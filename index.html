@@ -72,6 +72,7 @@ td.name .drive{margin-left:4px;text-decoration:none;}
 select,input[type=number],input[type=text],input[type=date],input[type=url]{background:var(--bg);color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:4px 6px;font-size:.76rem;}
 .mddate{width:56px;}
 .subname{width:150px;}
+.subnote{width:110px;}
 .tname-input{font-weight:600;background:transparent;border:1px solid transparent;padding:2px 4px;}
 .tname-input:hover,.tname-input:focus{border-color:var(--line);background:var(--card);}
 .status-未開始{color:var(--sub);} .status-進行中{color:var(--accent2);font-weight:600;} .status-待收款{color:var(--warn);font-weight:600;} .status-已完成{color:var(--ok);}
@@ -113,6 +114,11 @@ select,input[type=number],input[type=text],input[type=date],input[type=url]{back
 .ganttbar-done{opacity:.35;}
 .ganttToday{position:absolute;top:0;bottom:0;width:2px;background:var(--warn);z-index:2;}
 .notesbox{width:100%;min-height:70px;padding:8px;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--ink);font-size:.8rem;font-family:inherit;resize:vertical;}
+.monthgrid{display:flex;gap:8px;margin-top:6px;flex-wrap:wrap;}
+.monthcol{flex:1;min-width:130px;background:var(--card);border:1px solid var(--line);border-radius:8px;padding:6px 8px;}
+.monthcolhead{font-weight:600;font-size:.78rem;margin-bottom:4px;color:var(--accent2);}
+.monthitem{font-size:.68rem;padding:2px 0;border-bottom:1px dashed var(--line);}
+.monthitem.done{opacity:.4;text-decoration:line-through;}
 .basicgrid{display:flex;flex-wrap:wrap;gap:12px;margin-bottom:14px;}
 .basicgrid label{font-size:.7rem;color:var(--sub);display:flex;flex-direction:column;gap:3px;}
 .collab{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px;}
@@ -662,15 +668,20 @@ function taskItemHtml(p,idx){
       <input type="text" class="mddate" placeholder="月/日" value="${shortDate(info.end)}" onchange="setTaskDeadline('${p.id}',${idx},this.value)" title="截止日（例如9/15，跨年可打2027/1/15）">`;
   }
   const ctrl=`<button class="mini" onclick="moveTopTask('${p.id}',${idx},-1)">▲</button><button class="mini" onclick="moveTopTask('${p.id}',${idx},1)">▼</button><button class="mini danger" onclick="deleteTopTask('${p.id}',${idx})">✕</button>`;
-  const children=subs.map((s,si)=>`<div class="subitem">
+  const children=subs.map((s,si)=>{
+    const isUrl=/^https?:\/\//.test((s.note||'').trim());
+    return `<div class="subitem">
       <input type="checkbox" ${s.done?'checked':''} onchange="toggleSubtask('${p.id}',${idx},${si},this.checked)">
       <input type="text" class="subname" value="${esc(s.name)}" onchange="renameSubtask('${p.id}',${idx},${si},this.value)">
       <select style="${selStyle(s.assignee)}" onchange="setSubtaskAssignee('${p.id}',${idx},${si},this.value)">${personOptsWithVendor(s.assignee)}</select>
       <input type="text" class="mddate" placeholder="月/日" value="${shortDate(s.end)}" onchange="setSubtaskDeadline('${p.id}',${idx},${si},this.value)" title="截止日（例如9/15，跨年可打2027/1/15）">
+      <input type="text" class="subnote" placeholder="備註或連結" value="${esc(s.note||'')}" onchange="setSubtaskNote('${p.id}',${idx},${si},this.value)">
+      ${isUrl?`<a href="${esc(s.note)}" target="_blank" rel="noopener" class="mini" style="text-decoration:none;">🔗</a>`:''}
       <button class="mini" onclick="moveSubtask('${p.id}',${idx},${si},-1)">▲</button>
       <button class="mini" onclick="moveSubtask('${p.id}',${idx},${si},1)">▼</button>
       <button class="mini danger" onclick="deleteSubtask('${p.id}',${idx},${si})">✕</button>
-    </div>`).join("");
+    </div>`;
+  }).join("");
   return `<div class="taskitem ${custom?'custom':''}">
     <div class="theader">${head}${ctrl}</div>
     ${children?`<div class="children">${children}</div>`:''}
@@ -887,6 +898,27 @@ function projRowHtml(p,label){
     <div class="prow-bottom"><span>${getRow(p.id).status}・迄 ${shortDate(getRange(p).end)}</span><span>任務 ${tp.done}/${tp.total}（${pct}%）</span></div>
   </div>`;
 }
+function personMonthlyHtml(t){
+  const months={9:[],10:[],11:[],12:[]};
+  ALLP.forEach(p=>{
+    taskList(p).forEach(tn=>{
+      const subs=materializedSubs(p.id,tn);
+      if(subs.length){
+        subs.forEach(s=>{ if(s.assignee===t && s.end){ const m=Number(s.end.split('-')[1]); if(months[m]) months[m].push({label:`${getName(p)}：${s.name}`, done:s.done, date:s.end}); } });
+      } else {
+        const info=taskInfo(p,tn);
+        if(info.assignee===t && info.end){ const m=Number(info.end.split('-')[1]); if(months[m]) months[m].push({label:`${getName(p)}：${tn}`, done:info.done, date:info.end}); }
+      }
+    });
+  });
+  Object.keys(months).forEach(m=>months[m].sort((a,b)=>a.date.localeCompare(b.date)));
+  const cols=[9,10,11,12].map(m=>{
+    const items=months[m];
+    const body=items.length? items.map(it=>`<div class="monthitem${it.done?' done':''}">${shortDate(it.date)} ${it.label}</div>`).join('') : '<div class="small">（無）</div>';
+    return `<div class="monthcol"><div class="monthcolhead">${m}月</div>${body}</div>`;
+  }).join('');
+  return `<div class="monthgrid">${cols}</div>`;
+}
 function personDetailHtml(t){
   const owned=ALLP.filter(p=>getRow(p.id).assignee===t)
     .sort((a,b)=>URG_RANK[urgency(a)]-URG_RANK[urgency(b)] || new Date(getRange(a).end)-new Date(getRange(b).end));
@@ -943,6 +975,8 @@ function personDetailHtml(t){
     ${todoHtml}
     ${moreBtn}
     ${doneCount?`<div class="small" style="margin-top:6px;">已完成 ${doneCount} 項（不列出）</div>`:''}
+    <h3 style="margin-top:16px;">本季每月重點（依截止日）</h3>
+    ${personMonthlyHtml(t)}
     <button class="mini" style="margin-top:12px;" onclick="toggleOwnedCollab('${t}')">${ocExpanded?'收合':'顯示'}負責／協作專案清單（${owned.length}負責・${collab.length}協作）</button>
     ${ocPane}
   </div>`;
@@ -1227,6 +1261,12 @@ window.renameSubtask=async function(pid,idx,si,val){
   const p=getProject(pid); const t=taskList(p)[idx]; const cur=getRow(pid);
   const subtasks=Object.assign({},cur.subtasks); const arr=materializedSubs(pid,t);
   arr[si]=Object.assign({},arr[si],{name}); subtasks[t]=arr;
+  state[pid]=Object.assign({},cur,{subtasks}); touch(pid); render(); await persist();
+};
+window.setSubtaskNote=async function(pid,idx,si,val){
+  const p=getProject(pid); const t=taskList(p)[idx]; const cur=getRow(pid);
+  const subtasks=Object.assign({},cur.subtasks); const arr=materializedSubs(pid,t);
+  arr[si]=Object.assign({},arr[si],{note:val||''}); subtasks[t]=arr;
   state[pid]=Object.assign({},cur,{subtasks}); touch(pid); render(); await persist();
 };
 window.addReceipt=async function(pid){
