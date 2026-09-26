@@ -260,16 +260,30 @@ function lastDay(y,m){return new Date(y,m,0).getDate();}
 function todayISO(){const d=new Date();return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;}
 function addDaysISO(iso,n){const d=new Date(iso+"T00:00:00");d.setDate(d.getDate()+n);return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;}
 function shortDate(iso){ if(!iso) return ""; const [y,m,d]=iso.split("-"); return (Number(y)!==REF_YEAR?y+"/":"")+`${Number(m)}/${Number(d)}`; }
-function mdToISO(md){
+function mdToISO(md,p){
   if(!md) return '';
   const parts=md.replace(/[^0-9\/]/g,'').split('/');
-  let y=REF_YEAR,m,d;
-  if(parts.length===3){ y=parseInt(parts[0],10); m=parseInt(parts[1],10); d=parseInt(parts[2],10); }
-  else if(parts.length===2){ m=parseInt(parts[0],10); d=parseInt(parts[1],10); }
-  else return '';
+  if(parts.length===3){
+    let y=parseInt(parts[0],10), m=parseInt(parts[1],10), d=parseInt(parts[2],10);
+    if(!m||!d||m<1||m>12||d<1||d>31) return '';
+    if(!y||y<2000) y=REF_YEAR;
+    return `${y}-${pad(m)}-${pad(d)}`;
+  }
+  if(parts.length!==2) return '';
+  const m=parseInt(parts[0],10), d=parseInt(parts[1],10);
   if(!m||!d||m<1||m>12||d<1||d>31) return '';
-  if(!y||y<2000) y=REF_YEAR;
-  return `${y}-${pad(m)}-${pad(d)}`;
+  // no year given: guess using the project's own start/end year span (handles cross-year projects)
+  if(p){
+    const range=getRange(p);
+    const sy=Number(range.start.split('-')[0]), ey=Number(range.end.split('-')[0]);
+    const candidates=sy===ey?[sy]:[sy,ey];
+    for(const y of candidates){
+      const iso=`${y}-${pad(m)}-${pad(d)}`;
+      if(iso>=range.start && iso<=range.end) return iso;
+    }
+    return `${sy}-${pad(m)}-${pad(d)}`;
+  }
+  return `${REF_YEAR}-${pad(m)}-${pad(d)}`;
 }
 function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;'); }
 function relTime(ts){
@@ -1134,7 +1148,7 @@ window.setTaskDate=async function(pid,idx,field,val){
 };
 window.setTaskDeadline=async function(pid,idx,mdVal){
   const p=getProject(pid); const t=taskList(p)[idx]; const cur=getRow(pid);
-  const iso=mdToISO(mdVal);
+  const iso=mdToISO(mdVal,p);
   const prev=cur.tasks[t]||{};
   const tasks=Object.assign({},cur.tasks,{[t]:Object.assign({},prev,{start:iso,end:iso})});
   state[pid]=Object.assign({},cur,{tasks}); touch(pid); render(); await persist();
@@ -1238,7 +1252,7 @@ window.setSubtaskDate=async function(pid,idx,si,field,val){
 };
 window.setSubtaskDeadline=async function(pid,idx,si,mdVal){
   const p=getProject(pid); const t=taskList(p)[idx]; const cur=getRow(pid);
-  const iso=mdToISO(mdVal);
+  const iso=mdToISO(mdVal,p);
   const subtasks=Object.assign({},cur.subtasks); const arr=materializedSubs(pid,t);
   arr[si]=Object.assign({},arr[si],{start:iso,end:iso}); subtasks[t]=arr;
   state[pid]=Object.assign({},cur,{subtasks}); touch(pid); render(); await persist();
