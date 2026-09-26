@@ -95,7 +95,8 @@ select,input[type=number],input[type=text],input[type=date],input[type=url]{back
 .ganttgrouprow{padding-top:8px;}
 .ganttgrouprow .ganttbar-group{background:transparent;border:1.5px dashed var(--sub);height:10px;top:3px;border-radius:5px;}
 .ganttchildrow{padding-left:0;}
-.ganttdatecol{width:78px;flex-shrink:0;text-align:right;font-size:.68rem;color:var(--sub);white-space:nowrap;}
+.ganttdate{position:absolute;top:0;font-size:.66rem;color:var(--sub);white-space:nowrap;line-height:16px;}
+.ganttmilestone{position:absolute;top:2px;width:10px;height:10px;transform:translateX(-50%) rotate(45deg);border-radius:2px;}
 .ganttgrouphead{font-size:.72rem;color:var(--sub);font-weight:600;margin-top:6px;}
 .ganttbararea{flex:1;position:relative;height:16px;background:var(--card);border-radius:3px;}
 .ganttgrid{position:absolute;top:0;bottom:0;width:1px;background:var(--line);}
@@ -652,6 +653,7 @@ function ganttHtml(p){
   const overlayHtml=gridLines.map(pct=>`<div class="ganttgrid" style="left:${pct}%;"></div>`).join('')
     + (todayPct!==null?`<div class="ganttToday" style="left:${todayPct}%;"></div>`:'');
   const pct=(iso)=>{ const d=new Date(iso+"T00:00:00"); const c=d<rangeStart?rangeStart:(d>rangeEnd?rangeEnd:d); return (c-rangeStart)/totalMs*100; };
+  const dayCount=(a,b)=>Math.round((new Date(b+"T00:00:00")-new Date(a+"T00:00:00"))/86400000)+1;
 
   // pre-compute each group's min/max span
   const groupSpan={};
@@ -659,10 +661,15 @@ function ganttHtml(p){
 
   let lastGroup=undefined;
   const barsHtml=dated.map(r=>{
+    const isPoint=r.start===r.end;
     const leftPct=pct(r.start);
-    const widthPct=Math.max(4,pct(r.end)-pct(r.start));
+    const widthPct=isPoint?0:Math.max(2,pct(r.end)-pct(r.start));
     const cls=r.assignee?(isStaff(r.assignee)?'ganttbar-staff':'ganttbar-partner'):'ganttbar-none';
-    const dateLabel=r.start===r.end?shortDate(r.start):`${shortDate(r.start)}–${shortDate(r.end)}`;
+    const dateLabel=isPoint?shortDate(r.start):`${shortDate(r.start)}–${shortDate(r.end)}`;
+    const markerHtml=isPoint
+      ? `<div class="ganttmilestone ${cls} ${r.done?'ganttbar-done':''}" style="left:${leftPct}%;" title="${dateLabel}${r.done?'（已完成）':''}"></div>`
+      : `<div class="ganttbar ${cls} ${r.done?'ganttbar-done':''}" style="left:${leftPct}%;width:${widthPct}%;" title="${dateLabel}${r.done?'（已完成）':''}"></div>`;
+    const dateTag=`<span class="ganttdate" style="left:calc(${leftPct}% + ${widthPct}% + 8px);">${dateLabel}</span>`;
     let groupHeader='';
     if(r.group!==lastGroup){
       lastGroup=r.group;
@@ -670,18 +677,17 @@ function ganttHtml(p){
         const sp=groupSpan[r.group];
         const gLeft=pct(sp.min), gWidth=Math.max(4,pct(sp.max)-pct(sp.min));
         const gLabel=sp.min===sp.max?shortDate(sp.min):`${shortDate(sp.min)}–${shortDate(sp.max)}`;
+        const gDays=dayCount(sp.min,sp.max);
         groupHeader=`<div class="ganttrow ganttgrouprow">
           <div class="ganttlabel"><b>${r.group}</b></div>
-          <div class="ganttbararea">${overlayHtml}<div class="ganttbar ganttbar-group" style="left:${gLeft}%;width:${gWidth}%;"></div></div>
-          <div class="ganttdatecol">${gLabel}</div>
+          <div class="ganttbararea">${overlayHtml}<div class="ganttbar ganttbar-group" style="left:${gLeft}%;width:${gWidth}%;"></div><span class="ganttdate" style="left:calc(${gLeft}% + ${gWidth}% + 8px);">${gLabel}（共${gDays}天）</span></div>
         </div>`;
       }
     }
     const labelText = r.group ? `　└ ${r.label}` : r.label;
     return `${groupHeader}<div class="ganttrow ${r.group?'ganttchildrow':''}">
       <div class="ganttlabel">${labelText}${r.assignee?` <span class="small">・${r.assignee}</span>`:''}</div>
-      <div class="ganttbararea">${overlayHtml}<div class="ganttbar ${cls} ${r.done?'ganttbar-done':''}" style="left:${leftPct}%;width:${widthPct}%;" title="${dateLabel}${r.done?'（已完成）':''}"></div></div>
-      <div class="ganttdatecol">${dateLabel}</div>
+      <div class="ganttbararea">${overlayHtml}${markerHtml}${dateTag}</div>
     </div>`;
   }).join('');
   const undatedHtml=undated.length?`<div class="small" style="margin-top:6px;">尚未標日期：${undated.map(r=>r.label).join('、')}（在下面任務清單填開始/截止日就會出現在圖上）</div>`:'';
