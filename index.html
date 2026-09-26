@@ -78,7 +78,11 @@ select,input[type=number],input[type=text],input[type=date],input[type=url]{back
 .bar i{display:block;height:100%;background:var(--accent);}
 .progtxt{font-size:.7rem;color:var(--sub);white-space:nowrap;}
 .detail td{background:var(--bg);white-space:normal;}
-.detail h4{font-size:.72rem;color:var(--sub);margin:0 0 6px;text-transform:uppercase;}
+.detail h4{font-size:.72rem;color:var(--sub);margin:10px 0 6px;text-transform:uppercase;}
+.detail h4:first-child{margin-top:0;}
+.dtabs{display:flex;gap:6px;margin-bottom:10px;}
+.dtab{background:var(--card);border:1px solid var(--line);color:var(--sub);padding:4px 12px;border-radius:14px;font-size:.75rem;cursor:pointer;}
+.dtab.active{background:var(--accent2);color:#fff;border-color:var(--accent2);}
 .gantt{margin-bottom:14px;}
 .ganttaxis{display:flex;justify-content:space-between;font-size:.68rem;color:var(--sub);margin-bottom:4px;}
 .ganttbody{position:relative;}
@@ -208,7 +212,7 @@ const URG_LABEL={overdue:"已逾期",soon7:"7天內到期",soon30:"30天內",lat
 
 const SHEET_API_URL="https://script.google.com/macros/s/AKfycbymRzIunZy7hUkAzy0UTsHi-22mVACE1HlZtsGCI2H3_FekAgnbdcQ_XsOwFVcve4h2gQ/exec";
 let state={};
-let view="project", catFilter="全部", statusFilter="全部", searchTerm="", expanded=new Set(), expandedPerson=new Set(), showAddForm=false;
+let view="project", catFilter="全部", statusFilter="全部", searchTerm="", expanded=new Set(), expandedPerson=new Set(), showAddForm=false, detailTab={};
 let ALLP=[];
 function loadWhoAmI(){ try{ return localStorage.getItem('dash_whoami')||''; }catch(e){ return ''; } }
 function saveWhoAmI(v){ try{ localStorage.setItem('dash_whoami',v); }catch(e){} }
@@ -627,24 +631,29 @@ function detailRow(p){
   const range=getRange(p);
   const collabHtml=TEAM.map(x=>`<label><input type="checkbox" ${r.collaborators.includes(x)?'checked':''} onchange="toggleCollab('${p.id}','${x}',this.checked)"><span class="${isStaff(x)?'tag-staff':'tag-partner'}">${x}</span></label>`).join("");
   const items=taskList(p).map((t,idx)=>taskItemHtml(p,idx)).join("");
-  return `<tr class="detail"><td colspan="10">
-    <h4>基本資料</h4>
+  const tab=getDetailTab(p.id);
+  const tabBtn=(key,label)=>`<button class="dtab ${tab===key?'active':''}" onclick="setDetailTab('${p.id}','${key}')">${label}</button>`;
+
+  const basicPane=`
     <div class="basicgrid">
       <label>專案名稱<input type="text" value="${esc(getName(p))}" onchange="saveName('${p.id}',this.value)" style="width:200px;"></label>
       <label>預估營收<input type="number" value="${getEstRev(p)}" onchange="saveRev('${p.id}',this.value)"></label>
       <label>累積成本（財務填）<input type="number" value="${r.cost===null?'':r.cost}" onchange="setField('${p.id}','cost',this.value===''?null:Number(this.value))"></label>
       <label>起始日<input type="date" value="${range.start}" onchange="setField('${p.id}','startDate',this.value)"></label>
       <label>截止日<input type="date" value="${range.end}" onchange="setField('${p.id}','endDate',this.value)"></label>
+      <label style="flex:1;min-width:220px;">雲端資料夾連結
+        <div style="display:flex;gap:6px;">
+          <input type="url" placeholder="貼上 Google Drive 連結" value="${r.driveLink}" onchange="setField('${p.id}','driveLink',this.value)" style="flex:1;">
+          ${r.driveLink?`<a href="${r.driveLink}" target="_blank" rel="noopener" class="mini" style="text-decoration:none;white-space:nowrap;">📁 開啟</a>`:''}
+        </div>
+      </label>
     </div>
-    <h4>協作成員（除負責人外，一起執行此案的人）</h4>
+    <h4>協作成員</h4>
     <div class="collab">${collabHtml}</div>
     <h4>實際收款（發票金額，可分期登錄）</h4>
-    ${receiptsHtml(p)}
-    <h4>雲端資料夾連結（Google Drive）</h4>
-    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px;">
-      <input type="url" placeholder="貼上 Google Drive 資料夾連結" value="${r.driveLink}" onchange="setField('${p.id}','driveLink',this.value)" style="width:100%;max-width:420px;">
-      ${r.driveLink?`<a href="${r.driveLink}" target="_blank" rel="noopener" class="mini" style="text-decoration:none;">📁 開啟資料夾</a>`:''}
-    </div>
+    ${receiptsHtml(p)}`;
+
+  const taskPane=`
     <h4>甘特圖（依任務起訖日自動產生，紅線＝今天）</h4>
     ${ganttHtml(p)}
     <h4>任務清單（點「＋」可拆子項目並各自標開始/截止日）</h4>
@@ -652,9 +661,14 @@ function detailRow(p){
     <div class="addtask">
       <input type="text" placeholder="新增一項頂層工作…" id="add-${p.id}">
       <button onclick="addTask('${p.id}')">新增</button>
-    </div>
-    <h4 style="margin-top:14px;">備註（自由填寫，例如特殊日期、提醒事項）</h4>
-    <textarea class="notesbox" placeholder="在這裡自由記錄，例如：9/25中秋公司休假、10/9雙十連假影響交件…" onchange="setField('${p.id}','notes',this.value)">${esc(r.notes)}</textarea>
+    </div>`;
+
+  const notesPane=`<textarea class="notesbox" placeholder="在這裡自由記錄，例如：9/25中秋公司休假、10/9雙十連假影響交件…" onchange="setField('${p.id}','notes',this.value)">${esc(r.notes)}</textarea>`;
+
+  const pane = tab==='tasks' ? taskPane : tab==='notes' ? notesPane : basicPane;
+  return `<tr class="detail"><td colspan="10">
+    <div class="dtabs">${tabBtn('basic','基本資料')}${tabBtn('tasks','任務與甘特圖')}${tabBtn('notes','備註')}</div>
+    ${pane}
   </td></tr>`;
 }
 
@@ -946,6 +960,8 @@ window.deleteReceipt=async function(pid,idx){
   receipts.splice(idx,1);
   state[pid]=Object.assign({},cur,{receipts}); touch(pid); render(); await persist();
 };
+function getDetailTab(pid){ return detailTab[pid]||'basic'; }
+window.setDetailTab=function(pid,tab){ detailTab[pid]=tab; renderProjectView(); };
 window.toggleExpand=function(id){ expanded.has(id)?expanded.delete(id):expanded.add(id); renderProjectView(); };
 window.togglePerson=function(t){ expandedPerson.has(t)?expandedPerson.delete(t):expandedPerson.add(t); renderPersonView(); };
 
