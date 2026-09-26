@@ -586,10 +586,8 @@ function renderPriority(){
   const payGroup=list.filter(p=>getRow(p.id).status==="待收款");
   const execGroup=list.filter(p=>{const s=getRow(p.id).status; return s==="未開始"||s==="進行中";});
   const rowWithLag=p=>projRowHtml(p, lagBadge(lagInfo(p)));
-  const urgentBody=list.length? `
-    ${payGroup.length?`<div class="small" style="margin:10px 0 2px;">待收款（${payGroup.length}）</div>${paginatedBody('urgent-pay',payGroup.map(rowWithLag),'')}`:''}
-    ${execGroup.length?`<div class="small" style="margin:10px 0 2px;">執行（${execGroup.length}）</div>${paginatedBody('urgent-exec',execGroup.map(rowWithLag),'')}`:''}
-  ` : `<div class="small">✓ 目前沒有已逾期或進度明顯落後的案子</div>`;
+  const urgentBody=execGroup.length? paginatedBody('urgent-exec',execGroup.map(rowWithLag),'') : `<div class="small">✓ 目前沒有已逾期或進度明顯落後、還在執行中的案子</div>`;
+  const payBody=payGroup.length? paginatedBody('urgent-pay',payGroup.map(rowWithLag),'') : `<div class="small">✓ 目前沒有已逾期或進度明顯落後的待收款案子</div>`;
 
   // 任務層級急迫（不管專案本身狀態），含負責人與前後步驟
   const taskUrgent=[];
@@ -646,10 +644,11 @@ function renderPriority(){
   const costBody=paginatedBody('cost', costItemsHtml, `<div class="small">✓ 沒有成本壓力超過60%的專案</div>`);
 
   const personTabs=[
-    {key:'urgent', label:`急迫案件 (${list.length})`, body:urgentBody},
+    {key:'urgent', label:`急迫案件 (${execGroup.length})`, body:urgentBody},
     {key:'task', label:`任務急迫 (${taskUrgent.length})`, body:taskBody},
     {key:'stagnant', label:`未指派任務 (${unassignedTasks.length})`, body:stagnantBody},
     {key:'cost', label:`成本壓力 (${overCost.length})`, body:costBody},
+    {key:'pay', label:`待收款 (${payGroup.length})`, body:payBody},
   ];
   const projectTabs=[
     {key:'month', label:`月營收分布`, body:monthlyChartBody()},
