@@ -71,6 +71,7 @@ td.name .drive{margin-left:4px;text-decoration:none;}
 .cat{display:inline-block;font-size:.7rem;padding:2px 7px;border-radius:6px;background:var(--line);color:var(--sub);}
 select,input[type=number],input[type=text],input[type=date],input[type=url]{background:var(--bg);color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:4px 6px;font-size:.76rem;}
 .mddate{width:56px;}
+.subname{width:150px;}
 .status-未開始{color:var(--sub);} .status-進行中{color:var(--accent2);font-weight:600;} .status-待收款{color:var(--warn);font-weight:600;} .status-已完成{color:var(--ok);}
 .rev{text-align:right;font-variant-numeric:tabular-nums;}
 .diff{font-size:.66rem;display:block;margin-top:2px;}
@@ -589,9 +590,11 @@ function taskItemHtml(p,idx){
   const ctrl=custom?`<button class="mini" onclick="moveCustomTask('${p.id}',${idx},-1)">▲</button><button class="mini" onclick="moveCustomTask('${p.id}',${idx},1)">▼</button><button class="mini danger" onclick="deleteCustomTask('${p.id}',${idx})">✕</button>`:'';
   const children=subs.map((s,si)=>`<div class="subitem">
       <input type="checkbox" ${s.done?'checked':''} onchange="toggleSubtask('${p.id}',${idx},${si},this.checked)">
-      <span>${s.name}</span>
+      <input type="text" class="subname" value="${esc(s.name)}" onchange="renameSubtask('${p.id}',${idx},${si},this.value)">
       <select style="${selStyle(s.assignee)}" onchange="setSubtaskAssignee('${p.id}',${idx},${si},this.value)">${personOpts(s.assignee)}</select>
       <input type="text" class="mddate" placeholder="月/日" value="${shortDate(s.end)}" onchange="setSubtaskDeadline('${p.id}',${idx},${si},this.value)" title="截止日（例如9/15）">
+      <button class="mini" onclick="moveSubtask('${p.id}',${idx},${si},-1)">▲</button>
+      <button class="mini" onclick="moveSubtask('${p.id}',${idx},${si},1)">▼</button>
       <button class="mini danger" onclick="deleteSubtask('${p.id}',${idx},${si})">✕</button>
     </div>`).join("");
   return `<div class="taskitem ${custom?'custom':''}">
@@ -1054,6 +1057,20 @@ window.deleteSubtask=async function(pid,idx,si){
   const p=getProject(pid); const t=taskList(p)[idx]; const cur=getRow(pid);
   const subtasks=Object.assign({},cur.subtasks); const arr=materializedSubs(pid,t);
   arr.splice(si,1); subtasks[t]=arr;
+  state[pid]=Object.assign({},cur,{subtasks}); touch(pid); render(); await persist();
+};
+window.moveSubtask=async function(pid,idx,si,dir){
+  const p=getProject(pid); const t=taskList(p)[idx]; const cur=getRow(pid);
+  const subtasks=Object.assign({},cur.subtasks); const arr=materializedSubs(pid,t);
+  const ni=si+dir; if(ni<0||ni>=arr.length) return;
+  const tmp=arr[si]; arr[si]=arr[ni]; arr[ni]=tmp; subtasks[t]=arr;
+  state[pid]=Object.assign({},cur,{subtasks}); touch(pid); render(); await persist();
+};
+window.renameSubtask=async function(pid,idx,si,val){
+  const name=(val||'').trim(); if(!name) return;
+  const p=getProject(pid); const t=taskList(p)[idx]; const cur=getRow(pid);
+  const subtasks=Object.assign({},cur.subtasks); const arr=materializedSubs(pid,t);
+  arr[si]=Object.assign({},arr[si],{name}); subtasks[t]=arr;
   state[pid]=Object.assign({},cur,{subtasks}); touch(pid); render(); await persist();
 };
 window.addReceipt=async function(pid){
