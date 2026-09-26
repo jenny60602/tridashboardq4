@@ -231,7 +231,7 @@ const ROLES={
 };
 const TEAM=TEAM_STAFF.concat(TEAM_PARTNER);
 const STATUSES=["未開始","進行中","待收款","已完成"];
-const BASE_TASKS=["需求/報價確認","簽約/合約確認","執行/交付準備","請款/開立發票","收款確認"];
+const BASE_TASKS=["提案內容撰寫","成本試算／報價底稿","報價/合約","訂金","執行/交付","結案報告","案例建置","宣傳曝光"];
 const GOV_EXTRA=["期中/期末報告","經費核銷單據整理"];
 const REF_YEAR=2026;
 const URG_RANK={overdue:0,soon7:1,soon30:2,later:3};
@@ -273,16 +273,26 @@ function relTime(ts){
 
 function getRow(id){
   const r=state[id]||{};
-  return {status:r.status||"未開始", assignee:r.assignee||"", collaborators:r.collaborators||[],
+  return {status:r.status||"未開始", assignee:r.assignee||"",
     estOverride:(r.estOverride===undefined?null:r.estOverride), actual:(r.actual===undefined?null:r.actual),
     cost:(r.cost===undefined?null:r.cost), driveLink:r.driveLink||"", nameOverride:(r.nameOverride===undefined?null:r.nameOverride),
-    invoiceMonth:(r.invoiceMonth===undefined?null:r.invoiceMonth),
+    invoiceMonth:(r.invoiceMonth===undefined?null:r.invoiceMonth), paymentMethod:r.paymentMethod||"",
     startDate:r.startDate||null, endDate:r.endDate||null, lastEdit:r.lastEdit||null, notes:r.notes||"",
     taskRenames:r.taskRenames||{}, taskDeletes:r.taskDeletes||[],
     tasks:r.tasks||{}, subtasks:r.subtasks||{}, custom:r.custom||[]};
 }
 function isStaff(n){return TEAM_STAFF.includes(n);}
 function isVendor(n){ return !!n && !TEAM.includes(n); }
+function collaboratorsOf(p){
+  const owner=getRow(p.id).assignee;
+  const set=new Set();
+  taskList(p).forEach(t=>{
+    const subs=materializedSubs(p.id,t);
+    if(subs.length){ subs.forEach(s=>{ if(s.assignee && s.assignee!==owner && TEAM.includes(s.assignee)) set.add(s.assignee); }); }
+    else { const info=taskInfo(p,t); if(info.assignee && info.assignee!==owner && TEAM.includes(info.assignee)) set.add(info.assignee); }
+  });
+  return [...set];
+}
 function isNonOp(p){ return p.cat==="政府"; }
 function selStyle(n){ if(!n) return ''; if(isVendor(n)) return 'background:#f3e6c4;'; return isStaff(n)?'background:#dfe9df;':'background:#f4e3c9;'; }
 function getEstRev(p){ const r=getRow(p.id); return r.estOverride!==null ? r.estOverride : p.rev; }
@@ -349,9 +359,16 @@ function materializedSubs(pid,t){
   const cur=getRow(pid);
   return (cur.subtasks[t]||[]).slice();
 }
+function defaultAssigneeFor(p,name){
+  if(/發票|入帳|對帳/.test(name)) return "雅芬";
+  if(name==="成本試算／報價底稿") return "緯襦";
+  if(name==="宣傳曝光") return "嘉妤";
+  if(name==="結案報告"||name==="案例建置") return getRow(p.id).assignee||"";
+  return "";
+}
 function taskInfo(p,name){
   const r=getRow(p.id); const t=r.tasks[name];
-  if(!t) return {done:false,assignee:"",start:"",end:""};
+  if(!t) return {done:false,assignee:defaultAssigneeFor(p,name),start:"",end:""};
   if(typeof t==="boolean") return {done:t,assignee:"",start:"",end:""};
   return {done:!!t.done, assignee:t.assignee||"", start:t.start||"", end:t.end||""};
 }
@@ -738,16 +755,21 @@ function ganttHtml(p){
 function detailRow(p){
   const r=getRow(p.id);
   const range=getRange(p);
-  const collabHtml=TEAM.filter(x=>x!==r.assignee).map(x=>`<label><input type="checkbox" ${r.collaborators.includes(x)?'checked':''} onchange="toggleCollab('${p.id}','${x}',this.checked)"><span class="${isStaff(x)?'tag-staff':'tag-partner'}">${x}</span></label>`).join("");
+  const collabList=collaboratorsOf(p);
+  const collabHtml=collabList.length
+    ? collabList.map(x=>`<span class="${isStaff(x)?'tag-staff':'tag-partner'}">${x}</span>`).join(" ")
+    : '<span class="small">（尚無其他人被指派任務）</span>';
   const items=taskList(p).map((t,idx)=>taskItemHtml(p,idx)).join("");
   const tab=getDetailTab(p.id);
   const tabBtn=(key,label)=>`<button class="dtab ${tab===key?'active':''}" onclick="setDetailTab('${p.id}','${key}')">${label}</button>`;
+  const paymentOpts=["","一次付清","訂金+尾款","自訂分期"].map(o=>`<option ${r.paymentMethod===o?'selected':''}>${o||'（未設定）'}</option>`).join('');
 
   const basicPane=`
     <div class="basicgrid">
       <label>專案名稱<input type="text" value="${esc(getName(p))}" onchange="saveName('${p.id}',this.value)" style="width:200px;"></label>
       <label>預估營收<input type="number" value="${getEstRev(p)}" onchange="saveRev('${p.id}',this.value)"></label>
       <label>累積成本（財務填）<input type="number" value="${r.cost===null?'':r.cost}" onchange="setField('${p.id}','cost',this.value===''?null:Number(this.value))"></label>
+      <label>付款方式<select onchange="setField('${p.id}','paymentMethod',this.value)">${paymentOpts}</select></label>
       <label>起始日<input type="date" value="${range.start}" onchange="setField('${p.id}','startDate',this.value)"></label>
       <label>截止日<input type="date" value="${range.end}" onchange="setField('${p.id}','endDate',this.value)"></label>
       <label style="flex:1;min-width:220px;">雲端資料夾連結
@@ -757,7 +779,7 @@ function detailRow(p){
         </div>
       </label>
     </div>
-    <h4>協作成員</h4>
+    <h4>協作成員（自動統計：任務指派名單中，除負責人外出現過的人）</h4>
     <div class="collab">${collabHtml}</div>
     <h4>實際收款（發票金額，可分期登錄）</h4>
     ${receiptsHtml(p)}`;
@@ -794,7 +816,7 @@ function renderProjectView(){
     const lastEditNote=r.lastEdit?`<div class="small">最後更新：${r.lastEdit.by||'匿名'}・${relTime(r.lastEdit.at)}</div>`:'';
     let html=`<tr>
       <td><span class="cat">${p.cat}</span></td>
-      <td class="name" onclick="toggleExpand('${p.id}')"><span class="arrow">${open?'▾':'▸'}</span>${getName(p)}${driveIcon}${r.collaborators.length?`<div class="small">+${r.collaborators.length} 協作</div>`:""}${lastEditNote}</td>
+      <td class="name" onclick="toggleExpand('${p.id}')"><span class="arrow">${open?'▾':'▸'}</span>${getName(p)}${driveIcon}${collaboratorsOf(p).length?`<div class="small">+${collaboratorsOf(p).length} 協作</div>`:""}${lastEditNote}</td>
       <td class="rev">${fmt(getEstRev(p))}${isNonOp(p)?'<br><span class="small">營收外收入</span>':''}</td>
       <td class="rev">${totalActual(p)?fmt(totalActual(p)):(getReceipts(p.id).length?fmt(0):'—')}${diffLabel(p)}${getReceipts(p.id).length>1?`<span class="small">共${getReceipts(p.id).length}期</span>`:''}</td>
       <td class="rev">${r.cost===null||r.cost===""?'—':fmt(Number(r.cost))}${costNote(p)}</td>
@@ -814,7 +836,7 @@ function renderProjectView(){
 
 function personInvolved(t){
   const ids=new Set();
-  ALLP.forEach(p=>{ const r=getRow(p.id); if(r.assignee===t||r.collaborators.includes(t)) ids.add(p.id); });
+  ALLP.forEach(p=>{ const r=getRow(p.id); if(r.assignee===t||collaboratorsOf(p).includes(t)) ids.add(p.id); });
   return [...ids].map(getProject);
 }
 function personTop(t){
@@ -834,7 +856,7 @@ function projRowHtml(p,label){
 function personDetailHtml(t){
   const owned=ALLP.filter(p=>getRow(p.id).assignee===t)
     .sort((a,b)=>URG_RANK[urgency(a)]-URG_RANK[urgency(b)] || new Date(getRange(a).end)-new Date(getRange(b).end));
-  const collab=ALLP.filter(p=>getRow(p.id).collaborators.includes(t) && getRow(p.id).assignee!==t)
+  const collab=ALLP.filter(p=>collaboratorsOf(p).includes(t) && getRow(p.id).assignee!==t)
     .sort((a,b)=>URG_RANK[urgency(a)]-URG_RANK[urgency(b)] || new Date(getRange(a).end)-new Date(getRange(b).end));
   let myTasks=[];
   ALLP.forEach(p=>{
@@ -891,7 +913,7 @@ function personDetailHtml(t){
 function personCard(t){
   const group=isStaff(t)?'staff':'partner';
   const owned=ALLP.filter(p=>getRow(p.id).assignee===t);
-  const collabOn=ALLP.filter(p=>getRow(p.id).collaborators.includes(t));
+  const collabOn=ALLP.filter(p=>collaboratorsOf(p).includes(t));
   const activeOwned=owned.filter(p=>getRow(p.id).status!=="已完成");
   let taskCount=0;
   ALLP.forEach(p=>taskList(p).forEach((tn)=>{
@@ -1019,12 +1041,6 @@ window.saveRev=async function(pid,val){
   const cur=getRow(pid); state[pid]=Object.assign({},cur,{estOverride:num}); touch(pid);
   render(); await persist();
 };
-window.toggleCollab=async function(id,name,checked){
-  const cur=getRow(id); let collaborators=cur.collaborators.slice();
-  if(checked && !collaborators.includes(name)) collaborators.push(name);
-  if(!checked) collaborators=collaborators.filter(x=>x!==name);
-  state[id]=Object.assign({},cur,{collaborators}); touch(id); render(); await persist();
-};
 window.toggleTask=async function(pid,idx,checked){
   const p=getProject(pid); const t=taskList(p)[idx]; const cur=getRow(pid);
   const prev=cur.tasks[t]||{};
@@ -1107,7 +1123,8 @@ window.addSubtask=async function(pid,idx){
   const p=getProject(pid); const t=taskList(p)[idx];
   const inp=document.getElementById(`subin-${pid}-${idx}`); const val=(inp.value||'').trim(); if(!val) return;
   const cur=getRow(pid); const subtasks=Object.assign({},cur.subtasks);
-  const arr=materializedSubs(pid,t); arr.push({name:val,done:false,assignee:'',start:'',end:''}); subtasks[t]=arr;
+  const defAssignee=/發票|入帳|對帳/.test(val)?'雅芬':'';
+  const arr=materializedSubs(pid,t); arr.push({name:val,done:false,assignee:defAssignee,start:'',end:''}); subtasks[t]=arr;
   expanded.add(pid); state[pid]=Object.assign({},cur,{subtasks}); touch(pid); render(); await persist();
 };
 window.toggleSubtask=async function(pid,idx,si,checked){
