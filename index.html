@@ -85,6 +85,8 @@ select,input[type=number],input[type=text],input[type=date],input[type=url]{back
 .ganttrow{display:flex;align-items:center;gap:8px;padding:3px 0;border-bottom:1px dashed var(--line);font-size:.74rem;}
 .ganttlabel{width:150px;flex-shrink:0;}
 .ganttbararea{flex:1;position:relative;height:16px;background:var(--card);border-radius:3px;}
+.ganttgrid{position:absolute;top:0;bottom:0;width:1px;background:var(--line);}
+.ganttdate{position:absolute;top:0;font-size:.66rem;color:var(--sub);white-space:nowrap;line-height:16px;}
 .ganttbar{position:absolute;top:0;height:16px;border-radius:3px;}
 .ganttbar-staff{background:var(--accent);}
 .ganttbar-partner{background:var(--accent2);}
@@ -256,8 +258,8 @@ function defaultRange(p){
 }
 function getRange(p){
   const r=getRow(p.id);
-  if(r.startDate && r.endDate) return {start:r.startDate, end:r.endDate};
-  return defaultRange(p);
+  const def=defaultRange(p);
+  return {start:r.startDate||def.start, end:r.endDate||def.end};
 }
 function refreshAll(){
   const customs=(state._customProjects||[]).map(c=>({id:c.id,cat:c.cat,name:c.name,rev:c.rev}));
@@ -591,20 +593,25 @@ function ganttHtml(p){
   const range=getRange(p);
   const rangeStart=new Date(range.start+"T00:00:00"), rangeEnd=new Date(range.end+"T00:00:00");
   const totalMs=(rangeEnd-rangeStart)||1;
+  const totalDays=Math.max(1,Math.round(totalMs/86400000));
   const rows=ganttRows(p);
   const today=new Date(); today.setHours(0,0,0,0);
   const todayPct=(today>=rangeStart && today<=rangeEnd) ? ((today-rangeStart)/totalMs*100) : null;
   const dated=rows.filter(r=>r.start&&r.end);
   const undated=rows.filter(r=>!r.start||!r.end);
+  // weekly gridlines from range start
+  const gridLines=[]; for(let d=0; d<=totalDays; d+=7){ gridLines.push(d/totalDays*100); }
+  const gridHtml=gridLines.map(pct=>`<div class="ganttgrid" style="left:${pct}%;"></div>`).join('');
   const barsHtml=dated.map(r=>{
     const s=new Date(r.start+"T00:00:00"), e=new Date(r.end+"T00:00:00");
     const cs=s<rangeStart?rangeStart:s, ce=e>rangeEnd?rangeEnd:e;
     const leftPct=(cs-rangeStart)/totalMs*100;
-    const widthPct=Math.max(1.5,(ce-cs)/totalMs*100);
+    const widthPct=Math.max(4,(ce-cs)/totalMs*100);
     const cls=r.assignee?(isStaff(r.assignee)?'ganttbar-staff':'ganttbar-partner'):'ganttbar-none';
+    const dateLabel=r.start===r.end?shortDate(r.start):`${shortDate(r.start)}–${shortDate(r.end)}`;
     return `<div class="ganttrow">
       <div class="ganttlabel">${r.label}${r.assignee?` <span class="small">・${r.assignee}</span>`:''}</div>
-      <div class="ganttbararea"><div class="ganttbar ${cls} ${r.done?'ganttbar-done':''}" style="left:${leftPct}%;width:${widthPct}%;" title="${shortDate(r.start)}–${shortDate(r.end)}${r.done?'（已完成）':''}"></div></div>
+      <div class="ganttbararea">${gridHtml}<div class="ganttbar ${cls} ${r.done?'ganttbar-done':''}" style="left:${leftPct}%;width:${widthPct}%;" title="${dateLabel}${r.done?'（已完成）':''}"></div><span class="ganttdate" style="left:calc(${leftPct}% + ${widthPct}% + 4px);">${dateLabel}</span></div>
     </div>`;
   }).join('');
   const undatedHtml=undated.length?`<div class="small" style="margin-top:6px;">尚未標日期：${undated.map(r=>r.label).join('、')}（在下面任務清單填開始/截止日就會出現在圖上）</div>`:'';
@@ -634,7 +641,10 @@ function detailRow(p){
     <h4>實際收款（發票金額，可分期登錄）</h4>
     ${receiptsHtml(p)}
     <h4>雲端資料夾連結（Google Drive）</h4>
-    <input type="url" placeholder="貼上 Google Drive 資料夾連結" value="${r.driveLink}" onchange="setField('${p.id}','driveLink',this.value)" style="width:100%;max-width:420px;margin-bottom:12px;">
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px;">
+      <input type="url" placeholder="貼上 Google Drive 資料夾連結" value="${r.driveLink}" onchange="setField('${p.id}','driveLink',this.value)" style="width:100%;max-width:420px;">
+      ${r.driveLink?`<a href="${r.driveLink}" target="_blank" rel="noopener" class="mini" style="text-decoration:none;">📁 開啟資料夾</a>`:''}
+    </div>
     <h4>甘特圖（依任務起訖日自動產生，紅線＝今天）</h4>
     ${ganttHtml(p)}
     <h4>任務清單（點「＋」可拆子項目並各自標開始/截止日）</h4>
