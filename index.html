@@ -85,7 +85,8 @@ select,input[type=number],input[type=text],input[type=date],input[type=url]{back
 .bar{flex:1;height:6px;background:var(--line);border-radius:3px;overflow:hidden;}
 .bar i{display:block;height:100%;background:var(--accent);}
 .progtxt{font-size:.7rem;color:var(--sub);white-space:nowrap;}
-.detail td{background:var(--bg);white-space:normal;display:grid;grid-template-columns:minmax(0,1fr);}
+.detail td{background:var(--bg);white-space:normal;}
+.detailwrap{display:grid;grid-template-columns:minmax(0,1fr);}
 .detail h4{font-size:.72rem;color:var(--sub);margin:10px 0 6px;text-transform:uppercase;}
 .detail h4:first-child{margin-top:0;}
 .dtabs{display:flex;gap:6px;margin-bottom:10px;}
@@ -497,16 +498,24 @@ function diffLabel(p){
 
 function touch(pid){ const cur=state[pid]||{}; state[pid]=Object.assign({},cur,{lastEdit:{by:whoAmI||'',at:Date.now()}}); }
 
+let priorityTab='urgent';
+window.setPriorityTab=function(k){ priorityTab=k; renderPriority(); };
 function renderPriority(){
   const list=ALLP.filter(p=>getRow(p.id).status!=="已完成" && (urgency(p)==="overdue"||urgency(p)==="soon7"))
     .sort((a,b)=>URG_RANK[urgency(a)]-URG_RANK[urgency(b)] || getEstRev(b)-getEstRev(a));
   const box=document.getElementById("priority");
 
-  // 1) 任務層級急迫（不管專案本身狀態）
+  const groups=STATUSES.filter(s=>s!=="已完成").map(s=>({status:s, items:list.filter(p=>getRow(p.id).status===s)})).filter(g=>g.items.length);
+  const urgentBody=list.length? groups.map(g=>`
+    <div class="small" style="margin:10px 0 2px;">${g.status}（${g.items.length}）</div>
+    ${g.items.map(p=>{const r=getRow(p.id);return `<div class="row"><span>${getName(p)}（${p.cat}・${r.assignee||"未指派"}・迄 ${shortDate(getRange(p).end)}）</span><span class="badge ${urgency(p)}">${URG_LABEL[urgency(p)]}</span></div>`;}).join("")}
+  `).join("") : `<div class="small">✓ 目前沒有已逾期或7天內到期、還未完成的案子</div>`;
+
+  // 任務層級急迫（不管專案本身狀態）
   const taskUrgent=[];
   ALLP.forEach(p=>{
     if(getRow(p.id).status==="已完成") return;
-    taskList(p).forEach((tn,idx)=>{
+    taskList(p).forEach((tn)=>{
       const subs=materializedSubs(p.id,tn);
       const check=(label,info)=>{
         if(info.done||!info.end) return;
@@ -518,40 +527,33 @@ function renderPriority(){
     });
   });
   taskUrgent.sort((a,b)=>a.days-b.days);
-  const taskUrgentHtml=taskUrgent.length?`<div class="priority" style="margin-top:10px;"><h3>任務層級急迫（不管專案整體狀態，單一工作項目7天內到期／已逾期）</h3>
-    ${taskUrgent.map(x=>`<div class="row"><span>${getName(x.p)} － ${x.label}</span><span class="badge ${x.days<0?'overdue':'soon7'}">${x.days<0?'已逾期':'7天內到期'}（${shortDate(x.end)}）</span></div>`).join("")}
-  </div>`:'';
+  const taskBody=taskUrgent.length? taskUrgent.map(x=>`<div class="row"><span>${getName(x.p)} － ${x.label}</span><span class="badge ${x.days<0?'overdue':'soon7'}">${x.days<0?'已逾期':'7天內到期'}（${shortDate(x.end)}）</span></div>`).join("") : `<div class="small">✓ 目前沒有任務層級的急迫項目</div>`;
 
-  // 2) 停滯提醒：進行中/待收款但任務完全沒開始，且已過起始日
+  // 停滯提醒：進行中/待收款但任務完全沒開始，且已過起始日7天以上
   const today=new Date(); today.setHours(0,0,0,0);
   const stagnant=ALLP.filter(p=>{
     const r=getRow(p.id);
     if(r.status!=="進行中" && r.status!=="待收款") return false;
     const tp=taskProgress(p); if(tp.total===0||tp.done>0) return false;
-    const start=new Date(getRange(p).start+"T00:00:00");
+    const start=new Date(getRange(p).start+"T00:00:00"); start.setDate(start.getDate()+7);
     return today>=start;
   });
-  const stagnantHtml=stagnant.length?`<div class="priority" style="margin-top:10px;"><h3>可能被忘記了（狀態進行中／待收款，但任務進度0%、已過起始日）</h3>
-    ${stagnant.map(p=>{const r=getRow(p.id);return `<div class="row"><span>${getName(p)}（${p.cat}・${r.assignee||"未指派"}）</span><span class="small">起始 ${shortDate(getRange(p).start)}</span></div>`;}).join("")}
-  </div>`:'';
+  const stagnantBody=stagnant.length? stagnant.map(p=>{const r=getRow(p.id);return `<div class="row"><span>${getName(p)}（${p.cat}・${r.assignee||"未指派"}）</span><span class="small">起始 ${shortDate(getRange(p).start)}</span></div>`;}).join("") : `<div class="small">✓ 沒有看起來被忘記的專案</div>`;
 
-  // 3) 成本超支提醒
+  // 成本壓力
   const overCost=ALLP.filter(p=>{ const r=getRow(p.id); return r.cost!==null && r.cost!=="" && Number(r.cost)/getEstRev(p)>=0.6; })
     .sort((a,b)=>(Number(getRow(b.id).cost)/getEstRev(b))-(Number(getRow(a.id).cost)/getEstRev(a)));
-  const overCostHtml=overCost.length?`<div class="priority" style="margin-top:10px;"><h3>成本壓力（佔預估營收60%以上）</h3>
-    ${overCost.map(p=>{const r=getRow(p.id); const ratio=Math.round(Number(r.cost)/getEstRev(p)*100); const isOver=ratio>=100;return `<div class="row"><span>${getName(p)}（${p.cat}・${r.assignee||"未指派"}）</span><span class="small" style="color:${isOver?'var(--warn)':'var(--accent2)'};font-weight:${isOver?'600':'400'};">${isOver?'已超支':'成本壓力'} ${ratio}%</span></div>`;}).join("")}
-  </div>`:'';
+  const costBody=overCost.length? overCost.map(p=>{const r=getRow(p.id); const ratio=Math.round(Number(r.cost)/getEstRev(p)*100); const isOver=ratio>=100;return `<div class="row"><span>${getName(p)}（${p.cat}・${r.assignee||"未指派"}）</span><span class="small" style="color:${isOver?'var(--warn)':'var(--accent2)'};font-weight:${isOver?'600':'400'};">${isOver?'已超支':'成本壓力'} ${ratio}%</span></div>`;}).join("") : `<div class="small">✓ 沒有成本壓力超過60%的專案</div>`;
 
-  if(!list.length){
-    box.innerHTML=`<div class="priority ok"><h3>✓ 目前沒有已逾期或7天內到期、還未完成的案子</h3></div>${taskUrgentHtml}${stagnantHtml}${overCostHtml}`;
-    return;
-  }
-  const groups=STATUSES.filter(s=>s!=="已完成").map(s=>({status:s, items:list.filter(p=>getRow(p.id).status===s)})).filter(g=>g.items.length);
-  const groupHtml=groups.map(g=>`
-    <div class="small" style="margin:10px 0 2px;">${g.status}（${g.items.length}）</div>
-    ${g.items.map(p=>{const r=getRow(p.id);return `<div class="row"><span>${getName(p)}（${p.cat}・${r.assignee||"未指派"}・迄 ${shortDate(getRange(p).end)}）</span><span class="badge ${urgency(p)}">${URG_LABEL[urgency(p)]}</span></div>`;}).join("")}
-  `).join("");
-  box.innerHTML=`<div class="priority"><h3>現在最該處理（已逾期／7天內到期，尚未完成）</h3>${groupHtml}</div>${taskUrgentHtml}${stagnantHtml}${overCostHtml}`;
+  const tabs=[
+    {key:'urgent', label:`急迫案件 (${list.length})`, body:urgentBody},
+    {key:'task', label:`任務急迫 (${taskUrgent.length})`, body:taskBody},
+    {key:'stagnant', label:`可能被忘記 (${stagnant.length})`, body:stagnantBody},
+    {key:'cost', label:`成本壓力 (${overCost.length})`, body:costBody},
+  ];
+  const tabBtns=tabs.map(tb=>`<button class="dtab ${priorityTab===tb.key?'active':''}" onclick="setPriorityTab('${tb.key}')">${tb.label}</button>`).join('');
+  const active=tabs.find(tb=>tb.key===priorityTab)||tabs[0];
+  box.innerHTML=`<div class="priority plain"><div class="dtabs" style="margin-bottom:2px;">${tabBtns}</div>${active.body}</div>`;
 }
 
 function monthOptsQ(sel){ let s='<option value="">未填</option>'; [9,10,11,12].forEach(m=>{ s+=`<option value="${m}" ${sel===m?'selected':''}>${m}月</option>`; }); return s; }
@@ -905,10 +907,10 @@ function detailRow(p){
   const notesPane=`<textarea class="notesbox" placeholder="在這裡自由記錄，例如：9/25中秋公司休假、10/9雙十連假影響交件…" onchange="setField('${p.id}','notes',this.value)">${esc(r.notes)}</textarea>`;
 
   const pane = tab==='tasks' ? taskPane : tab==='notes' ? notesPane : basicPane;
-  return `<tr class="detail"><td colspan="10">
+  return `<tr class="detail"><td colspan="10"><div class="detailwrap">
     <div class="dtabs">${tabBtn('basic','基本資料')}${tabBtn('tasks','任務與甘特圖')}${tabBtn('notes','備註')}</div>
     ${pane}
-  </td></tr>`;
+  </div></td></tr>`;
 }
 
 function renderProjectView(){
