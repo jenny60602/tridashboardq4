@@ -618,7 +618,7 @@ function renderPriority(){
   taskUrgent.sort((a,b)=>a.days-b.days);
   const taskItemsHtml=taskUrgent.map(x=>{
     const ctx=(x.prev||x.next)?`<div class="small" style="margin-top:2px;">${x.prev?`上一步：${x.prev}`:''}${x.prev&&x.next?'　':''}${x.next?`下一步：${x.next}`:''}</div>`:'';
-    return `<div class="prow">
+    return `<div class="prow" onclick="goToProject('${x.p.id}')" style="cursor:pointer;">
       <div class="prow-top"><span class="pname">${getName(x.p)} － ${x.label}</span>${assigneeTag(x.assignee)}<span class="badge ${x.days<0?'overdue':'soon7'}">${x.days<0?'已逾期':'7天內到期'}（${shortDate(x.end)}）</span></div>
       ${ctx}
     </div>`;
@@ -636,13 +636,13 @@ function renderPriority(){
     });
   });
   unassignedTasks.sort((a,b)=>{ if(a.end&&b.end) return a.end.localeCompare(b.end); if(a.end) return -1; if(b.end) return 1; return 0; });
-  const unassignedItemsHtml=unassignedTasks.map(x=>`<div class="prow"><div class="prow-top"><span class="pname">${getName(x.p)} － ${x.label}</span><span class="small" style="color:var(--warn);">尚未指派${x.end?`・迄 ${shortDate(x.end)}`:''}</span></div></div>`);
+  const unassignedItemsHtml=unassignedTasks.map(x=>`<div class="prow" onclick="goToProject('${x.p.id}')" style="cursor:pointer;"><div class="prow-top"><span class="pname">${getName(x.p)} － ${x.label}</span><span class="small" style="color:var(--warn);">尚未指派${x.end?`・迄 ${shortDate(x.end)}`:''}</span></div></div>`);
   const stagnantBody=paginatedBody('unassigned', unassignedItemsHtml, `<div class="small">✓ 目前沒有尚未指派的任務項目</div>`);
 
   // 成本壓力
   const overCost=ALLP.filter(p=>{ const r=getRow(p.id); return r.cost!==null && r.cost!=="" && Number(r.cost)/getEstRev(p)>=0.6; })
     .sort((a,b)=>(Number(getRow(b.id).cost)/getEstRev(b))-(Number(getRow(a.id).cost)/getEstRev(a)));
-  const costItemsHtml=overCost.map(p=>{const r=getRow(p.id); const ratio=Math.round(Number(r.cost)/getEstRev(p)*100); const isOver=ratio>=100;return `<div class="prow"><div class="prow-top"><span class="pname">${getName(p)}</span><span class="cat">${p.cat}</span>${assigneeTag(r.assignee)}<span class="small" style="color:${isOver?'var(--warn)':'var(--accent2)'};font-weight:600;">${isOver?'已超支':'成本壓力'} ${ratio}%</span></div></div>`;});
+  const costItemsHtml=overCost.map(p=>{const r=getRow(p.id); const ratio=Math.round(Number(r.cost)/getEstRev(p)*100); const isOver=ratio>=100;return `<div class="prow" onclick="goToProject('${p.id}')" style="cursor:pointer;"><div class="prow-top"><span class="pname">${getName(p)}</span><span class="cat">${p.cat}</span>${assigneeTag(r.assignee)}<span class="small" style="color:${isOver?'var(--warn)':'var(--accent2)'};font-weight:600;">${isOver?'已超支':'成本壓力'} ${ratio}%</span></div></div>`;});
   const costBody=paginatedBody('cost', costItemsHtml, `<div class="small">✓ 沒有成本壓力超過60%的專案</div>`);
 
   const personTabs=[
@@ -770,6 +770,15 @@ window.gotoPerson=function(){
   document.querySelector('.tabs button[data-v="person"]').classList.add("active");
   render();
   document.getElementById("view").scrollIntoView({behavior:"smooth"});
+};
+window.goToProject=function(pid){
+  view="project"; catFilter="全部"; statusFilter="全部"; searchTerm="";
+  const sb=document.getElementById("searchbox"); if(sb) sb.value="";
+  document.querySelectorAll(".tabs button").forEach(x=>x.classList.remove("active"));
+  document.querySelector('.tabs button[data-v="project"]').classList.add("active");
+  expanded.add(pid);
+  render();
+  setTimeout(()=>{ const el=document.getElementById("proj-"+pid); if(el) el.scrollIntoView({behavior:"smooth",block:"center"}); },50);
 };
 
 function renderAddForm(){
@@ -1030,7 +1039,7 @@ function renderProjectView(){
     const urg=urgency(p);
     const driveIcon=r.driveLink?`<a class="drive" href="${r.driveLink}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="開啟雲端資料夾">📁</a>`:'';
     const lastEditNote=r.lastEdit?`<div class="small">最後更新：${r.lastEdit.by||'匿名'}・${relTime(r.lastEdit.at)}</div>`:'';
-    let html=`<tr>
+    let html=`<tr id="proj-${p.id}">
       <td><span class="cat">${p.cat}</span></td>
       <td class="name" onclick="toggleExpand('${p.id}')"><span class="arrow">${open?'▾':'▸'}</span>${getName(p)}${driveIcon}${collaboratorsOf(p).length?`<div class="small">+${collaboratorsOf(p).length} 協作</div>`:""}${lastEditNote}</td>
       <td class="rev">${fmt(getEstRev(p))}${isNonOp(p)?'<br><span class="small">營收外收入</span>':''}</td>
@@ -1071,7 +1080,7 @@ function projRowHtml(p,badgeHtml){
   const tp=taskProgress(p);
   const pct=tp.total?Math.round(tp.done/tp.total*100):0;
   const badge=badgeHtml||`<span class="badge ${urgency(p)}">${URG_LABEL[urgency(p)]}</span>`;
-  return `<div class="prow">
+  return `<div class="prow" onclick="goToProject('${p.id}')" style="cursor:pointer;">
     <div class="prow-top"><span class="pname">${getName(p)}</span><span class="cat">${p.cat}</span>${assigneeTag(r.assignee)}${badge}</div>
     <div class="prow-bottom"><span>${r.status}・迄 ${shortDate(getRange(p).end)}</span><span>任務 ${tp.done}/${tp.total}（${pct}%）</span></div>
   </div>`;
