@@ -27,6 +27,8 @@ h1{font-size:1.3rem;margin:0 0 4px;}
 .statgrouplabel{font-size:.72rem;color:var(--sub);text-transform:uppercase;letter-spacing:.03em;margin:0 0 4px;}
 .stats{display:flex;gap:10px;flex-wrap:wrap;margin:0 0 4px;}
 .stat{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 14px;min-width:110px;}
+.stat.clickable{cursor:pointer;}
+.stat.clickable:hover{border-color:var(--accent2);}
 .stat b{display:block;font-size:1.05rem;}
 .stat span{color:var(--sub);font-size:.7rem;}
 .stat span.small{display:block;margin-top:2px;}
@@ -77,6 +79,19 @@ select,input[type=number],input[type=text],input[type=date],input[type=url]{back
 .progtxt{font-size:.7rem;color:var(--sub);white-space:nowrap;}
 .detail td{background:var(--bg);white-space:normal;}
 .detail h4{font-size:.72rem;color:var(--sub);margin:0 0 6px;text-transform:uppercase;}
+.gantt{margin-bottom:14px;}
+.ganttaxis{display:flex;justify-content:space-between;font-size:.68rem;color:var(--sub);margin-bottom:4px;}
+.ganttbody{position:relative;}
+.ganttrow{display:flex;align-items:center;gap:8px;padding:3px 0;border-bottom:1px dashed var(--line);font-size:.74rem;}
+.ganttlabel{width:150px;flex-shrink:0;}
+.ganttbararea{flex:1;position:relative;height:16px;background:var(--card);border-radius:3px;}
+.ganttbar{position:absolute;top:0;height:16px;border-radius:3px;}
+.ganttbar-staff{background:var(--accent);}
+.ganttbar-partner{background:var(--accent2);}
+.ganttbar-none{background:var(--line);}
+.ganttbar-done{opacity:.35;}
+.ganttToday{position:absolute;top:0;bottom:0;width:2px;background:var(--warn);z-index:2;}
+.notesbox{width:100%;min-height:70px;padding:8px;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--ink);font-size:.8rem;font-family:inherit;resize:vertical;}
 .basicgrid{display:flex;flex-wrap:wrap;gap:12px;margin-bottom:14px;}
 .basicgrid label{font-size:.7rem;color:var(--sub);display:flex;flex-direction:column;gap:3px;}
 .collab{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px;}
@@ -97,6 +112,12 @@ select,input[type=number],input[type=text],input[type=date],input[type=url]{back
 .addtask{display:flex;gap:6px;}
 .addtask input{flex:1;}
 .people{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;margin:8px 0 16px;}
+.persondetail{grid-column:1/-1;margin-top:0 !important;}
+.prow{padding:6px 0;border-bottom:1px dashed var(--line);}
+.prow:last-child{border-bottom:none;}
+.prow-top{display:flex;align-items:center;gap:6px;font-size:.82rem;flex-wrap:wrap;}
+.prow-bottom{display:flex;justify-content:space-between;gap:8px;font-size:.72rem;color:var(--sub);margin-top:3px;}
+.pname{font-weight:600;}
 .pcard{background:var(--card);border:1px solid var(--line);border-left:4px solid var(--line);border-radius:10px;padding:10px 12px;}
 .pcard.staff{border-left-color:var(--accent);}
 .pcard.partner{border-left-color:var(--accent2);}
@@ -129,6 +150,7 @@ select,input[type=number],input[type=text],input[type=date],input[type=url]{back
   <div id="monthchart" style="margin-bottom:12px;"></div>
   <div id="filterbar" class="filterbar">
     <div id="filters" class="filters"></div>
+    <div id="statusfilters" class="filters"></div>
     <input id="searchbox" type="text" placeholder="🔍 搜尋專案名稱…">
   </div>
   <div id="addform" style="margin-bottom:12px;"></div>
@@ -184,7 +206,7 @@ const URG_LABEL={overdue:"已逾期",soon7:"7天內到期",soon30:"30天內",lat
 
 const SHEET_API_URL="https://script.google.com/macros/s/AKfycbymRzIunZy7hUkAzy0UTsHi-22mVACE1HlZtsGCI2H3_FekAgnbdcQ_XsOwFVcve4h2gQ/exec";
 let state={};
-let view="project", catFilter="全部", searchTerm="", expanded=new Set(), expandedPerson=new Set(), showAddForm=false;
+let view="project", catFilter="全部", statusFilter="全部", searchTerm="", expanded=new Set(), expandedPerson=new Set(), showAddForm=false;
 let ALLP=[];
 function loadWhoAmI(){ try{ return localStorage.getItem('dash_whoami')||''; }catch(e){ return ''; } }
 function saveWhoAmI(v){ try{ localStorage.setItem('dash_whoami',v); }catch(e){} }
@@ -211,7 +233,7 @@ function getRow(id){
     estOverride:(r.estOverride===undefined?null:r.estOverride), actual:(r.actual===undefined?null:r.actual),
     cost:(r.cost===undefined?null:r.cost), driveLink:r.driveLink||"", nameOverride:(r.nameOverride===undefined?null:r.nameOverride),
     invoiceMonth:(r.invoiceMonth===undefined?null:r.invoiceMonth),
-    startDate:r.startDate||null, endDate:r.endDate||null, lastEdit:r.lastEdit||null,
+    startDate:r.startDate||null, endDate:r.endDate||null, lastEdit:r.lastEdit||null, notes:r.notes||"",
     tasks:r.tasks||{}, subtasks:r.subtasks||{}, custom:r.custom||[]};
 }
 function isStaff(n){return TEAM_STAFF.includes(n);}
@@ -245,6 +267,7 @@ function sortedAll(){ return ALLP.slice().sort((a,b)=>new Date(getRange(a).end)-
 function visibleProjects(){
   let s=sortedAll();
   if(catFilter!=="全部") s=s.filter(p=>p.cat===catFilter);
+  if(statusFilter!=="全部") s=s.filter(p=>getRow(p.id).status===statusFilter);
   if(searchTerm) s=s.filter(p=>getName(p).toLowerCase().includes(searchTerm.toLowerCase()));
   return s;
 }
@@ -397,8 +420,7 @@ function renderMonthlyChart(){
 function renderStats(){
   const coreRev=ALLP.filter(p=>!isNonOp(p)).reduce((s,p)=>s+getEstRev(p),0);
   const nonOpRev=ALLP.filter(p=>isNonOp(p)).reduce((s,p)=>s+getEstRev(p),0);
-  const done=ALLP.filter(p=>getRow(p.id).status==="已完成").length;
-  const doing=ALLP.filter(p=>getRow(p.id).status==="進行中").length;
+  const statusCount={}; STATUSES.forEach(s=>statusCount[s]=ALLP.filter(p=>getRow(p.id).status===s).length);
   const unassigned=ALLP.filter(p=>!getRow(p.id).assignee).length;
   let tDone=0,tAll=0; ALLP.forEach(p=>{const t=taskProgress(p); tDone+=t.done; tAll+=t.total;});
   const pct=tAll?Math.round(tDone/tAll*100):0;
@@ -418,12 +440,14 @@ function renderStats(){
       </div>
     </div>
     <div class="statgroup">
-      <div class="statgrouplabel">專案狀態</div>
+      <div class="statgrouplabel">專案狀態（點數字可篩選）</div>
       <div class="stats">
-        <div class="stat"><b>${ALLP.length}</b><span>專案總數</span></div>
-        <div class="stat"><b>${doing}</b><span>進行中</span></div>
-        <div class="stat"><b>${done}</b><span>已完成</span></div>
-        <div class="stat"><b style="color:${unassigned?'var(--warn)':'var(--ok)'}">${unassigned}</b><span>尚未指派負責人</span></div>
+        <div class="stat clickable" onclick="gotoStatus('全部')"><b>${ALLP.length}</b><span>專案總數</span></div>
+        <div class="stat clickable" onclick="gotoStatus('未開始')"><b>${statusCount['未開始']||0}</b><span>未開始</span></div>
+        <div class="stat clickable" onclick="gotoStatus('進行中')"><b>${statusCount['進行中']||0}</b><span>進行中</span></div>
+        <div class="stat clickable" onclick="gotoStatus('待收款')"><b>${statusCount['待收款']||0}</b><span>待收款</span></div>
+        <div class="stat clickable" onclick="gotoStatus('已完成')"><b>${statusCount['已完成']||0}</b><span>已完成</span></div>
+        <div class="stat clickable" onclick="gotoPerson()"><b style="color:${unassigned?'var(--warn)':'var(--ok)'}">${unassigned}</b><span>尚未指派負責人</span></div>
       </div>
     </div>
     <div class="statgroup">
@@ -441,8 +465,27 @@ function renderFilters(){
   document.getElementById("filters").innerHTML=cats.map(c=>
     `<button class="${catFilter===c?'active':''}" onclick="setFilter('${c}')">${c}${c==="全部"?"":" ("+ALLP.filter(p=>p.cat===c).length+")"}</button>`
   ).join("");
+  const statuses=["全部",...STATUSES];
+  document.getElementById("statusfilters").innerHTML=statuses.map(s=>
+    `<button class="${statusFilter===s?'active':''}" onclick="setStatusFilter('${s}')">${s}${s==="全部"?"":" ("+ALLP.filter(p=>getRow(p.id).status===s).length+")"}</button>`
+  ).join("");
 }
 window.setFilter=function(c){ catFilter=c; renderFilters(); renderProjectView(); };
+window.setStatusFilter=function(s){ statusFilter=s; renderFilters(); renderProjectView(); };
+window.gotoStatus=function(s){
+  statusFilter=s; view="project";
+  document.querySelectorAll(".tabs button").forEach(x=>x.classList.remove("active"));
+  document.querySelector('.tabs button[data-v="project"]').classList.add("active");
+  render();
+  document.getElementById("filterbar").scrollIntoView({behavior:"smooth",block:"start"});
+};
+window.gotoPerson=function(){
+  view="person";
+  document.querySelectorAll(".tabs button").forEach(x=>x.classList.remove("active"));
+  document.querySelector('.tabs button[data-v="person"]').classList.add("active");
+  render();
+  document.getElementById("view").scrollIntoView({behavior:"smooth"});
+};
 
 function renderAddForm(){
   const box=document.getElementById("addform");
@@ -531,6 +574,47 @@ function receiptsHtml(p){
     <div class="small" style="margin:6px 0 12px;">合計已收：${fmt(totalActual(p))}／預估 ${fmt(getEstRev(p))}</div>`;
 }
 
+function ganttRows(p){
+  const rows=[];
+  taskList(p).forEach((t)=>{
+    const subs=materializedSubs(p.id,t);
+    if(subs.length){
+      subs.forEach(s=>{ rows.push({label:t+'／'+s.name, start:s.start, end:s.end, assignee:s.assignee, done:s.done}); });
+    } else {
+      const info=taskInfo(p,t);
+      rows.push({label:t, start:info.start, end:info.end, assignee:info.assignee, done:info.done});
+    }
+  });
+  return rows;
+}
+function ganttHtml(p){
+  const range=getRange(p);
+  const rangeStart=new Date(range.start+"T00:00:00"), rangeEnd=new Date(range.end+"T00:00:00");
+  const totalMs=(rangeEnd-rangeStart)||1;
+  const rows=ganttRows(p);
+  const today=new Date(); today.setHours(0,0,0,0);
+  const todayPct=(today>=rangeStart && today<=rangeEnd) ? ((today-rangeStart)/totalMs*100) : null;
+  const dated=rows.filter(r=>r.start&&r.end);
+  const undated=rows.filter(r=>!r.start||!r.end);
+  const barsHtml=dated.map(r=>{
+    const s=new Date(r.start+"T00:00:00"), e=new Date(r.end+"T00:00:00");
+    const cs=s<rangeStart?rangeStart:s, ce=e>rangeEnd?rangeEnd:e;
+    const leftPct=(cs-rangeStart)/totalMs*100;
+    const widthPct=Math.max(1.5,(ce-cs)/totalMs*100);
+    const cls=r.assignee?(isStaff(r.assignee)?'ganttbar-staff':'ganttbar-partner'):'ganttbar-none';
+    return `<div class="ganttrow">
+      <div class="ganttlabel">${r.label}${r.assignee?` <span class="small">・${r.assignee}</span>`:''}</div>
+      <div class="ganttbararea"><div class="ganttbar ${cls} ${r.done?'ganttbar-done':''}" style="left:${leftPct}%;width:${widthPct}%;" title="${shortDate(r.start)}–${shortDate(r.end)}${r.done?'（已完成）':''}"></div></div>
+    </div>`;
+  }).join('');
+  const undatedHtml=undated.length?`<div class="small" style="margin-top:6px;">尚未標日期：${undated.map(r=>r.label).join('、')}（在下面任務清單填開始/截止日就會出現在圖上）</div>`:'';
+  const body=dated.length
+    ? `<div class="ganttaxis"><span>${shortDate(range.start)}</span><span>${shortDate(range.end)}</span></div>
+       <div class="ganttbody">${todayPct!==null?`<div class="ganttToday" style="left:${todayPct}%;"></div>`:''}${barsHtml}</div>`
+    : `<div class="small">目前沒有任何任務標了開始/截止日，先在下面任務清單裡加就會自動畫出來。</div>`;
+  return `<div class="gantt">${body}${undatedHtml}</div>`;
+}
+
 function detailRow(p){
   const r=getRow(p.id);
   const range=getRange(p);
@@ -551,12 +635,16 @@ function detailRow(p){
     ${receiptsHtml(p)}
     <h4>雲端資料夾連結（Google Drive）</h4>
     <input type="url" placeholder="貼上 Google Drive 資料夾連結" value="${r.driveLink}" onchange="setField('${p.id}','driveLink',this.value)" style="width:100%;max-width:420px;margin-bottom:12px;">
+    <h4>甘特圖（依任務起訖日自動產生，紅線＝今天）</h4>
+    ${ganttHtml(p)}
     <h4>任務清單（點「＋」可拆子項目並各自標開始/截止日）</h4>
     <div class="tasklist">${items}</div>
     <div class="addtask">
       <input type="text" placeholder="新增一項頂層工作…" id="add-${p.id}">
       <button onclick="addTask('${p.id}')">新增</button>
     </div>
+    <h4 style="margin-top:14px;">備註（自由填寫，例如特殊日期、提醒事項）</h4>
+    <textarea class="notesbox" placeholder="在這裡自由記錄，例如：9/25中秋公司休假、10/9雙十連假影響交件…" onchange="setField('${p.id}','notes',this.value)">${esc(r.notes)}</textarea>
   </td></tr>`;
 }
 
@@ -605,7 +693,10 @@ function personTop(t){
 function projRowHtml(p,label){
   const tp=taskProgress(p);
   const pct=tp.total?Math.round(tp.done/tp.total*100):0;
-  return `<div class="row"><span>${getName(p)}（${p.cat}）${label?`・${label}`:''}</span><span><span class="badge ${urgency(p)}">${URG_LABEL[urgency(p)]}</span> ${getRow(p.id).status}・${tp.done}/${tp.total}（${pct}%）</span></div>`;
+  return `<div class="prow">
+    <div class="prow-top"><span class="pname">${getName(p)}</span><span class="cat">${p.cat}</span>${label?`<span class="small">${label}</span>`:''}<span class="badge ${urgency(p)}">${URG_LABEL[urgency(p)]}</span></div>
+    <div class="prow-bottom"><span>${getRow(p.id).status}・迄 ${shortDate(getRange(p).end)}</span><span>任務 ${tp.done}/${tp.total}（${pct}%）</span></div>
+  </div>`;
 }
 function personDetailHtml(t){
   const owned=ALLP.filter(p=>getRow(p.id).assignee===t)
@@ -620,18 +711,19 @@ function personDetailHtml(t){
       else { const info=taskInfo(p,tn); if(info.assignee===t) myTasks.push({p,idx,si:null,name:tn,done:info.done}); }
     });
   });
-  const ownedHtml=owned.map(p=>projRowHtml(p)).join("")||'<div class="row"><span>（無）</span></div>';
-  const collabHtml=collab.map(p=>projRowHtml(p)).join("")||'<div class="row"><span>（無）</span></div>';
+  const ownedHtml=owned.map(p=>projRowHtml(p)).join("")||'<div class="prow small">（無）</div>';
+  const collabHtml=collab.map(p=>projRowHtml(p)).join("")||'<div class="prow small">（無）</div>';
   const taskHtml=myTasks.map(x=>{
     const cb=x.si===null
       ? `<input type="checkbox" ${x.done?'checked':''} onchange="toggleTask('${x.p.id}',${x.idx},this.checked)">`
       : `<input type="checkbox" ${x.done?'checked':''} onchange="toggleSubtask('${x.p.id}',${x.idx},${x.si},this.checked)">`;
-    return `<div class="trow">${cb}<span>${getName(x.p)} — ${x.name}</span><span class="badge ${urgency(x.p)}" style="margin-left:auto;">${URG_LABEL[urgency(x.p)]}</span></div>`;
-  }).join("")||'<div class="trow"><span>（目前沒有指派給你的任務項目）</span></div>';
-  return `<div class="priority plain" style="margin-top:6px;">
-    <div class="small" style="margin:2px 0;">負責的專案（依急迫度排序）</div>${ownedHtml}
-    <div class="small" style="margin:10px 0 2px;">協作的專案（依急迫度排序）</div>${collabHtml}
-    <div class="small" style="margin:10px 0 2px;">指派給我的任務項目</div>${taskHtml}
+    return `<div class="prow"><div class="prow-top">${cb}<span class="pname">${getName(x.p)}</span><span class="badge ${urgency(x.p)}" style="margin-left:auto;">${URG_LABEL[urgency(x.p)]}</span></div>
+      <div class="prow-bottom"><span>${x.name}</span></div></div>`;
+  }).join("")||'<div class="prow small">（目前沒有指派給你的任務項目）</div>';
+  return `<div class="priority plain persondetail">
+    <h3>負責的專案（依急迫度排序）</h3>${ownedHtml}
+    <h3 style="margin-top:14px;">協作的專案（依急迫度排序）</h3>${collabHtml}
+    <h3 style="margin-top:14px;">指派給我的任務項目</h3>${taskHtml}
   </div>`;
 }
 
