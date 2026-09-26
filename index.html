@@ -93,7 +93,8 @@ select,input[type=number],input[type=text],input[type=date],input[type=url]{back
 .dtab{background:var(--card);border:1px solid var(--line);color:var(--sub);padding:4px 12px;border-radius:14px;font-size:.75rem;cursor:pointer;}
 .dtab.active{background:var(--accent2);color:#fff;border-color:var(--accent2);}
 .gantt{margin-bottom:14px;}
-.ganttscroll{width:1px;min-width:100%;overflow-x:auto;}
+.ganttscroll{width:1px;min-width:100%;overflow:auto;max-height:420px;}
+.gantthead{position:sticky;top:0;z-index:3;background:var(--bg);}
 .ganttaxis{display:flex;justify-content:space-between;font-size:.68rem;color:var(--sub);margin-bottom:4px;}
 .ganttbody{position:relative;}
 .ganttrow{display:flex;align-items:center;gap:8px;padding:3px 0;border-bottom:1px dashed var(--line);font-size:.74rem;}
@@ -121,6 +122,7 @@ select,input[type=number],input[type=text],input[type=date],input[type=url]{back
 .monthcol{flex:0 0 130px;min-width:130px;background:var(--card);border:1px solid var(--line);border-radius:8px;padding:6px 8px;}
 .monthcolhead{font-weight:600;font-size:.78rem;margin-bottom:4px;color:var(--accent2);}
 .monthitem{font-size:.68rem;padding:2px 0;border-bottom:1px dashed var(--line);}
+.monthproj{color:var(--accent2);font-weight:600;}
 .monthitem.done{opacity:.4;text-decoration:line-through;}
 .basicgrid{display:flex;flex-wrap:wrap;gap:12px;margin-bottom:14px;}
 .basicgrid label{font-size:.7rem;color:var(--sub);display:flex;flex-direction:column;gap:3px;}
@@ -252,7 +254,7 @@ const URG_LABEL={overdue:"已逾期",soon7:"7天內到期",soon30:"30天內",lat
 
 const SHEET_API_URL="https://script.google.com/macros/s/AKfycbymRzIunZy7hUkAzy0UTsHi-22mVACE1HlZtsGCI2H3_FekAgnbdcQ_XsOwFVcve4h2gQ/exec";
 let state={};
-let view="project", catFilter="全部", statusFilter="全部", searchTerm="", expanded=new Set(), expandedPerson=new Set(), showAddForm=false, detailTab={}, todoExpandedSet=new Set(), ownedCollabExpandedSet=new Set();
+let view="project", catFilter="全部", statusFilter="全部", searchTerm="", expanded=new Set(), expandedPerson=new Set(), showAddForm=false, detailTab={}, todoExpandedSet=new Set(), ownedCollabExpandedSet=new Set(), ganttGroupExpanded={};
 let ALLP=[];
 function loadWhoAmI(){ try{ return localStorage.getItem('dash_whoami')||''; }catch(e){ return ''; } }
 function saveWhoAmI(v){ try{ localStorage.setItem('dash_whoami',v); }catch(e){} }
@@ -832,6 +834,7 @@ function ganttHtml(p){
   dated.forEach(r=>{ if(!r.group) return; if(!groupSpan[r.group]) groupSpan[r.group]={min:r.end,max:r.end}; if(r.end<groupSpan[r.group].min) groupSpan[r.group].min=r.end; if(r.end>groupSpan[r.group].max) groupSpan[r.group].max=r.end; });
 
   let lastGroup=undefined;
+  let curGroupExpanded=true;
   const barsHtml=dated.map(r=>{
     const isPoint=r.start===r.end;
     const leftPct=pct(r.start);
@@ -846,16 +849,19 @@ function ganttHtml(p){
     if(r.group!==lastGroup){
       lastGroup=r.group;
       if(r.group){
+        const key=p.id+'::'+r.group;
+        curGroupExpanded=!!ganttGroupExpanded[key];
         const sp=groupSpan[r.group];
         const gLeft=pct(sp.min), gWidth=Math.max(4,pct(sp.max)-pct(sp.min));
         const gLabel=sp.min===sp.max?shortDate(sp.min):`${shortDate(sp.min)}–${shortDate(sp.max)}`;
         const gDays=dayCount(sp.min,sp.max);
-        groupHeader=`<div class="ganttrow ganttgrouprow">
-          <div class="ganttlabel"><b>${r.group}</b></div>
+        groupHeader=`<div class="ganttrow ganttgrouprow" onclick="toggleGanttGroup('${p.id}','${r.group}')" style="cursor:pointer;">
+          <div class="ganttlabel"><span class="arrow">${curGroupExpanded?'▾':'▸'}</span><b>${r.group}</b></div>
           <div class="ganttbararea">${overlayHtml}<div class="ganttbar ganttbar-group" style="left:${gLeft}%;width:${gWidth}%;"></div><span class="ganttdate" style="left:calc(${gLeft}% + ${gWidth}% + 8px);">${gLabel}（共${gDays}天）</span></div>
         </div>`;
-      }
+      } else { curGroupExpanded=true; }
     }
+    if(r.group && !curGroupExpanded) return groupHeader;
     const labelText = r.group ? `　└ ${r.label}` : r.label;
     return `${groupHeader}<div class="ganttrow ${r.group?'ganttchildrow':''}">
       <div class="ganttlabel">${labelText}${r.assignee?` <span class="small">・${r.assignee}</span>`:''}</div>
@@ -870,8 +876,10 @@ function ganttHtml(p){
   </div>`;
   const minWidthPx=Math.max(500, Math.round(totalDays*8));
   const body=`<div class="ganttscroll"><div class="ganttinner" style="min-width:${minWidthPx}px;">
-       <div class="ganttaxis"><span>${shortDate(proj.start)}</span><span>${shortDate(proj.end)}</span></div>
-       ${weekHeaderHtml}
+       <div class="gantthead">
+         <div class="ganttaxis"><span>${shortDate(proj.start)}</span><span>${shortDate(proj.end)}</span></div>
+         ${weekHeaderHtml}
+       </div>
        <div class="ganttbody">${barsHtml}</div>
        </div></div>`;
   return `<div class="gantt">${body}${undatedHtml}${outOfRangeHtml}</div>`;
@@ -991,7 +999,7 @@ function personMonthlyHtml(t){
   ALLP.forEach(p=>{
     taskList(p).forEach(tn=>{
       const subs=materializedSubs(p.id,tn);
-      const pushIt=(name,info)=>{ if(info.assignee===t && info.end){ items.push({ym:info.end.slice(0,7), date:info.end, label:`${getName(p)}：${name}`, done:info.done}); } };
+      const pushIt=(name,info)=>{ if(info.assignee===t && info.end){ items.push({ym:info.end.slice(0,7), date:info.end, proj:getName(p), task:name, done:info.done}); } };
       if(subs.length){ subs.forEach(s=>pushIt(s.name,s)); }
       else { pushIt(tn, taskInfo(p,tn)); }
     });
@@ -1003,7 +1011,7 @@ function personMonthlyHtml(t){
     const [y,m]=ym.split('-').map(Number);
     const label=(y!==REF_YEAR?y+'/':'')+m+'月';
     const rows=items.filter(i=>i.ym===ym).sort((a,b)=>a.date.localeCompare(b.date));
-    const body=rows.length? rows.map(it=>`<div class="monthitem${it.done?' done':''}">${shortDate(it.date)} ${it.label}</div>`).join('') : '<div class="small">（無）</div>';
+    const body=rows.length? rows.map(it=>`<div class="monthitem${it.done?' done':''}">${shortDate(it.date)} <span class="monthproj">${it.proj}</span>：${it.task}</div>`).join('') : '<div class="small">（無）</div>';
     return `<div class="monthcol"><div class="monthcolhead">${label}</div>${body}</div>`;
   }).join('');
   return `<div class="monthgridscroll"><div class="monthgrid">${cols}</div></div>`;
@@ -1101,7 +1109,12 @@ function vendorCard(v){
     if(subs.length){ taskCount+=subs.filter(s=>s.assignee===v).length; }
     else if(taskInfo(p,tn).assignee===v){ taskCount++; }
   }));
-  return `<div class="pcard" style="border-left-color:#c9a227;"><b>${v}</b><span>${taskCount} 項任務</span></div>`;
+  return `<div class="pcard" style="border-left-color:#c9a227;">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <b>${v}</b><button class="mini" onclick="renameVendor('${esc(v)}')" title="改名（會同步更新所有指派給這個名字的任務）">✎ 改名</button>
+      </div>
+      <span>${taskCount} 項任務</span>
+    </div>`;
 }
 function renderPersonView(){
   const legend=`<div style="display:flex;gap:10px;margin:6px 0 4px;"><span class="tag-staff">■ 三小文創</span><span class="tag-partner">■ 合作夥伴</span></div>`;
@@ -1381,7 +1394,38 @@ function getDetailTab(pid){ return detailTab[pid]||'basic'; }
 window.setDetailTab=function(pid,tab){ detailTab[pid]=tab; renderProjectView(); };
 window.toggleExpand=function(id){ expanded.has(id)?expanded.delete(id):expanded.add(id); renderProjectView(); };
 window.togglePerson=function(t){ expandedPerson.has(t)?expandedPerson.delete(t):expandedPerson.add(t); renderPersonView(); };
+window.renameVendor=async function(oldName){
+  const input=prompt(`將委外單位「${oldName}」改名為：`, oldName);
+  if(!input) return;
+  const nn=input.trim();
+  if(!nn || nn===oldName) return;
+  if(TEAM.includes(nn)){ alert('這個名字跟現有的員工/夥伴重複，請換一個名字。'); return; }
+  let changedCount=0;
+  ALLP.forEach(p=>{
+    const cur=getRow(p.id);
+    let changed=false;
+    const tasks=Object.assign({},cur.tasks);
+    Object.keys(tasks).forEach(k=>{
+      const t=tasks[k];
+      if(t && typeof t==='object' && t.assignee===oldName){ tasks[k]=Object.assign({},t,{assignee:nn}); changed=true; }
+    });
+    const subtasks=Object.assign({},cur.subtasks);
+    Object.keys(subtasks).forEach(k=>{
+      const arr=subtasks[k];
+      if(Array.isArray(arr)){
+        let arrChanged=false;
+        const newArr=arr.map(s=>{ if(s && s.assignee===oldName){ arrChanged=true; return Object.assign({},s,{assignee:nn}); } return s; });
+        if(arrChanged){ subtasks[k]=newArr; changed=true; }
+      }
+    });
+    if(changed){ state[p.id]=Object.assign({},cur,{tasks,subtasks}); touch(p.id); changedCount++; }
+  });
+  if(changedCount===0){ alert('沒有找到指派給這個名字的任務。'); return; }
+  render();
+  await persist();
+};
 window.toggleTodoExpand=function(t){ todoExpandedSet.has(t)?todoExpandedSet.delete(t):todoExpandedSet.add(t); renderPersonView(); };
+window.toggleGanttGroup=function(pid,group){ const key=pid+'::'+group; ganttGroupExpanded[key]=!ganttGroupExpanded[key]; renderProjectView(); };
 window.toggleOwnedCollab=function(t){ ownedCollabExpandedSet.has(t)?ownedCollabExpandedSet.delete(t):ownedCollabExpandedSet.add(t); renderPersonView(); };
 
 document.querySelectorAll(".tabs button").forEach(b=>b.addEventListener("click",()=>{
