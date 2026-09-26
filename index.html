@@ -40,6 +40,9 @@ main{max-width:1260px;margin:0 auto;padding:0 16px 40px;}
 .filters{display:flex;gap:6px;flex-wrap:wrap;}
 .filters button{background:var(--card);border:1px solid var(--line);color:var(--sub);padding:4px 11px;border-radius:16px;font-size:.75rem;cursor:pointer;}
 .filters button.active{background:var(--accent2);color:#fff;border-color:var(--accent2);}
+.statusfilters button.active{background:var(--accent);border-color:var(--accent);}
+.filterdivider{width:1px;align-self:stretch;background:var(--line);margin:0 2px;}
+.filterlabel{font-size:.72rem;color:var(--sub);align-self:center;}
 #searchbox{padding:5px 10px;border:1px solid var(--line);border-radius:16px;background:var(--card);color:var(--ink);font-size:.78rem;width:180px;}
 .priority{border:1px solid var(--warn);background:var(--card);border-radius:10px;padding:12px 14px;margin-bottom:14px;}
 .priority h3{margin:0 0 8px;font-size:.88rem;color:var(--warn);}
@@ -156,7 +159,9 @@ select,input[type=number],input[type=text],input[type=date],input[type=url]{back
   <div id="monthchart" style="margin-bottom:12px;"></div>
   <div id="filterbar" class="filterbar">
     <div id="filters" class="filters"></div>
-    <div id="statusfilters" class="filters"></div>
+    <div class="filterdivider"></div>
+    <span class="filterlabel">狀態</span>
+    <div id="statusfilters" class="filters statusfilters"></div>
     <input id="searchbox" type="text" placeholder="🔍 搜尋專案名稱…">
   </div>
   <div id="addform" style="margin-bottom:12px;"></div>
