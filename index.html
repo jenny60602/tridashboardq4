@@ -72,6 +72,8 @@ td.name .drive{margin-left:4px;text-decoration:none;}
 select,input[type=number],input[type=text],input[type=date],input[type=url]{background:var(--bg);color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:4px 6px;font-size:.76rem;}
 .mddate{width:56px;}
 .subname{width:150px;}
+.tname-input{font-weight:600;background:transparent;border:1px solid transparent;padding:2px 4px;}
+.tname-input:hover,.tname-input:focus{border-color:var(--line);background:var(--card);}
 .status-未開始{color:var(--sub);} .status-進行中{color:var(--accent2);font-weight:600;} .status-待收款{color:var(--warn);font-weight:600;} .status-已完成{color:var(--ok);}
 .rev{text-align:right;font-variant-numeric:tabular-nums;}
 .diff{font-size:.66rem;display:block;margin-top:2px;}
@@ -104,6 +106,7 @@ select,input[type=number],input[type=text],input[type=date],input[type=url]{back
 .ganttbar{position:absolute;top:0;height:16px;border-radius:3px;}
 .ganttbar-staff{background:var(--accent);}
 .ganttbar-partner{background:var(--accent2);}
+.ganttbar-vendor{background:#c9a227;}
 .ganttbar-none{background:var(--line);}
 .ganttbar-done{opacity:.35;}
 .ganttToday{position:absolute;top:0;bottom:0;width:2px;background:var(--warn);z-index:2;}
@@ -247,14 +250,17 @@ function pad(n){return n<10?"0"+n:""+n;}
 function lastDay(y,m){return new Date(y,m,0).getDate();}
 function todayISO(){const d=new Date();return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;}
 function addDaysISO(iso,n){const d=new Date(iso+"T00:00:00");d.setDate(d.getDate()+n);return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;}
-function shortDate(iso){ if(!iso) return ""; const [y,m,d]=iso.split("-"); return `${Number(m)}/${Number(d)}`; }
+function shortDate(iso){ if(!iso) return ""; const [y,m,d]=iso.split("-"); return (Number(y)!==REF_YEAR?y+"/":"")+`${Number(m)}/${Number(d)}`; }
 function mdToISO(md){
   if(!md) return '';
   const parts=md.replace(/[^0-9\/]/g,'').split('/');
-  if(parts.length!==2) return '';
-  const m=parseInt(parts[0],10), d=parseInt(parts[1],10);
+  let y=REF_YEAR,m,d;
+  if(parts.length===3){ y=parseInt(parts[0],10); m=parseInt(parts[1],10); d=parseInt(parts[2],10); }
+  else if(parts.length===2){ m=parseInt(parts[0],10); d=parseInt(parts[1],10); }
+  else return '';
   if(!m||!d||m<1||m>12||d<1||d>31) return '';
-  return `${REF_YEAR}-${pad(m)}-${pad(d)}`;
+  if(!y||y<2000) y=REF_YEAR;
+  return `${y}-${pad(m)}-${pad(d)}`;
 }
 function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;'); }
 function relTime(ts){
@@ -272,11 +278,13 @@ function getRow(id){
     cost:(r.cost===undefined?null:r.cost), driveLink:r.driveLink||"", nameOverride:(r.nameOverride===undefined?null:r.nameOverride),
     invoiceMonth:(r.invoiceMonth===undefined?null:r.invoiceMonth),
     startDate:r.startDate||null, endDate:r.endDate||null, lastEdit:r.lastEdit||null, notes:r.notes||"",
+    taskRenames:r.taskRenames||{}, taskDeletes:r.taskDeletes||[],
     tasks:r.tasks||{}, subtasks:r.subtasks||{}, custom:r.custom||[]};
 }
 function isStaff(n){return TEAM_STAFF.includes(n);}
+function isVendor(n){ return !!n && !TEAM.includes(n); }
 function isNonOp(p){ return p.cat==="政府"; }
-function selStyle(n){ if(!n) return ''; return isStaff(n)?'background:#dfe9df;':'background:#f4e3c9;'; }
+function selStyle(n){ if(!n) return ''; if(isVendor(n)) return 'background:#f3e6c4;'; return isStaff(n)?'background:#dfe9df;':'background:#f4e3c9;'; }
 function getEstRev(p){ const r=getRow(p.id); return r.estOverride!==null ? r.estOverride : p.rev; }
 function getName(p){ const r=getRow(p.id); return (r.nameOverride!==null && r.nameOverride!=='') ? r.nameOverride : p.name; }
 function planScaled(p){
@@ -328,9 +336,15 @@ function baseTasksFor(p){
   if(p.cat==="2C零售") return periodsFor(p);
   return BASE_TASKS;
 }
-function taskList(p){return baseTasksFor(p).concat(getRow(p.id).custom);}
-function isCustomIdx(p,idx){ return idx>=baseTasksFor(p).length; }
-function customPos(p,idx){ return idx-baseTasksFor(p).length; }
+function baseTasksVisible(p){
+  const cur=getRow(p.id); const raw=baseTasksFor(p);
+  const deletes=new Set(cur.taskDeletes); const renames=cur.taskRenames;
+  return raw.filter(n=>!deletes.has(n)).map(n=>({raw:n, display:renames[n]||n}));
+}
+function taskList(p){ return baseTasksVisible(p).map(x=>x.display).concat(getRow(p.id).custom); }
+function isCustomIdx(p,idx){ return idx>=baseTasksVisible(p).length; }
+function customPos(p,idx){ return idx-baseTasksVisible(p).length; }
+function rawBaseNameAt(p,idx){ const bv=baseTasksVisible(p); return bv[idx]?bv[idx].raw:null; }
 function materializedSubs(pid,t){
   const cur=getRow(pid);
   return (cur.subtasks[t]||[]).slice();
@@ -361,6 +375,26 @@ function personOpts(sel){
   const so=TEAM_STAFF.map(x=>`<option ${sel===x?'selected':''}>${x}</option>`).join('');
   const po=TEAM_PARTNER.map(x=>`<option ${sel===x?'selected':''}>${x}</option>`).join('');
   return `<option value="">未指派</option><optgroup label="三小文創">${so}</optgroup><optgroup label="合作夥伴">${po}</optgroup>`;
+}
+function vendorNames(){
+  const set=new Set();
+  ALLP.forEach(p=>{
+    taskList(p).forEach(t=>{
+      const info=taskInfo(p,t); if(info.assignee && !TEAM.includes(info.assignee)) set.add(info.assignee);
+      const subs=materializedSubs(p.id,t);
+      subs.forEach(s=>{ if(s.assignee && !TEAM.includes(s.assignee)) set.add(s.assignee); });
+    });
+  });
+  return [...set].sort();
+}
+function personOptsWithVendor(sel){
+  const so=TEAM_STAFF.map(x=>`<option ${sel===x?'selected':''}>${x}</option>`).join('');
+  const po=TEAM_PARTNER.map(x=>`<option ${sel===x?'selected':''}>${x}</option>`).join('');
+  const vendors=vendorNames();
+  const vo=vendors.map(v=>`<option ${sel===v?'selected':''}>${v}</option>`).join('');
+  return `<option value="">未指派</option><optgroup label="三小文創">${so}</optgroup><optgroup label="合作夥伴">${po}</optgroup>`
+    + (vo?`<optgroup label="委外單位">${vo}</optgroup>`:'')
+    + `<option value="__vendor__">＋ 新增委外單位…</option>`;
 }
 
 function urgency(p){
@@ -573,26 +607,28 @@ function taskItemHtml(p,idx){
   const subs=materializedSubs(p.id,t);
   const custom=isCustomIdx(p,idx);
   const info=taskInfo(p,t);
+  const nameInput=`<input type="text" class="tname-input" value="${esc(t)}" onchange="renameTopTask('${p.id}',${idx},this.value)">`;
   let head;
   if(subs.length){
     const d=subs.filter(s=>s.done).length;
     const ends=subs.map(s=>s.end).filter(Boolean);
     const periodTxt = ends.length ? `・工作期 ${shortDate(ends.reduce((a,b)=>a<b?a:b))}–${shortDate(ends.reduce((a,b)=>a>b?a:b))}` : '';
-    head=`<span class="tname">${t}</span><span class="progtxt">（${d}/${subs.length} 項完成${periodTxt}）</span>`;
+    head=`${nameInput}<span class="progtxt">（${d}/${subs.length} 項完成${periodTxt}）</span>`;
   } else if(p.cat==="2C零售"){
-    head=`<span class="tname">${t}</span><span class="progtxt">（尚未新增任務，自行加入常態或專案項目）</span>`;
+    head=`${nameInput}<span class="progtxt">（尚未新增任務，自行加入常態或專案項目）</span>`;
   } else {
     head=`<input type="checkbox" ${info.done?'checked':''} onchange="toggleTask('${p.id}',${idx},this.checked)">
-      <span class="tname">${t}</span>
-      <select style="${selStyle(info.assignee)}" onchange="setTaskAssignee('${p.id}',${idx},this.value)">${personOpts(info.assignee)}</select>
-      <input type="text" class="mddate" placeholder="月/日" value="${shortDate(info.end)}" onchange="setTaskDeadline('${p.id}',${idx},this.value)" title="截止日（例如9/15）">`;
+      ${nameInput}
+      <select style="${selStyle(info.assignee)}" onchange="setTaskAssignee('${p.id}',${idx},this.value)">${personOptsWithVendor(info.assignee)}</select>
+      <input type="text" class="mddate" placeholder="月/日" value="${shortDate(info.end)}" onchange="setTaskDeadline('${p.id}',${idx},this.value)" title="截止日（例如9/15，跨年可打2027/1/15）">`;
   }
-  const ctrl=custom?`<button class="mini" onclick="moveCustomTask('${p.id}',${idx},-1)">▲</button><button class="mini" onclick="moveCustomTask('${p.id}',${idx},1)">▼</button><button class="mini danger" onclick="deleteCustomTask('${p.id}',${idx})">✕</button>`:'';
+  const ctrl=(custom?`<button class="mini" onclick="moveCustomTask('${p.id}',${idx},-1)">▲</button><button class="mini" onclick="moveCustomTask('${p.id}',${idx},1)">▼</button>`:'')
+    + `<button class="mini danger" onclick="deleteTopTask('${p.id}',${idx})">✕</button>`;
   const children=subs.map((s,si)=>`<div class="subitem">
       <input type="checkbox" ${s.done?'checked':''} onchange="toggleSubtask('${p.id}',${idx},${si},this.checked)">
       <input type="text" class="subname" value="${esc(s.name)}" onchange="renameSubtask('${p.id}',${idx},${si},this.value)">
-      <select style="${selStyle(s.assignee)}" onchange="setSubtaskAssignee('${p.id}',${idx},${si},this.value)">${personOpts(s.assignee)}</select>
-      <input type="text" class="mddate" placeholder="月/日" value="${shortDate(s.end)}" onchange="setSubtaskDeadline('${p.id}',${idx},${si},this.value)" title="截止日（例如9/15）">
+      <select style="${selStyle(s.assignee)}" onchange="setSubtaskAssignee('${p.id}',${idx},${si},this.value)">${personOptsWithVendor(s.assignee)}</select>
+      <input type="text" class="mddate" placeholder="月/日" value="${shortDate(s.end)}" onchange="setSubtaskDeadline('${p.id}',${idx},${si},this.value)" title="截止日（例如9/15，跨年可打2027/1/15）">
       <button class="mini" onclick="moveSubtask('${p.id}',${idx},${si},-1)">▲</button>
       <button class="mini" onclick="moveSubtask('${p.id}',${idx},${si},1)">▼</button>
       <button class="mini danger" onclick="deleteSubtask('${p.id}',${idx},${si})">✕</button>
@@ -667,7 +703,7 @@ function ganttHtml(p){
     const isPoint=r.start===r.end;
     const leftPct=pct(r.start);
     const widthPct=isPoint?0:Math.max(2,pct(r.end)-pct(r.start));
-    const cls=r.assignee?(isStaff(r.assignee)?'ganttbar-staff':'ganttbar-partner'):'ganttbar-none';
+    const cls=r.assignee?(isStaff(r.assignee)?'ganttbar-staff':isVendor(r.assignee)?'ganttbar-vendor':'ganttbar-partner'):'ganttbar-none';
     const dateLabel=isPoint?shortDate(r.start):`${shortDate(r.start)}–${shortDate(r.end)}`;
     const markerHtml=isPoint
       ? `<div class="ganttmilestone ${cls} ${r.done?'ganttbar-done':''}" style="left:${leftPct}%;" title="${dateLabel}${r.done?'（已完成）':''}"></div>`
@@ -875,17 +911,28 @@ function personCard(t){
 }
 
 
+function vendorCard(v){
+  let taskCount=0;
+  ALLP.forEach(p=>taskList(p).forEach(tn=>{
+    const subs=materializedSubs(p.id,tn);
+    if(subs.length){ taskCount+=subs.filter(s=>s.assignee===v).length; }
+    else if(taskInfo(p,tn).assignee===v){ taskCount++; }
+  }));
+  return `<div class="pcard" style="border-left-color:#c9a227;"><b>${v}</b><span>${taskCount} 項任務</span></div>`;
+}
 function renderPersonView(){
   const legend=`<div style="display:flex;gap:10px;margin:6px 0 4px;"><span class="tag-staff">■ 三小文創</span><span class="tag-partner">■ 合作夥伴</span></div>`;
   const staffCards=`<div class="small" style="margin:4px 0;">三小文創</div>
     <div class="people">${TEAM_STAFF_G1.map(personCard).join("")}</div>
     <div class="people" style="margin-top:10px;">${TEAM_STAFF_G2.map(personCard).join("")}</div>`;
   const partnerCards=`<div class="small" style="margin:14px 0 4px;">合作夥伴</div><div class="people">${TEAM_PARTNER.map(personCard).join("")}</div>`;
+  const vendors=vendorNames();
+  const vendorCards=vendors.length?`<div class="small" style="margin:14px 0 4px;">委外單位</div><div class="people">${vendors.map(vendorCard).join("")}</div>`:'';
   const un=ALLP.filter(p=>!getRow(p.id).assignee);
   const unHtml=un.length ? `<div class="priority" style="margin-top:10px;"><h3>尚未指派負責人（${un.length}）</h3>
       ${un.map(p=>`<div class="row"><span>${getName(p)}（${p.cat}）</span><select style="width:150px;" onchange="setField('${p.id}','assignee',this.value)">${personOpts('')}</select></div>`).join('')}
     </div>` : `<div class="priority ok" style="margin-top:10px;"><h3>✓ 所有專案都已指派負責人</h3></div>`;
-  document.getElementById("view").innerHTML=legend+staffCards+partnerCards+unHtml;
+  document.getElementById("view").innerHTML=legend+staffCards+partnerCards+vendorCards+unHtml;
 }
 
 function render(){
@@ -985,6 +1032,7 @@ window.toggleTask=async function(pid,idx,checked){
   state[pid]=Object.assign({},cur,{tasks}); touch(pid); render(); await persist();
 };
 window.setTaskAssignee=async function(pid,idx,val){
+  if(val==='__vendor__'){ const name=prompt('請輸入委外單位名稱：'); if(!name||!name.trim()){ render(); return; } val=name.trim(); }
   const p=getProject(pid); const t=taskList(p)[idx]; const cur=getRow(pid);
   const prev=cur.tasks[t]||{};
   const tasks=Object.assign({},cur.tasks,{[t]:Object.assign({},prev,{assignee:val})});
@@ -1021,6 +1069,40 @@ window.deleteCustomTask=async function(pid,idx){
   const subtasks=Object.assign({},cur.subtasks); delete subtasks[name];
   state[pid]=Object.assign({},cur,{custom,tasks,subtasks}); touch(pid); render(); await persist();
 };
+window.renameCustomTask=async function(pid,idx,newName){
+  const p=getProject(pid); const pos=customPos(p,idx); const cur=getRow(pid);
+  const oldName=cur.custom[pos]; const nn=(newName||'').trim(); if(!nn||nn===oldName){ render(); return; }
+  const custom=cur.custom.slice(); custom[pos]=nn;
+  const tasks=Object.assign({},cur.tasks); if(tasks[oldName]!==undefined){ tasks[nn]=tasks[oldName]; delete tasks[oldName]; }
+  const subtasks=Object.assign({},cur.subtasks); if(subtasks[oldName]!==undefined){ subtasks[nn]=subtasks[oldName]; delete subtasks[oldName]; }
+  state[pid]=Object.assign({},cur,{custom,tasks,subtasks}); touch(pid); render(); await persist();
+};
+window.renameBaseTask=async function(pid,idx,newName){
+  const p=getProject(pid); const raw=rawBaseNameAt(p,idx); if(!raw) return;
+  const cur=getRow(pid);
+  const prevDisplay=cur.taskRenames[raw]||raw;
+  const nd=(newName||'').trim(); if(!nd||nd===prevDisplay){ render(); return; }
+  const taskRenames=Object.assign({},cur.taskRenames,{[raw]:nd});
+  const tasks=Object.assign({},cur.tasks); if(tasks[prevDisplay]!==undefined){ tasks[nd]=tasks[prevDisplay]; if(nd!==prevDisplay) delete tasks[prevDisplay]; }
+  const subtasks=Object.assign({},cur.subtasks); if(subtasks[prevDisplay]!==undefined){ subtasks[nd]=subtasks[prevDisplay]; if(nd!==prevDisplay) delete subtasks[prevDisplay]; }
+  state[pid]=Object.assign({},cur,{taskRenames,tasks,subtasks}); touch(pid); render(); await persist();
+};
+window.deleteBaseTask=async function(pid,idx){
+  const p=getProject(pid); const raw=rawBaseNameAt(p,idx); if(!raw) return;
+  const cur=getRow(pid);
+  const taskDeletes=cur.taskDeletes.concat([raw]);
+  state[pid]=Object.assign({},cur,{taskDeletes}); touch(pid); render(); await persist();
+};
+window.renameTopTask=async function(pid,idx,newName){
+  const p=getProject(pid);
+  if(isCustomIdx(p,idx)) return renameCustomTask(pid,idx,newName);
+  return renameBaseTask(pid,idx,newName);
+};
+window.deleteTopTask=async function(pid,idx){
+  const p=getProject(pid);
+  if(isCustomIdx(p,idx)) return deleteCustomTask(pid,idx);
+  return deleteBaseTask(pid,idx);
+};
 window.addSubtask=async function(pid,idx){
   const p=getProject(pid); const t=taskList(p)[idx];
   const inp=document.getElementById(`subin-${pid}-${idx}`); const val=(inp.value||'').trim(); if(!val) return;
@@ -1035,6 +1117,7 @@ window.toggleSubtask=async function(pid,idx,si,checked){
   state[pid]=Object.assign({},cur,{subtasks}); touch(pid); render(); await persist();
 };
 window.setSubtaskAssignee=async function(pid,idx,si,val){
+  if(val==='__vendor__'){ const name=prompt('請輸入委外單位名稱：'); if(!name||!name.trim()){ render(); return; } val=name.trim(); }
   const p=getProject(pid); const t=taskList(p)[idx]; const cur=getRow(pid);
   const subtasks=Object.assign({},cur.subtasks); const arr=materializedSubs(pid,t);
   arr[si]=Object.assign({},arr[si],{assignee:val}); subtasks[t]=arr;
