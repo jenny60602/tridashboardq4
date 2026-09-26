@@ -523,11 +523,12 @@ function renderPriority(){
   const list=ALLP.filter(p=>getRow(p.id).status!=="已完成" && (urgency(p)==="overdue"||urgency(p)==="soon7"))
     .sort((a,b)=>URG_RANK[urgency(a)]-URG_RANK[urgency(b)] || getEstRev(b)-getEstRev(a));
 
-  const groups=STATUSES.filter(s=>s!=="已完成").map(s=>({status:s, items:list.filter(p=>getRow(p.id).status===s)})).filter(g=>g.items.length);
-  const urgentBody=list.length? groups.map(g=>`
-    <div class="small" style="margin:10px 0 2px;">${g.status}（${g.items.length}）</div>
-    ${g.items.map(p=>projRowHtml(p)).join("")}
-  `).join("") : `<div class="small">✓ 目前沒有已逾期或7天內到期、還未完成的案子</div>`;
+  const payGroup=list.filter(p=>getRow(p.id).status==="待收款");
+  const execGroup=list.filter(p=>{const s=getRow(p.id).status; return s==="未開始"||s==="進行中";});
+  const urgentBody=list.length? `
+    ${payGroup.length?`<div class="small" style="margin:10px 0 2px;">待收款（${payGroup.length}）</div>${payGroup.map(p=>projRowHtml(p)).join("")}`:''}
+    ${execGroup.length?`<div class="small" style="margin:10px 0 2px;">執行（${execGroup.length}）</div>${execGroup.map(p=>projRowHtml(p)).join("")}`:''}
+  ` : `<div class="small">✓ 目前沒有已逾期或7天內到期、還未完成的案子</div>`;
 
   // 任務層級急迫（不管專案本身狀態），含負責人與前後步驟
   const taskUrgent=[];
