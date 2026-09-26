@@ -231,7 +231,7 @@ const ROLES={
 };
 const TEAM=TEAM_STAFF.concat(TEAM_PARTNER);
 const STATUSES=["未開始","進行中","待收款","已完成"];
-const BASE_TASKS=["提案內容撰寫","成本試算／報價底稿","報價/合約","款項","執行/交付","結案報告","案例建置","宣傳曝光"];
+const BASE_TASKS=["企劃","成本","報價/合約","款項","執行","結案"];
 const GOV_EXTRA=["期中/期末報告","經費核銷單據整理"];
 const REF_YEAR=2026;
 const URG_RANK={overdue:0,soon7:1,soon30:2,later:3};
@@ -358,13 +358,11 @@ function rawBaseNameAt(p,idx){ const bv=baseTasksVisible(p); return bv[idx]?bv[i
 function findTaskDisplayByRaw(p,rawName){ const bv=baseTasksVisible(p); const m=bv.find(x=>x.raw===rawName); return m?m.display:null; }
 function materializedSubs(pid,t){
   const cur=getRow(pid);
-  return (cur.subtasks[t]||[]).slice();
+  if(cur.subtasks[t] && cur.subtasks[t].length) return cur.subtasks[t].slice();
+  if(t==="結案") return ["結案報告","案例建置","宣傳曝光"].map(name=>({name,done:false,assignee:'',start:'',end:''}));
+  return [];
 }
 function defaultAssigneeFor(p,name){
-  if(/發票|入帳|對帳/.test(name)) return "雅芬";
-  if(name==="成本試算／報價底稿") return "緯襦";
-  if(name==="宣傳曝光") return "嘉妤";
-  if(name==="結案報告"||name==="案例建置") return getRow(p.id).assignee||"";
   return "";
 }
 function taskInfo(p,name){
@@ -1141,8 +1139,7 @@ window.addSubtask=async function(pid,idx){
   const p=getProject(pid); const t=taskList(p)[idx];
   const inp=document.getElementById(`subin-${pid}-${idx}`); const val=(inp.value||'').trim(); if(!val) return;
   const cur=getRow(pid); const subtasks=Object.assign({},cur.subtasks);
-  const defAssignee=/發票|入帳|對帳/.test(val)?'雅芬':'';
-  const arr=materializedSubs(pid,t); arr.push({name:val,done:false,assignee:defAssignee,start:'',end:''}); subtasks[t]=arr;
+  const arr=materializedSubs(pid,t); arr.push({name:val,done:false,assignee:'',start:'',end:''}); subtasks[t]=arr;
   expanded.add(pid); state[pid]=Object.assign({},cur,{subtasks}); touch(pid); render(); await persist();
 };
 window.toggleSubtask=async function(pid,idx,si,checked){
