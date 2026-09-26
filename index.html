@@ -96,6 +96,8 @@ select,input[type=number],input[type=text],input[type=date],input[type=url]{back
 .ganttrow{display:flex;align-items:center;gap:8px;padding:3px 0;border-bottom:1px dashed var(--line);font-size:.74rem;}
 .ganttlabel{width:150px;flex-shrink:0;}
 .ganttgrouprow{padding-top:8px;}
+.ganttweekrow{border-bottom:1px solid var(--line);padding-bottom:4px;margin-bottom:2px;}
+.ganttweeklabel{position:absolute;top:0;font-size:.64rem;color:var(--sub);white-space:nowrap;padding-left:2px;}
 .ganttgrouprow .ganttbar-group{background:transparent;border:1.5px dashed var(--sub);height:10px;top:3px;border-radius:5px;}
 .ganttchildrow{padding-left:0;}
 .ganttdate{position:absolute;top:0;font-size:.66rem;color:var(--sub);white-space:nowrap;line-height:16px;}
@@ -701,7 +703,15 @@ function ganttHtml(p){
   const totalDays=Math.max(1,Math.round(totalMs/86400000));
   const todayPct=(today>=rangeStart && today<=rangeEnd) ? ((today-rangeStart)/totalMs*100) : null;
   const outOfRange=dated.filter(r=>r.start<proj.start || r.end>proj.end);
-  const gridLines=[]; for(let d=0; d<=totalDays; d+=7){ gridLines.push(d/totalDays*100); }
+  const gridLines=[]; const weekLabels=[];
+  for(let d=0; d<=totalDays; d+=7){
+    gridLines.push(d/totalDays*100);
+    if(d<totalDays){
+      const wd=new Date(rangeStart); wd.setDate(wd.getDate()+d);
+      const wom=Math.ceil(wd.getDate()/7);
+      weekLabels.push({pct:d/totalDays*100, label:`${wd.getMonth()+1}月W${wom}`});
+    }
+  }
   const overlayHtml=gridLines.map(pct=>`<div class="ganttgrid" style="left:${pct}%;"></div>`).join('')
     + (todayPct!==null?`<div class="ganttToday" style="left:${todayPct}%;"></div>`:'');
   const pct=(iso)=>{ const d=new Date(iso+"T00:00:00"); const c=d<rangeStart?rangeStart:(d>rangeEnd?rangeEnd:d); return (c-rangeStart)/totalMs*100; };
@@ -744,7 +754,12 @@ function ganttHtml(p){
   }).join('');
   const undatedHtml=undated.length?`<div class="small" style="margin-top:6px;">尚未標日期：${undated.map(r=>r.label).join('、')}（在下面任務清單填開始/截止日就會出現在圖上）</div>`:'';
   const outOfRangeHtml=outOfRange.length?`<div class="small" style="margin-top:6px;color:var(--warn);">⚠ 以下任務超出專案起訖範圍（${shortDate(proj.start)}–${shortDate(proj.end)}），圖上會裁切在邊界，建議修改任務日期或調整專案起訖日：${outOfRange.map(r=>`${r.label}（${shortDate(r.start)===shortDate(r.end)?shortDate(r.start):shortDate(r.start)+'–'+shortDate(r.end)}）`).join('、')}</div>`:'';
+  const weekHeaderHtml=`<div class="ganttrow ganttweekrow">
+    <div class="ganttlabel"></div>
+    <div class="ganttbararea">${weekLabels.map(w=>`<span class="ganttweeklabel" style="left:${w.pct}%;">${w.label}</span>`).join('')}</div>
+  </div>`;
   const body=`<div class="ganttaxis"><span>${shortDate(proj.start)}</span><span>${shortDate(proj.end)}</span></div>
+       ${weekHeaderHtml}
        <div class="ganttbody">${barsHtml}</div>`;
   return `<div class="gantt">${body}${undatedHtml}${outOfRangeHtml}</div>`;
 }
