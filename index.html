@@ -23,7 +23,9 @@ h1{font-size:1.3rem;margin:0 0 4px;}
 .sub{color:var(--sub);font-size:.82rem;margin-bottom:10px;}
 .whoami{font-size:.78rem;color:var(--sub);margin-bottom:10px;}
 .whoami select{font-size:.78rem;padding:3px 6px;}
-.stats{display:flex;gap:10px;flex-wrap:wrap;margin:12px 0;}
+.statgroup{margin-bottom:8px;}
+.statgrouplabel{font-size:.72rem;color:var(--sub);text-transform:uppercase;letter-spacing:.03em;margin:0 0 4px;}
+.stats{display:flex;gap:10px;flex-wrap:wrap;margin:0 0 4px;}
 .stat{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 14px;min-width:110px;}
 .stat b{display:block;font-size:1.05rem;}
 .stat span{color:var(--sub);font-size:.7rem;}
@@ -136,39 +138,39 @@ select,input[type=number],input[type=text],input[type=date],input[type=url]{back
 </main>
 <script>
 const PROJECTS=[
-{id:"retail-douliu",cat:"2C零售",name:"斗六店舖",rev:280000,months:[9, 10, 11, 12]},
-{id:"retail-taipei",cat:"2C零售",name:"台北大安設攤",rev:100000,months:[9, 10, 11, 12]},
-{id:"retail-web",cat:"2C零售",name:"網站",rev:600000,months:[9, 10, 11, 12]},
-{id:"retail-market",cat:"2C零售",name:"巿集收入",rev:32000,months:[9, 10, 11, 12]},
-{id:"retail-event",cat:"2C零售",name:"活動收入",rev:40000,months:[9, 10, 11, 12]},
-{id:"haotian-baocheng2",cat:"好田",name:"保誠好田-第二期款",rev:228571,months:[10]},
-{id:"haotian-guandong",cat:"好田",name:"關東鑫林",rev:529000,months:[12]},
-{id:"haotian-zhixiao",cat:"好田",name:"直銷協會",rev:300000,months:[12]},
-{id:"haotian-jianxing",cat:"好田",name:"建興儲存科技",rev:105000,months:[9, 11]},
-{id:"biz-jti-zoudu",cat:"企業",name:"JTI-走讀 第二三期",rev:220982,months:[10]},
-{id:"biz-jti-gongyi",cat:"企業",name:"JTI-公益支持 第二期",rev:900000,months:[12]},
-{id:"biz-kaiji-shewa",cat:"企業",name:"凱基諸羅樹蛙調研",rev:380952,months:[10, 12]},
-{id:"biz-kaiji-bank",cat:"企業",name:"凱基銀行-志工活動",rev:65714,months:[9]},
-{id:"biz-kaiji-sec",cat:"企業",name:"凱基證券-志工活動",rev:49643,months:[9]},
-{id:"biz-wabei",cat:"企業",name:"挖貝集資-食通信好田良伴",rev:1061356,months:[10, 12]},
-{id:"biz-ruihe-orchard",cat:"企業",name:"睿禾林果園",rev:81900,months:[9]},
-{id:"gov-chunhe",cat:"政府",name:"經濟部 春禾-專案服務費",rev:843000,months:[9, 11]},
-{id:"gov-sbir",cat:"政府",name:"經濟部 SBIR",rev:226821,months:[9, 10]},
-{id:"gov-qingnian",cat:"政府",name:"青年署-青聚點",rev:288000,months:[10]},
-{id:"gov-qingpei-fixed",cat:"政府",name:"國發會-青培站(固定費用)",rev:640000,months:[9, 10, 11, 12]},
-{id:"gov-qingpei-event",cat:"政府",name:"國發會-青培站(活動執行費)",rev:600000,months:[9, 10, 11, 12]},
-{id:"gov-edu-intern",cat:"政府",name:"教育部見習",rev:61800,months:[9]},
-{id:"inter-goodneighbor",cat:"中介",name:"好鄰居",rev:47619,months:[12]},
-{id:"inter-chuangsheng",cat:"中介",name:"創生中區-台灣鯛王總",rev:476190,months:[12]},
-{id:"inter-huashan",cat:"中介",name:"華山共伴",rev:190476,months:[10]},
-{id:"gift-baocheng",cat:"禮盒",name:"保誠人壽",rev:80000,months:[10]},
-{id:"gift-ruihe-fashuo",cat:"禮盒",name:"睿禾-法說會",rev:40000,months:[9]},
-{id:"gift-guotai1",cat:"禮盒",name:"國泰(1)",rev:40000,months:[10]},
-{id:"gift-guotai2",cat:"禮盒",name:"國泰(2)",rev:45000,months:[10]},
-{id:"gift-ruihe-midautumn",cat:"禮盒",name:"睿禾-中秋禮盒",rev:74000,months:[9]},
-{id:"gift-chunhe-watt",cat:"禮盒",name:"春禾.瓦特-中秋禮盒",rev:10000,months:[10]},
-{id:"gift-jianxing-oil",cat:"禮盒",name:"建興儲存科技-苦茶油禮盒",rev:306000,months:[12]},
-{id:"outsource-xiliang",cat:"委外",name:"喜亮太陽能",rev:170000,months:[9, 10, 11, 12]}
+{id:"retail-douliu",cat:"2C零售",name:"斗六店舖",rev:280000,plan:[70000, 70000, 70000, 70000]},
+{id:"retail-taipei",cat:"2C零售",name:"台北大安設攤",rev:100000,plan:[25000, 25000, 25000, 25000]},
+{id:"retail-web",cat:"2C零售",name:"網站",rev:600000,plan:[150000, 150000, 150000, 150000]},
+{id:"retail-market",cat:"2C零售",name:"巿集收入",rev:32000,plan:[8000, 8000, 8000, 8000]},
+{id:"retail-event",cat:"2C零售",name:"活動收入",rev:40000,plan:[10000, 10000, 10000, 10000]},
+{id:"haotian-baocheng2",cat:"好田",name:"保誠好田-第二期款",rev:228571,plan:[0, 228571, 0, 0]},
+{id:"haotian-guandong",cat:"好田",name:"關東鑫林",rev:529000,plan:[0, 0, 0, 529000]},
+{id:"haotian-zhixiao",cat:"好田",name:"直銷協會",rev:300000,plan:[0, 0, 0, 300000]},
+{id:"haotian-jianxing",cat:"好田",name:"建興儲存科技",rev:105000,plan:[30000, 0, 75000, 0]},
+{id:"biz-jti-zoudu",cat:"企業",name:"JTI-走讀 第二三期",rev:220982,plan:[0, 220982, 0, 0]},
+{id:"biz-jti-gongyi",cat:"企業",name:"JTI-公益支持 第二期",rev:900000,plan:[0, 0, 0, 900000]},
+{id:"biz-kaiji-shewa",cat:"企業",name:"凱基諸羅樹蛙調研",rev:380952,plan:[0, 100000, 0, 280952]},
+{id:"biz-kaiji-bank",cat:"企業",name:"凱基銀行-志工活動",rev:65714,plan:[65714, 0, 0, 0]},
+{id:"biz-kaiji-sec",cat:"企業",name:"凱基證券-志工活動",rev:49643,plan:[49643, 0, 0, 0]},
+{id:"biz-wabei",cat:"企業",name:"挖貝集資-食通信好田良伴",rev:1061356,plan:[0, 768234, 0, 293122]},
+{id:"biz-ruihe-orchard",cat:"企業",name:"睿禾林果園",rev:81900,plan:[81900, 0, 0, 0]},
+{id:"gov-chunhe",cat:"政府",name:"經濟部 春禾-專案服務費",rev:843000,plan:[508624, 0, 334376, 0]},
+{id:"gov-sbir",cat:"政府",name:"經濟部 SBIR",rev:226821,plan:[151214, 75607, 0, 0]},
+{id:"gov-qingnian",cat:"政府",name:"青年署-青聚點",rev:288000,plan:[0, 288000, 0, 0]},
+{id:"gov-qingpei-fixed",cat:"政府",name:"國發會-青培站(固定費用)",rev:640000,plan:[160000, 160000, 160000, 160000]},
+{id:"gov-qingpei-event",cat:"政府",name:"國發會-青培站(活動執行費)",rev:600000,plan:[150000, 150000, 150000, 150000]},
+{id:"gov-edu-intern",cat:"政府",name:"教育部見習",rev:61800,plan:[61800, 0, 0, 0]},
+{id:"inter-goodneighbor",cat:"中介",name:"好鄰居",rev:47619,plan:[0, 0, 0, 47619]},
+{id:"inter-chuangsheng",cat:"中介",name:"創生中區-台灣鯛王總",rev:476190,plan:[0, 0, 0, 476190]},
+{id:"inter-huashan",cat:"中介",name:"華山共伴",rev:190476,plan:[0, 190476, 0, 0]},
+{id:"gift-baocheng",cat:"禮盒",name:"保誠人壽",rev:80000,plan:[0, 80000, 0, 0]},
+{id:"gift-ruihe-fashuo",cat:"禮盒",name:"睿禾-法說會",rev:40000,plan:[40000, 0, 0, 0]},
+{id:"gift-guotai1",cat:"禮盒",name:"國泰(1)",rev:40000,plan:[0, 40000, 0, 0]},
+{id:"gift-guotai2",cat:"禮盒",name:"國泰(2)",rev:45000,plan:[0, 45000, 0, 0]},
+{id:"gift-ruihe-midautumn",cat:"禮盒",name:"睿禾-中秋禮盒",rev:74000,plan:[74000, 0, 0, 0]},
+{id:"gift-chunhe-watt",cat:"禮盒",name:"春禾.瓦特-中秋禮盒",rev:10000,plan:[0, 10000, 0, 0]},
+{id:"gift-jianxing-oil",cat:"禮盒",name:"建興儲存科技-苦茶油禮盒",rev:306000,plan:[0, 0, 0, 306000]},
+{id:"outsource-xiliang",cat:"委外",name:"喜亮太陽能",rev:170000,plan:[25000, 65000, 40000, 40000]}
 ];
 const TEAM_STAFF=["宜倩","嘉妤","思敏","潔如","緯襦","宜玟","芳寧","雅芬"];
 const TEAM_PARTNER=["Jessica","鈺淳","紫倢","Mio"];
@@ -217,8 +219,17 @@ function isNonOp(p){ return p.cat==="政府"; }
 function selStyle(n){ if(!n) return ''; return isStaff(n)?'background:#dfe9df;':'background:#f4e3c9;'; }
 function getEstRev(p){ const r=getRow(p.id); return r.estOverride!==null ? r.estOverride : p.rev; }
 function getName(p){ const r=getRow(p.id); return (r.nameOverride!==null && r.nameOverride!=='') ? r.nameOverride : p.name; }
+function planScaled(p){
+  if(!p.plan) return null;
+  const ratio=p.rev>0 ? getEstRev(p)/p.rev : 1;
+  return p.plan.map(v=>v*ratio);
+}
+function activeMonths(p){
+  if(p.plan){ const ms=[9,10,11,12].filter((m,i)=>p.plan[i]>0); return ms.length?ms:[9]; }
+  return [9];
+}
 function defaultRange(p){
-  const months=p.months||[9]; const sm=Math.min(...months), em=Math.max(...months);
+  const months=activeMonths(p); const sm=Math.min(...months), em=Math.max(...months);
   return {start:`${REF_YEAR}-${pad(sm)}-01`, end:`${REF_YEAR}-${pad(em)}-${pad(lastDay(REF_YEAR,em))}`};
 }
 function getRange(p){
@@ -329,9 +340,12 @@ function renderPriority(){
     .sort((a,b)=>URG_RANK[urgency(a)]-URG_RANK[urgency(b)] || getEstRev(b)-getEstRev(a));
   const box=document.getElementById("priority");
   if(!list.length){ box.innerHTML=`<div class="priority ok"><h3>✓ 目前沒有已逾期或7天內到期、還未完成的案子</h3></div>`; return; }
-  box.innerHTML=`<div class="priority"><h3>現在最該處理（已逾期／7天內到期，尚未完成）</h3>
-    ${list.map(p=>{const r=getRow(p.id);return `<div class="row"><span>${getName(p)}（${p.cat}・${r.assignee||"未指派"}・迄 ${shortDate(getRange(p).end)}）</span><span class="badge ${urgency(p)}">${URG_LABEL[urgency(p)]}</span></div>`;}).join("")}
-  </div>`;
+  const groups=STATUSES.filter(s=>s!=="已完成").map(s=>({status:s, items:list.filter(p=>getRow(p.id).status===s)})).filter(g=>g.items.length);
+  const groupHtml=groups.map(g=>`
+    <div class="small" style="margin:10px 0 2px;">${g.status}（${g.items.length}）</div>
+    ${g.items.map(p=>{const r=getRow(p.id);return `<div class="row"><span>${getName(p)}（${p.cat}・${r.assignee||"未指派"}・迄 ${shortDate(getRange(p).end)}）</span><span class="badge ${urgency(p)}">${URG_LABEL[urgency(p)]}</span></div>`;}).join("")}
+  `).join("");
+  box.innerHTML=`<div class="priority"><h3>現在最該處理（已逾期／7天內到期，尚未完成）</h3>${groupHtml}</div>`;
 }
 
 function monthOptsQ(sel){ let s='<option value="">未填</option>'; [9,10,11,12].forEach(m=>{ s+=`<option value="${m}" ${sel===m?'selected':''}>${m}月</option>`; }); return s; }
@@ -340,20 +354,27 @@ function renderMonthlyChart(){
   if(view!=="project"){ box.innerHTML=""; return; }
   const confirmed={9:0,10:0,11:0,12:0}, estimated={9:0,10:0,11:0,12:0};
   ALLP.forEach(p=>{
+    const receipts=getReceipts(p.id);
     const fm=Number(getRange(p).end.split('-')[1]);
-    const list=getReceipts(p.id);
-    let confirmedTotal=0;
-    list.forEach(rc=>{
+    const confirmedMonths=new Set();
+    receipts.forEach(rc=>{
       const amt=Number(rc.amount||0);
-      if(rc.month && confirmed[rc.month]!==undefined){ confirmed[rc.month]+=amt; confirmedTotal+=amt; }
-      else { if(estimated[fm]!==undefined) estimated[fm]+=amt; confirmedTotal+=amt; }
+      const m=(rc.month && confirmed[rc.month]!==undefined) ? rc.month : fm;
+      confirmed[m]+=amt;
+      confirmedMonths.add(m);
     });
-    const remaining=getEstRev(p)-confirmedTotal;
-    if(remaining>0 && estimated[fm]!==undefined) estimated[fm]+=remaining;
+    const plan=planScaled(p);
+    if(plan){
+      [9,10,11,12].forEach((m,i)=>{
+        if(!confirmedMonths.has(m)) estimated[m]+=plan[i];
+      });
+    } else if(!confirmedMonths.has(fm)){
+      estimated[fm]+=getEstRev(p);
+    }
   });
   const totals={}; [9,10,11,12].forEach(m=>totals[m]=confirmed[m]+estimated[m]);
   const max=Math.max(...Object.values(totals),1);
-  box.innerHTML=`<div class="priority plain"><h3>月營收分布（已依發票確認 / 估算）</h3>
+  box.innerHTML=`<div class="priority plain"><h3>月營收分布（原訂認列月份 + 已依發票確認）</h3>
     <div class="chartbars">
       ${[9,10,11,12].map(m=>{
         const totalH=Math.max(4,Math.round(totals[m]/max*70));
@@ -369,7 +390,7 @@ function renderMonthlyChart(){
         </div>`;
       }).join('')}
     </div>
-    <div class="small" style="margin-top:6px;">深色＝已在「實際收款」填發票月份，確定認列；淺色＝尚未開發票，暫依截止日估算月份。</div>
+    <div class="small" style="margin-top:6px;">淺色＝依原始預算表安排、還沒開發票的月份估算；深色＝那個月已在「實際收款」登錄發票，用實收金額取代原本的估算（不會重複累加）。新增專案沒有原始月份規劃，暫依截止日估算。</div>
   </div>`;
 }
 
@@ -387,15 +408,30 @@ function renderStats(){
     if(r.cost!==null && r.cost!==""){costSum+=Number(r.cost); costCount++;}
   });
   document.getElementById("stats").innerHTML=`
-    <div class="stat"><b>${ALLP.length}</b><span>專案總數</span></div>
-    <div class="stat"><b>${fmt(coreRev+nonOpRev)}</b><span>Q4 預估營收合計</span><span class="small">核心 ${fmt(coreRev)}／政府補助 ${fmt(nonOpRev)}</span></div>
-    <div class="stat"><b>${fmt(actualSum)}</b><span>實際收款合計（${actualCount}／${ALLP.length}筆已登錄）</span></div>
-    <div class="stat"><b style="color:${costSum>(coreRev+nonOpRev)?'var(--warn)':'var(--ink)'}">${fmt(costSum)}</b><span>累積成本合計（${costCount}／${ALLP.length}筆已登錄）</span></div>
-    <div class="stat"><b style="color:${(coreRev+nonOpRev-costSum)<0?'var(--warn)':'var(--ok)'}">${fmt(coreRev+nonOpRev-costSum)}</b><span>專案毛利合計（營收－成本，自動算）</span></div>
-    <div class="stat"><b>${doing}</b><span>進行中</span></div>
-    <div class="stat"><b>${done}</b><span>已完成</span></div>
-    <div class="stat"><b style="color:${unassigned?'var(--warn)':'var(--ok)'}">${unassigned}</b><span>尚未指派負責人</span></div>
-    <div class="stat"><b>${pct}%</b><span>全公司任務完成率</span></div>`;
+    <div class="statgroup">
+      <div class="statgrouplabel">財務</div>
+      <div class="stats">
+        <div class="stat"><b>${fmt(coreRev+nonOpRev)}</b><span>Q4 預估營收合計</span><span class="small">核心 ${fmt(coreRev)}／政府補助 ${fmt(nonOpRev)}</span></div>
+        <div class="stat"><b>${fmt(actualSum)}</b><span>實際收款合計（${actualCount}／${ALLP.length}筆已登錄）</span></div>
+        <div class="stat"><b style="color:${costSum>(coreRev+nonOpRev)?'var(--warn)':'var(--ink)'}">${fmt(costSum)}</b><span>累積成本合計（${costCount}／${ALLP.length}筆已登錄）</span></div>
+        <div class="stat"><b style="color:${(coreRev+nonOpRev-costSum)<0?'var(--warn)':'var(--ok)'}">${fmt(coreRev+nonOpRev-costSum)}</b><span>專案毛利合計（營收－成本，自動算）</span></div>
+      </div>
+    </div>
+    <div class="statgroup">
+      <div class="statgrouplabel">專案狀態</div>
+      <div class="stats">
+        <div class="stat"><b>${ALLP.length}</b><span>專案總數</span></div>
+        <div class="stat"><b>${doing}</b><span>進行中</span></div>
+        <div class="stat"><b>${done}</b><span>已完成</span></div>
+        <div class="stat"><b style="color:${unassigned?'var(--warn)':'var(--ok)'}">${unassigned}</b><span>尚未指派負責人</span></div>
+      </div>
+    </div>
+    <div class="statgroup">
+      <div class="statgrouplabel">執行進度</div>
+      <div class="stats">
+        <div class="stat"><b>${pct}%</b><span>全公司任務完成率</span></div>
+      </div>
+    </div>`;
 }
 
 function renderFilters(){
@@ -541,7 +577,7 @@ function renderProjectView(){
       <td class="rev">${fmt(getEstRev(p))}${isNonOp(p)?'<br><span class="small">營收外收入</span>':''}</td>
       <td class="rev">${totalActual(p)?fmt(totalActual(p)):(getReceipts(p.id).length?fmt(0):'—')}${diffLabel(p)}${getReceipts(p.id).length>1?`<span class="small">共${getReceipts(p.id).length}期</span>`:''}</td>
       <td class="rev">${r.cost===null||r.cost===""?'—':fmt(Number(r.cost))}${costNote(p)}</td>
-      <td class="rev"><b style="color:${marginOf(p)<0?'var(--warn)':'var(--ok)'}">${fmt(marginOf(p))}</b>${r.cost===null?'<span class="small">成本未登錄，暫以0計算</span>':''}</td>
+      <td class="rev"><b style="color:${marginOf(p)<0?'var(--warn)':'var(--ok)'}">${fmt(marginOf(p))}</b></td>
       <td>${shortDate(range.start)}–${shortDate(range.end)}<br><span class="badge ${urg}">${URG_LABEL[urg]}</span></td>
       <td><div class="progwrap"><div class="bar"><i style="width:${pct}%"></i></div><span class="progtxt">${tp.done}/${tp.total}</span></div></td>
       <td><select class="status-${r.status}" onchange="setField('${p.id}','status',this.value)">${opts}</select></td>
@@ -555,9 +591,27 @@ function renderProjectView(){
     <tbody>${rows}</tbody></table></div>`;
 }
 
+function personInvolved(t){
+  const ids=new Set();
+  ALLP.forEach(p=>{ const r=getRow(p.id); if(r.assignee===t||r.collaborators.includes(t)) ids.add(p.id); });
+  return [...ids].map(getProject);
+}
+function personTop(t){
+  const unfinished=personInvolved(t).filter(p=>getRow(p.id).status!=="已完成");
+  if(!unfinished.length) return null;
+  unfinished.sort((a,b)=>URG_RANK[urgency(a)]-URG_RANK[urgency(b)] || new Date(getRange(a).end)-new Date(getRange(b).end));
+  return unfinished[0];
+}
+function projRowHtml(p,label){
+  const tp=taskProgress(p);
+  const pct=tp.total?Math.round(tp.done/tp.total*100):0;
+  return `<div class="row"><span>${getName(p)}（${p.cat}）${label?`・${label}`:''}</span><span><span class="badge ${urgency(p)}">${URG_LABEL[urgency(p)]}</span> ${getRow(p.id).status}・${tp.done}/${tp.total}（${pct}%）</span></div>`;
+}
 function personDetailHtml(t){
-  const owned=ALLP.filter(p=>getRow(p.id).assignee===t);
-  const collab=ALLP.filter(p=>getRow(p.id).collaborators.includes(t) && getRow(p.id).assignee!==t);
+  const owned=ALLP.filter(p=>getRow(p.id).assignee===t)
+    .sort((a,b)=>URG_RANK[urgency(a)]-URG_RANK[urgency(b)] || new Date(getRange(a).end)-new Date(getRange(b).end));
+  const collab=ALLP.filter(p=>getRow(p.id).collaborators.includes(t) && getRow(p.id).assignee!==t)
+    .sort((a,b)=>URG_RANK[urgency(a)]-URG_RANK[urgency(b)] || new Date(getRange(a).end)-new Date(getRange(b).end));
   let myTasks=[];
   ALLP.forEach(p=>{
     taskList(p).forEach((tn,idx)=>{
@@ -566,17 +620,17 @@ function personDetailHtml(t){
       else { const info=taskInfo(p,tn); if(info.assignee===t) myTasks.push({p,idx,si:null,name:tn,done:info.done}); }
     });
   });
-  const ownedHtml=owned.map(p=>{const tp=taskProgress(p);return `<div class="row"><span>${getName(p)}（${p.cat}）</span><span>${getRow(p.id).status}・${tp.done}/${tp.total}</span></div>`;}).join("")||'<div class="row"><span>（無）</span></div>';
-  const collabHtml=collab.map(p=>`<div class="row"><span>${getName(p)}（協作）</span><span>${getRow(p.id).status}</span></div>`).join("")||'<div class="row"><span>（無）</span></div>';
+  const ownedHtml=owned.map(p=>projRowHtml(p)).join("")||'<div class="row"><span>（無）</span></div>';
+  const collabHtml=collab.map(p=>projRowHtml(p)).join("")||'<div class="row"><span>（無）</span></div>';
   const taskHtml=myTasks.map(x=>{
     const cb=x.si===null
       ? `<input type="checkbox" ${x.done?'checked':''} onchange="toggleTask('${x.p.id}',${x.idx},this.checked)">`
       : `<input type="checkbox" ${x.done?'checked':''} onchange="toggleSubtask('${x.p.id}',${x.idx},${x.si},this.checked)">`;
-    return `<div class="trow">${cb}<span>${getName(x.p)} — ${x.name}</span></div>`;
+    return `<div class="trow">${cb}<span>${getName(x.p)} — ${x.name}</span><span class="badge ${urgency(x.p)}" style="margin-left:auto;">${URG_LABEL[urgency(x.p)]}</span></div>`;
   }).join("")||'<div class="trow"><span>（目前沒有指派給你的任務項目）</span></div>';
   return `<div class="priority plain" style="margin-top:6px;">
-    <div class="small" style="margin:2px 0;">負責的專案</div>${ownedHtml}
-    <div class="small" style="margin:10px 0 2px;">協作的專案</div>${collabHtml}
+    <div class="small" style="margin:2px 0;">負責的專案（依急迫度排序）</div>${ownedHtml}
+    <div class="small" style="margin:10px 0 2px;">協作的專案（依急迫度排序）</div>${collabHtml}
     <div class="small" style="margin:10px 0 2px;">指派給我的任務項目</div>${taskHtml}
   </div>`;
 }
@@ -592,11 +646,16 @@ function personCard(t){
     if(subs.length){ taskCount+=subs.filter(s=>s.assignee===t).length; }
     else if(taskInfo(p,tn).assignee===t){ taskCount++; }
   }));
+  const top=personTop(t);
+  const topHtml=top
+    ? `<div class="small" style="margin-top:5px;">🔺最優先：${getName(top)} <span class="badge ${urgency(top)}">${URG_LABEL[urgency(top)]}</span></div>`
+    : `<div class="small" style="margin-top:5px;color:var(--ok);">✓ 目前沒有急件</div>`;
   const open=expandedPerson.has(t);
   return `<div class="pcard ${group}" onclick="togglePerson('${t}')" style="cursor:pointer;">
-      <b>${t}</b><span>負責 ${activeOwned.length}/${owned.length} 案・協作 ${collabOn.length} 案・${taskCount} 項任務</span>
+      <b>${t}</b><span>負責 ${activeOwned.length}/${owned.length} 案・協作 ${collabOn.length} 案・${taskCount} 項任務</span>${topHtml}
     </div>${open?personDetailHtml(t):''}`;
 }
+
 
 function renderPersonView(){
   const legend=`<div style="display:flex;gap:10px;margin:6px 0 4px;"><span class="tag-staff">■ 三小正式員工</span><span class="tag-partner">■ 委外合作夥伴/見習生</span></div>`;
