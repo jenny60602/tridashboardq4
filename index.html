@@ -91,6 +91,7 @@ select,input[type=number],input[type=text],input[type=date],input[type=url]{back
 .ganttbody{position:relative;}
 .ganttrow{display:flex;align-items:center;gap:8px;padding:3px 0;border-bottom:1px dashed var(--line);font-size:.74rem;}
 .ganttlabel{width:150px;flex-shrink:0;}
+.ganttgrouphead{font-size:.72rem;color:var(--sub);font-weight:600;margin-top:6px;}
 .ganttbararea{flex:1;position:relative;height:16px;background:var(--card);border-radius:3px;}
 .ganttgrid{position:absolute;top:0;bottom:0;width:1px;background:var(--line);}
 .ganttdate{position:absolute;top:0;font-size:.66rem;color:var(--sub);white-space:nowrap;line-height:16px;}
@@ -608,27 +609,38 @@ function ganttRows(p){
   taskList(p).forEach((t)=>{
     const subs=materializedSubs(p.id,t);
     if(subs.length){
-      subs.forEach(s=>{ rows.push({label:t+'／'+s.name, start:s.start, end:s.end, assignee:s.assignee, done:s.done}); });
+      subs.forEach(s=>{ rows.push({group:t, label:s.name, start:s.start, end:s.end, assignee:s.assignee, done:s.done}); });
     } else {
       const info=taskInfo(p,t);
-      rows.push({label:t, start:info.start, end:info.end, assignee:info.assignee, done:info.done});
+      rows.push({group:null, label:t, start:info.start, end:info.end, assignee:info.assignee, done:info.done});
     }
   });
   return rows;
 }
 function ganttHtml(p){
-  const range=getRange(p);
-  const rangeStart=new Date(range.start+"T00:00:00"), rangeEnd=new Date(range.end+"T00:00:00");
-  const totalMs=(rangeEnd-rangeStart)||1;
-  const totalDays=Math.max(1,Math.round(totalMs/86400000));
   const rows=ganttRows(p);
-  const today=new Date(); today.setHours(0,0,0,0);
-  const todayPct=(today>=rangeStart && today<=rangeEnd) ? ((today-rangeStart)/totalMs*100) : null;
   const dated=rows.filter(r=>r.start&&r.end);
   const undated=rows.filter(r=>!r.start||!r.end);
+  if(!dated.length){
+    const undatedHtml0=undated.length?`<div class="small" style="margin-top:6px;">尚未標日期：${undated.map(r=>r.label).join('、')}（在下面任務清單填開始/截止日就會出現在圖上）</div>`:'';
+    return `<div class="gantt"><div class="small">目前沒有任何任務標了開始/截止日，先在下面任務清單裡加就會自動畫出來。</div>${undatedHtml0}</div>`;
+  }
+  const today=new Date(); today.setHours(0,0,0,0);
+  const todayISOStr=`${today.getFullYear()}-${pad(today.getMonth()+1)}-${pad(today.getDate())}`;
+  let minStr=dated[0].start, maxStr=dated[0].end;
+  dated.forEach(r=>{ if(r.start<minStr) minStr=r.start; if(r.end>maxStr) maxStr=r.end; });
+  if(todayISOStr<minStr) minStr=todayISOStr;
+  if(todayISOStr>maxStr) maxStr=todayISOStr;
+  const rangeStart=new Date(minStr+"T00:00:00"); rangeStart.setDate(rangeStart.getDate()-2);
+  const rangeEnd=new Date(maxStr+"T00:00:00"); rangeEnd.setDate(rangeEnd.getDate()+2);
+  const totalMs=(rangeEnd-rangeStart)||1;
+  const totalDays=Math.max(1,Math.round(totalMs/86400000));
+  const todayPct=(today>=rangeStart && today<=rangeEnd) ? ((today-rangeStart)/totalMs*100) : null;
   // weekly gridlines from range start
   const gridLines=[]; for(let d=0; d<=totalDays; d+=7){ gridLines.push(d/totalDays*100); }
-  const gridHtml=gridLines.map(pct=>`<div class="ganttgrid" style="left:${pct}%;"></div>`).join('');
+  const overlayHtml=gridLines.map(pct=>`<div class="ganttgrid" style="left:${pct}%;"></div>`).join('')
+    + (todayPct!==null?`<div class="ganttToday" style="left:${todayPct}%;"></div>`:'');
+  let lastGroup=undefined;
   const barsHtml=dated.map(r=>{
     const s=new Date(r.start+"T00:00:00"), e=new Date(r.end+"T00:00:00");
     const cs=s<rangeStart?rangeStart:s, ce=e>rangeEnd?rangeEnd:e;
@@ -636,23 +648,27 @@ function ganttHtml(p){
     const widthPct=Math.max(4,(ce-cs)/totalMs*100);
     const cls=r.assignee?(isStaff(r.assignee)?'ganttbar-staff':'ganttbar-partner'):'ganttbar-none';
     const dateLabel=r.start===r.end?shortDate(r.start):`${shortDate(r.start)}–${shortDate(r.end)}`;
-    return `<div class="ganttrow">
-      <div class="ganttlabel">${r.label}${r.assignee?` <span class="small">・${r.assignee}</span>`:''}</div>
-      <div class="ganttbararea">${gridHtml}<div class="ganttbar ${cls} ${r.done?'ganttbar-done':''}" style="left:${leftPct}%;width:${widthPct}%;" title="${dateLabel}${r.done?'（已完成）':''}"></div><span class="ganttdate" style="left:calc(${leftPct}% + ${widthPct}% + 4px);">${dateLabel}</span></div>
+    let groupHeader='';
+    if(r.group!==lastGroup){
+      lastGroup=r.group;
+      if(r.group) groupHeader=`<div class="ganttgrouphead">${r.group}</div>`;
+    }
+    const labelText = r.group ? `　└ ${r.label}` : r.label;
+    return `${groupHeader}<div class="ganttrow">
+      <div class="ganttlabel">${labelText}${r.assignee?` <span class="small">・${r.assignee}</span>`:''}</div>
+      <div class="ganttbararea">${overlayHtml}<div class="ganttbar ${cls} ${r.done?'ganttbar-done':''}" style="left:${leftPct}%;width:${widthPct}%;" title="${dateLabel}${r.done?'（已完成）':''}"></div><span class="ganttdate" style="left:calc(${leftPct}% + ${widthPct}% + 4px);">${dateLabel}</span></div>
     </div>`;
   }).join('');
   const undatedHtml=undated.length?`<div class="small" style="margin-top:6px;">尚未標日期：${undated.map(r=>r.label).join('、')}（在下面任務清單填開始/截止日就會出現在圖上）</div>`:'';
-  const body=dated.length
-    ? `<div class="ganttaxis"><span>${shortDate(range.start)}</span><span>${shortDate(range.end)}</span></div>
-       <div class="ganttbody">${todayPct!==null?`<div class="ganttToday" style="left:${todayPct}%;"></div>`:''}${barsHtml}</div>`
-    : `<div class="small">目前沒有任何任務標了開始/截止日，先在下面任務清單裡加就會自動畫出來。</div>`;
+  const body=`<div class="ganttaxis"><span>${shortDate(minStr)}</span><span>${shortDate(maxStr)}</span></div>
+       <div class="ganttbody">${barsHtml}</div>`;
   return `<div class="gantt">${body}${undatedHtml}</div>`;
 }
 
 function detailRow(p){
   const r=getRow(p.id);
   const range=getRange(p);
-  const collabHtml=TEAM.map(x=>`<label><input type="checkbox" ${r.collaborators.includes(x)?'checked':''} onchange="toggleCollab('${p.id}','${x}',this.checked)"><span class="${isStaff(x)?'tag-staff':'tag-partner'}">${x}</span></label>`).join("");
+  const collabHtml=TEAM.filter(x=>x!==r.assignee).map(x=>`<label><input type="checkbox" ${r.collaborators.includes(x)?'checked':''} onchange="toggleCollab('${p.id}','${x}',this.checked)"><span class="${isStaff(x)?'tag-staff':'tag-partner'}">${x}</span></label>`).join("");
   const items=taskList(p).map((t,idx)=>taskItemHtml(p,idx)).join("");
   const tab=getDetailTab(p.id);
   const tabBtn=(key,label)=>`<button class="dtab ${tab===key?'active':''}" onclick="setDetailTab('${p.id}','${key}')">${label}</button>`;
