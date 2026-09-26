@@ -533,6 +533,8 @@ function paginatedBody(key,itemsHtml,emptyMsg){
   return shown+btn;
 }
 function lagInfo(p){
+  const r=getRow(p.id);
+  if(r.status==="已完成") return {overdue:false, lag:0, done:true};
   const range=getRange(p);
   const start=new Date(range.start+"T00:00:00"), end=new Date(range.end+"T23:59:59");
   const now=new Date();
@@ -545,10 +547,13 @@ function lagInfo(p){
     const tp=taskProgress(p); const taskRatio=tp.total?tp.done/tp.total:0;
     lag=timeRatio-taskRatio;
   }
-  return {overdue, lag};
+  return {overdue, lag, done:false};
 }
 function lagBadge(li){
-  return li.overdue ? `<span class="badge overdue">已逾期</span>` : `<span class="badge soon7">進度落後${Math.round(li.lag*100)}%</span>`;
+  if(li.done) return `<span class="badge later">已完成</span>`;
+  if(li.overdue) return `<span class="badge overdue">已逾期</span>`;
+  if(li.lag>=0.2) return `<span class="badge soon7">進度落後${Math.round(li.lag*100)}%</span>`;
+  return `<span class="badge later">進度正常</span>`;
 }
 function paginatedBody(key, itemsHtml, emptyMsg){
   const total=itemsHtml.length;
@@ -1032,7 +1037,7 @@ function renderProjectView(){
       <td class="rev">${totalActual(p)?fmt(totalActual(p)):(getReceipts(p.id).length?fmt(0):'—')}${diffLabel(p)}${getReceipts(p.id).length>1?`<span class="small">共${getReceipts(p.id).length}期</span>`:''}</td>
       <td class="rev">${r.cost===null||r.cost===""?'—':fmt(Number(r.cost))}${costNote(p)}</td>
       <td class="rev"><b style="color:${marginOf(p)<0?'var(--warn)':'var(--ok)'}">${fmt(marginOf(p))}</b></td>
-      <td>${shortDate(range.start)}–${shortDate(range.end)}<br><span class="badge ${urg}">${URG_LABEL[urg]}</span></td>
+      <td>${shortDate(range.start)}–${shortDate(range.end)}<br>${lagBadge(lagInfo(p))}</td>
       <td><div class="progwrap"><div class="bar"><i style="width:${pct}%"></i></div><span class="progtxt">${tp.done}/${tp.total}</span></div></td>
       <td><select class="status-${r.status}" onchange="setField('${p.id}','status',this.value)">${opts}</select></td>
       <td><select style="${selStyle(r.assignee)}" onchange="setField('${p.id}','assignee',this.value)">${personOpts(r.assignee)}</select></td>
