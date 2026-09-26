@@ -231,7 +231,7 @@ const ROLES={
 };
 const TEAM=TEAM_STAFF.concat(TEAM_PARTNER);
 const STATUSES=["未開始","進行中","待收款","已完成"];
-const BASE_TASKS=["提案內容撰寫","成本試算／報價底稿","報價/合約","訂金","執行/交付","結案報告","案例建置","宣傳曝光"];
+const BASE_TASKS=["提案內容撰寫","成本試算／報價底稿","報價/合約","款項","執行/交付","結案報告","案例建置","宣傳曝光"];
 const GOV_EXTRA=["期中/期末報告","經費核銷單據整理"];
 const REF_YEAR=2026;
 const URG_RANK={overdue:0,soon7:1,soon30:2,later:3};
@@ -1130,8 +1130,8 @@ window.syncPaymentSubtasks=async function(pid){
   if(method==='一次付清') names=['全額'];
   else if(method==='訂金+尾款') names=['訂金','尾款'];
   else { const n=Math.max(1,Number(cur.installmentCount)||2); for(let i=1;i<=n;i++) names.push(`第${i}期`); }
-  const target=findTaskDisplayByRaw(p,'訂金');
-  if(!target){ alert('找不到「訂金」這個任務（可能已被刪除或改名），請確認任務清單裡還有這一項。'); return; }
+  const target=findTaskDisplayByRaw(p,'款項');
+  if(!target){ alert('找不到「款項」這個任務（可能已被刪除或改名），請確認任務清單裡還有這一項。'); return; }
   if(!confirm(`將「${target}」底下的子項目換成：${names.join('、')}？\n（會覆蓋掉這個任務目前的子項目）`)) return;
   const newSubs=names.map(nm=>({name:nm,done:false,assignee:'',start:'',end:''}));
   const subtasks=Object.assign({},cur.subtasks,{[target]:newSubs});
