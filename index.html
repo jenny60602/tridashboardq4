@@ -517,18 +517,45 @@ function touch(pid){ const cur=state[pid]||{}; state[pid]=Object.assign({},cur,{
 let priorityTab='urgent', priorityExpandedTabs=new Set();
 window.setPriorityTab=function(k){ priorityTab=k; renderPriority(); };
 window.togglePriorityExpand=function(k){ priorityExpandedTabs.has(k)?priorityExpandedTabs.delete(k):priorityExpandedTabs.add(k); renderPriority(); };
+function lagInfo(p){
+  const range=getRange(p);
+  const start=new Date(range.start+"T00:00:00"), end=new Date(range.end+"T23:59:59");
+  const now=new Date();
+  const overdue = now>end;
+  const totalMs=end-start;
+  let lag=0;
+  if(totalMs>0){
+    const elapsed=Math.min(Math.max(now-start,0), totalMs);
+    const timeRatio=elapsed/totalMs;
+    const tp=taskProgress(p); const taskRatio=tp.total?tp.done/tp.total:0;
+    lag=timeRatio-taskRatio;
+  }
+  return {overdue, lag};
+}
+function lagBadge(li){
+  return li.overdue ? `<span class="badge overdue">已逾期</span>` : `<span class="badge soon7">進度落後${Math.round(li.lag*100)}%</span>`;
+}
 function renderPriority(){
   const box=document.getElementById("priority");
   if(view!=="project"){ box.innerHTML=""; return; }
-  const list=ALLP.filter(p=>getRow(p.id).status!=="已完成" && (urgency(p)==="overdue"||urgency(p)==="soon7"))
-    .sort((a,b)=>URG_RANK[urgency(a)]-URG_RANK[urgency(b)] || getEstRev(b)-getEstRev(a));
+  const LAG_THRESHOLD=0.2;
+  const list=ALLP.filter(p=>{
+    const r=getRow(p.id); if(r.status==="已完成") return false;
+    const li=lagInfo(p);
+    return li.overdue || li.lag>=LAG_THRESHOLD;
+  }).sort((a,b)=>{
+    const la=lagInfo(a), lb=lagInfo(b);
+    if(la.overdue!==lb.overdue) return la.overdue?-1:1;
+    return lb.lag-la.lag;
+  });
 
   const payGroup=list.filter(p=>getRow(p.id).status==="待收款");
   const execGroup=list.filter(p=>{const s=getRow(p.id).status; return s==="未開始"||s==="進行中";});
+  const rowWithLag=p=>projRowHtml(p, lagBadge(lagInfo(p)));
   const urgentBody=list.length? `
-    ${payGroup.length?`<div class="small" style="margin:10px 0 2px;">待收款（${payGroup.length}）</div>${payGroup.map(p=>projRowHtml(p)).join("")}`:''}
-    ${execGroup.length?`<div class="small" style="margin:10px 0 2px;">執行（${execGroup.length}）</div>${execGroup.map(p=>projRowHtml(p)).join("")}`:''}
-  ` : `<div class="small">✓ 目前沒有已逾期或7天內到期、還未完成的案子</div>`;
+    ${payGroup.length?`<div class="small" style="margin:10px 0 2px;">待收款（${payGroup.length}）</div>${payGroup.map(rowWithLag).join("")}`:''}
+    ${execGroup.length?`<div class="small" style="margin:10px 0 2px;">執行（${execGroup.length}）</div>${execGroup.map(rowWithLag).join("")}`:''}
+  ` : `<div class="small">✓ 目前沒有已逾期或進度明顯落後的案子</div>`;
 
   // 任務層級急迫（不管專案本身狀態），含負責人與前後步驟
   const taskUrgent=[];
@@ -566,16 +593,21 @@ function renderPriority(){
     </div>`;
   }).join("") + (taskUrgent.length>TASK_LIMIT ? `<button class="mini" style="margin-top:8px;" onclick="togglePriorityExpand('task')">${taskExpanded?`只顯示前${TASK_LIMIT}項`:`顯示全部（共${taskUrgent.length}項）`}</button>` : '') : `<div class="small">✓ 目前沒有任務層級的急迫項目</div>`;
 
-  // 停滯提醒：進行中/待收款但任務完全沒開始，且已過起始日7天以上
-  const today=new Date(); today.setHours(0,0,0,0);
-  const stagnant=ALLP.filter(p=>{
-    const r=getRow(p.id);
-    if(r.status!=="進行中" && r.status!=="待收款") return false;
-    const tp=taskProgress(p); if(tp.total===0||tp.done>0) return false;
-    const start=new Date(getRange(p).start+"T00:00:00"); start.setDate(start.getDate()+7);
-    return today>=start;
+  // 尚未指派的任務項目（不管專案狀態，只看單一任務項目本身）
+  const unassignedTasks=[];
+  ALLP.forEach(p=>{
+    if(getRow(p.id).status==="已完成") return;
+    taskList(p).forEach(tn=>{
+      const subs=materializedSubs(p.id,tn);
+      if(subs.length){ subs.forEach(s=>{ if(!s.done && !s.assignee) unassignedTasks.push({p,label:`${tn}／${s.name}`,end:s.end}); }); }
+      else { const info=taskInfo(p,tn); if(!info.done && !info.assignee) unassignedTasks.push({p,label:tn,end:info.end}); }
+    });
   });
-  const stagnantBody=stagnant.length? stagnant.map(p=>projRowHtml(p)).join("") : `<div class="small">✓ 沒有看起來被忘記的專案</div>`;
+  unassignedTasks.sort((a,b)=>{ if(a.end&&b.end) return a.end.localeCompare(b.end); if(a.end) return -1; if(b.end) return 1; return 0; });
+  const UNASSIGN_LIMIT=10;
+  const unassignExpanded=priorityExpandedTabs.has('unassigned');
+  const shownUnassigned=unassignExpanded?unassignedTasks:unassignedTasks.slice(0,UNASSIGN_LIMIT);
+  const stagnantBody=unassignedTasks.length? shownUnassigned.map(x=>`<div class="prow"><div class="prow-top"><span class="pname">${getName(x.p)} － ${x.label}</span><span class="small" style="color:var(--warn);">尚未指派${x.end?`・迄 ${shortDate(x.end)}`:''}</span></div></div>`).join("") + (unassignedTasks.length>UNASSIGN_LIMIT?`<button class="mini" style="margin-top:8px;" onclick="togglePriorityExpand('unassigned')">${unassignExpanded?`只顯示前${UNASSIGN_LIMIT}項`:`顯示全部（共${unassignedTasks.length}項）`}</button>`:'') : `<div class="small">✓ 目前沒有尚未指派的任務項目</div>`;
 
   // 成本壓力
   const overCost=ALLP.filter(p=>{ const r=getRow(p.id); return r.cost!==null && r.cost!=="" && Number(r.cost)/getEstRev(p)>=0.6; })
@@ -585,7 +617,7 @@ function renderPriority(){
   const tabs=[
     {key:'urgent', label:`急迫案件 (${list.length})`, body:urgentBody},
     {key:'task', label:`任務急迫 (${taskUrgent.length})`, body:taskBody},
-    {key:'stagnant', label:`可能被忘記 (${stagnant.length})`, body:stagnantBody},
+    {key:'stagnant', label:`未指派任務 (${unassignedTasks.length})`, body:stagnantBody},
     {key:'cost', label:`成本壓力 (${overCost.length})`, body:costBody},
   ];
   const tabBtns=tabs.map(tb=>`<button class="dtab ${priorityTab===tb.key?'active':''}" onclick="setPriorityTab('${tb.key}')">${tb.label}</button>`).join('');
@@ -1003,12 +1035,13 @@ function assigneeTag(name){
   const cls = isStaff(name)?'tag-staff' : isVendor(name)?'tag-vendor' : 'tag-partner';
   return `<span class="${cls}">${name}</span>`;
 }
-function projRowHtml(p){
+function projRowHtml(p,badgeHtml){
   const r=getRow(p.id);
   const tp=taskProgress(p);
   const pct=tp.total?Math.round(tp.done/tp.total*100):0;
+  const badge=badgeHtml||`<span class="badge ${urgency(p)}">${URG_LABEL[urgency(p)]}</span>`;
   return `<div class="prow">
-    <div class="prow-top"><span class="pname">${getName(p)}</span><span class="cat">${p.cat}</span>${assigneeTag(r.assignee)}<span class="badge ${urgency(p)}">${URG_LABEL[urgency(p)]}</span></div>
+    <div class="prow-top"><span class="pname">${getName(p)}</span><span class="cat">${p.cat}</span>${assigneeTag(r.assignee)}${badge}</div>
     <div class="prow-bottom"><span>${r.status}・迄 ${shortDate(getRange(p).end)}</span><span>任務 ${tp.done}/${tp.total}（${pct}%）</span></div>
   </div>`;
 }
