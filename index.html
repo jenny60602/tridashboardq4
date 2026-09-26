@@ -99,7 +99,7 @@ select,input[type=number],input[type=text],input[type=date],input[type=url]{back
 .ganttgrouprow{padding-top:8px;}
 .ganttweekrow{border-bottom:1px solid var(--line);padding-bottom:4px;margin-bottom:2px;}
 .ganttweeklabel{position:absolute;top:0;font-size:.64rem;color:var(--sub);white-space:nowrap;padding-left:2px;}
-.ganttgrouprow .ganttbar-group{background:transparent;border:1.5px dashed var(--sub);height:10px;top:3px;border-radius:5px;}
+.ganttgrouprow .ganttbar-group{background:rgba(184,134,11,0.32);border:1px solid #b8860b;height:12px;top:2px;border-radius:5px;}
 .ganttchildrow{padding-left:0;}
 .ganttdate{position:absolute;top:0;font-size:.66rem;color:var(--sub);white-space:nowrap;line-height:16px;}
 .ganttmilestone{position:absolute;top:2px;width:10px;height:10px;transform:translateX(-50%) rotate(45deg);border-radius:2px;}
@@ -114,8 +114,9 @@ select,input[type=number],input[type=text],input[type=date],input[type=url]{back
 .ganttbar-done{opacity:.35;}
 .ganttToday{position:absolute;top:0;bottom:0;width:2px;background:var(--warn);z-index:2;}
 .notesbox{width:100%;min-height:70px;padding:8px;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--ink);font-size:.8rem;font-family:inherit;resize:vertical;}
-.monthgrid{display:flex;gap:8px;margin-top:6px;flex-wrap:wrap;}
-.monthcol{flex:1;min-width:130px;background:var(--card);border:1px solid var(--line);border-radius:8px;padding:6px 8px;}
+.monthgridscroll{overflow-x:auto;margin-top:6px;}
+.monthgrid{display:flex;gap:8px;flex-wrap:nowrap;}
+.monthcol{flex:0 0 130px;min-width:130px;background:var(--card);border:1px solid var(--line);border-radius:8px;padding:6px 8px;}
 .monthcolhead{font-weight:600;font-size:.78rem;margin-bottom:4px;color:var(--accent2);}
 .monthitem{font-size:.68rem;padding:2px 0;border-bottom:1px dashed var(--line);}
 .monthitem.done{opacity:.4;text-decoration:line-through;}
@@ -913,25 +914,26 @@ function projRowHtml(p,label){
   </div>`;
 }
 function personMonthlyHtml(t){
-  const months={9:[],10:[],11:[],12:[]};
+  const items=[];
   ALLP.forEach(p=>{
     taskList(p).forEach(tn=>{
       const subs=materializedSubs(p.id,tn);
-      if(subs.length){
-        subs.forEach(s=>{ if(s.assignee===t && s.end){ const m=Number(s.end.split('-')[1]); if(months[m]) months[m].push({label:`${getName(p)}：${s.name}`, done:s.done, date:s.end}); } });
-      } else {
-        const info=taskInfo(p,tn);
-        if(info.assignee===t && info.end){ const m=Number(info.end.split('-')[1]); if(months[m]) months[m].push({label:`${getName(p)}：${tn}`, done:info.done, date:info.end}); }
-      }
+      const pushIt=(name,info)=>{ if(info.assignee===t && info.end){ items.push({ym:info.end.slice(0,7), date:info.end, label:`${getName(p)}：${name}`, done:info.done}); } };
+      if(subs.length){ subs.forEach(s=>pushIt(s.name,s)); }
+      else { pushIt(tn, taskInfo(p,tn)); }
     });
   });
-  Object.keys(months).forEach(m=>months[m].sort((a,b)=>a.date.localeCompare(b.date)));
-  const cols=[9,10,11,12].map(m=>{
-    const items=months[m];
-    const body=items.length? items.map(it=>`<div class="monthitem${it.done?' done':''}">${shortDate(it.date)} ${it.label}</div>`).join('') : '<div class="small">（無）</div>';
-    return `<div class="monthcol"><div class="monthcolhead">${m}月</div>${body}</div>`;
+  const today=new Date(); const todayYm=`${today.getFullYear()}-${pad(today.getMonth()+1)}`;
+  if(!items.length) return `<div class="small">目前沒有標日期的任務</div>`;
+  let yms=[...new Set(items.map(i=>i.ym).concat([todayYm]))].sort();
+  const cols=yms.map(ym=>{
+    const [y,m]=ym.split('-').map(Number);
+    const label=(y!==REF_YEAR?y+'/':'')+m+'月';
+    const rows=items.filter(i=>i.ym===ym).sort((a,b)=>a.date.localeCompare(b.date));
+    const body=rows.length? rows.map(it=>`<div class="monthitem${it.done?' done':''}">${shortDate(it.date)} ${it.label}</div>`).join('') : '<div class="small">（無）</div>';
+    return `<div class="monthcol"><div class="monthcolhead">${label}</div>${body}</div>`;
   }).join('');
-  return `<div class="monthgrid">${cols}</div>`;
+  return `<div class="monthgridscroll"><div class="monthgrid">${cols}</div></div>`;
 }
 function personDetailHtml(t){
   const owned=ALLP.filter(p=>getRow(p.id).assignee===t)
