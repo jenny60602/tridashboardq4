@@ -128,6 +128,7 @@ select,input[type=number],input[type=text],input[type=date],input[type=url]{back
 .collab label{display:flex;align-items:center;gap:4px;font-size:.78rem;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:3px 9px;}
 .tag-staff{background:#dfe9df;color:var(--accent);padding:1px 6px;border-radius:5px;font-size:.68rem;}
 .tag-partner{background:#f4e3c9;color:var(--accent2);padding:1px 6px;border-radius:5px;font-size:.68rem;}
+.tag-vendor{background:#f3e6c4;color:#8a6d1a;padding:1px 6px;border-radius:5px;font-size:.68rem;}
 .tasklist{display:flex;flex-direction:column;gap:8px;margin-bottom:8px;}
 .taskitem{border-bottom:1px dashed var(--line);padding-bottom:6px;}
 .taskitem.custom .tname{color:var(--accent2);}
@@ -179,7 +180,7 @@ select,input[type=number],input[type=text],input[type=date],input[type=url]{back
 <main>
   <div class="tabs">
     <button data-v="project" class="active">依專案</button>
-    <button data-v="person">依人力負荷</button>
+    <button data-v="person">依人員</button>
   </div>
   <div id="restorebanner"></div>
   <div id="priority"></div>
@@ -501,33 +502,49 @@ function touch(pid){ const cur=state[pid]||{}; state[pid]=Object.assign({},cur,{
 let priorityTab='urgent';
 window.setPriorityTab=function(k){ priorityTab=k; renderPriority(); };
 function renderPriority(){
+  const box=document.getElementById("priority");
+  if(view!=="project"){ box.innerHTML=""; return; }
   const list=ALLP.filter(p=>getRow(p.id).status!=="已完成" && (urgency(p)==="overdue"||urgency(p)==="soon7"))
     .sort((a,b)=>URG_RANK[urgency(a)]-URG_RANK[urgency(b)] || getEstRev(b)-getEstRev(a));
-  const box=document.getElementById("priority");
 
   const groups=STATUSES.filter(s=>s!=="已完成").map(s=>({status:s, items:list.filter(p=>getRow(p.id).status===s)})).filter(g=>g.items.length);
   const urgentBody=list.length? groups.map(g=>`
     <div class="small" style="margin:10px 0 2px;">${g.status}（${g.items.length}）</div>
-    ${g.items.map(p=>{const r=getRow(p.id);return `<div class="row"><span>${getName(p)}（${p.cat}・${r.assignee||"未指派"}・迄 ${shortDate(getRange(p).end)}）</span><span class="badge ${urgency(p)}">${URG_LABEL[urgency(p)]}</span></div>`;}).join("")}
+    ${g.items.map(p=>projRowHtml(p)).join("")}
   `).join("") : `<div class="small">✓ 目前沒有已逾期或7天內到期、還未完成的案子</div>`;
 
-  // 任務層級急迫（不管專案本身狀態）
+  // 任務層級急迫（不管專案本身狀態），含負責人與前後步驟
   const taskUrgent=[];
   ALLP.forEach(p=>{
     if(getRow(p.id).status==="已完成") return;
-    taskList(p).forEach((tn)=>{
+    const topList=taskList(p);
+    topList.forEach((tn)=>{
       const subs=materializedSubs(p.id,tn);
-      const check=(label,info)=>{
+      if(subs.length){
+        subs.forEach((s,si)=>{
+          if(s.done||!s.end) return;
+          const d=new Date(s.end+"T23:59:59"); const days=Math.ceil((d-new Date())/86400000);
+          if(days<=7) taskUrgent.push({p,label:`${tn}／${s.name}`,end:s.end,days,assignee:s.assignee,prev:si>0?subs[si-1].name:null,next:si<subs.length-1?subs[si+1].name:null});
+        });
+      } else {
+        const info=taskInfo(p,tn);
         if(info.done||!info.end) return;
         const d=new Date(info.end+"T23:59:59"); const days=Math.ceil((d-new Date())/86400000);
-        if(days<=7) taskUrgent.push({p,label,end:info.end,days});
-      };
-      if(subs.length){ subs.forEach(s=>check(`${tn}／${s.name}`,s)); }
-      else { check(tn, taskInfo(p,tn)); }
+        if(days<=7){
+          const idx=topList.indexOf(tn);
+          taskUrgent.push({p,label:tn,end:info.end,days,assignee:info.assignee,prev:idx>0?topList[idx-1]:null,next:idx<topList.length-1?topList[idx+1]:null});
+        }
+      }
     });
   });
   taskUrgent.sort((a,b)=>a.days-b.days);
-  const taskBody=taskUrgent.length? taskUrgent.map(x=>`<div class="row"><span>${getName(x.p)} － ${x.label}</span><span class="badge ${x.days<0?'overdue':'soon7'}">${x.days<0?'已逾期':'7天內到期'}（${shortDate(x.end)}）</span></div>`).join("") : `<div class="small">✓ 目前沒有任務層級的急迫項目</div>`;
+  const taskBody=taskUrgent.length? taskUrgent.map(x=>{
+    const ctx=(x.prev||x.next)?`<div class="small" style="margin-top:2px;">${x.prev?`上一步：${x.prev}`:''}${x.prev&&x.next?'　':''}${x.next?`下一步：${x.next}`:''}</div>`:'';
+    return `<div class="prow">
+      <div class="prow-top"><span class="pname">${getName(x.p)} － ${x.label}</span>${assigneeTag(x.assignee)}<span class="badge ${x.days<0?'overdue':'soon7'}">${x.days<0?'已逾期':'7天內到期'}（${shortDate(x.end)}）</span></div>
+      ${ctx}
+    </div>`;
+  }).join("") : `<div class="small">✓ 目前沒有任務層級的急迫項目</div>`;
 
   // 停滯提醒：進行中/待收款但任務完全沒開始，且已過起始日7天以上
   const today=new Date(); today.setHours(0,0,0,0);
@@ -538,12 +555,12 @@ function renderPriority(){
     const start=new Date(getRange(p).start+"T00:00:00"); start.setDate(start.getDate()+7);
     return today>=start;
   });
-  const stagnantBody=stagnant.length? stagnant.map(p=>{const r=getRow(p.id);return `<div class="row"><span>${getName(p)}（${p.cat}・${r.assignee||"未指派"}）</span><span class="small">起始 ${shortDate(getRange(p).start)}</span></div>`;}).join("") : `<div class="small">✓ 沒有看起來被忘記的專案</div>`;
+  const stagnantBody=stagnant.length? stagnant.map(p=>projRowHtml(p)).join("") : `<div class="small">✓ 沒有看起來被忘記的專案</div>`;
 
   // 成本壓力
   const overCost=ALLP.filter(p=>{ const r=getRow(p.id); return r.cost!==null && r.cost!=="" && Number(r.cost)/getEstRev(p)>=0.6; })
     .sort((a,b)=>(Number(getRow(b.id).cost)/getEstRev(b))-(Number(getRow(a.id).cost)/getEstRev(a)));
-  const costBody=overCost.length? overCost.map(p=>{const r=getRow(p.id); const ratio=Math.round(Number(r.cost)/getEstRev(p)*100); const isOver=ratio>=100;return `<div class="row"><span>${getName(p)}（${p.cat}・${r.assignee||"未指派"}）</span><span class="small" style="color:${isOver?'var(--warn)':'var(--accent2)'};font-weight:${isOver?'600':'400'};">${isOver?'已超支':'成本壓力'} ${ratio}%</span></div>`;}).join("") : `<div class="small">✓ 沒有成本壓力超過60%的專案</div>`;
+  const costBody=overCost.length? overCost.map(p=>{const r=getRow(p.id); const ratio=Math.round(Number(r.cost)/getEstRev(p)*100); const isOver=ratio>=100;return `<div class="prow"><div class="prow-top"><span class="pname">${getName(p)}</span><span class="cat">${p.cat}</span>${assigneeTag(r.assignee)}<span class="small" style="color:${isOver?'var(--warn)':'var(--accent2)'};font-weight:600;">${isOver?'已超支':'成本壓力'} ${ratio}%</span></div></div>`;}).join("") : `<div class="small">✓ 沒有成本壓力超過60%的專案</div>`;
 
   const tabs=[
     {key:'urgent', label:`急迫案件 (${list.length})`, body:urgentBody},
@@ -955,12 +972,18 @@ function personTop(t){
   unfinished.sort((a,b)=>URG_RANK[urgency(a)]-URG_RANK[urgency(b)] || new Date(getRange(a).end)-new Date(getRange(b).end));
   return unfinished[0];
 }
-function projRowHtml(p,label){
+function assigneeTag(name){
+  if(!name) return `<span class="small" style="color:var(--warn);">未指派</span>`;
+  const cls = isStaff(name)?'tag-staff' : isVendor(name)?'tag-vendor' : 'tag-partner';
+  return `<span class="${cls}">${name}</span>`;
+}
+function projRowHtml(p){
+  const r=getRow(p.id);
   const tp=taskProgress(p);
   const pct=tp.total?Math.round(tp.done/tp.total*100):0;
   return `<div class="prow">
-    <div class="prow-top"><span class="pname">${getName(p)}</span><span class="cat">${p.cat}</span>${label?`<span class="small">${label}</span>`:''}<span class="badge ${urgency(p)}">${URG_LABEL[urgency(p)]}</span></div>
-    <div class="prow-bottom"><span>${getRow(p.id).status}・迄 ${shortDate(getRange(p).end)}</span><span>任務 ${tp.done}/${tp.total}（${pct}%）</span></div>
+    <div class="prow-top"><span class="pname">${getName(p)}</span><span class="cat">${p.cat}</span>${assigneeTag(r.assignee)}<span class="badge ${urgency(p)}">${URG_LABEL[urgency(p)]}</span></div>
+    <div class="prow-bottom"><span>${r.status}・迄 ${shortDate(getRange(p).end)}</span><span>任務 ${tp.done}/${tp.total}（${pct}%）</span></div>
   </div>`;
 }
 function personMonthlyHtml(t){
