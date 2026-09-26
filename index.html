@@ -705,8 +705,6 @@ function monthlyChartBody(){
 function renderStats(){
   const coreRev=ALLP.filter(p=>!isNonOp(p)).reduce((s,p)=>s+getEstRev(p),0);
   const nonOpRev=ALLP.filter(p=>isNonOp(p)).reduce((s,p)=>s+getEstRev(p),0);
-  const statusCount={}; STATUSES.forEach(s=>statusCount[s]=ALLP.filter(p=>getRow(p.id).status===s).length);
-  const unassigned=ALLP.filter(p=>!getRow(p.id).assignee).length;
   let tDone=0,tAll=0; ALLP.forEach(p=>{const t=taskProgress(p); tDone+=t.done; tAll+=t.total;});
   const pct=tAll?Math.round(tDone/tAll*100):0;
   let actualSum=0,actualCount=0,costSum=0,costCount=0;
@@ -718,26 +716,11 @@ function renderStats(){
     <div class="statgroup">
       <div class="statgrouplabel">財務</div>
       <div class="stats">
+        <div class="stat clickable" onclick="gotoStatus('全部')"><b>${ALLP.length}</b><span>專案總數</span></div>
         <div class="stat"><b>${fmt(coreRev+nonOpRev)}</b><span>Q4 預估營收合計（未稅）</span><span class="small">核心 ${fmt(coreRev)}／政府補助 ${fmt(nonOpRev)}</span></div>
         <div class="stat"><b>${fmt(actualSum)}</b><span>實際收款合計（${actualCount}／${ALLP.length}筆已登錄）</span></div>
         <div class="stat"><b style="color:${costSum>(coreRev+nonOpRev)?'var(--warn)':'var(--ink)'}">${fmt(costSum)}</b><span>累積成本合計（${costCount}／${ALLP.length}筆已登錄）</span></div>
         <div class="stat"><b style="color:${(coreRev+nonOpRev-costSum)<0?'var(--warn)':'var(--ok)'}">${fmt(coreRev+nonOpRev-costSum)}</b><span>專案毛利合計（營收－成本，自動算）</span></div>
-      </div>
-    </div>
-    <div class="statgroup">
-      <div class="statgrouplabel">專案狀態（點數字可篩選）</div>
-      <div class="stats">
-        <div class="stat clickable" onclick="gotoStatus('全部')"><b>${ALLP.length}</b><span>專案總數</span></div>
-        <div class="stat clickable" onclick="gotoStatus('未開始')"><b>${statusCount['未開始']||0}</b><span>未開始</span></div>
-        <div class="stat clickable" onclick="gotoStatus('進行中')"><b>${statusCount['進行中']||0}</b><span>進行中</span></div>
-        <div class="stat clickable" onclick="gotoStatus('待收款')"><b>${statusCount['待收款']||0}</b><span>待收款</span></div>
-        <div class="stat clickable" onclick="gotoStatus('已完成')"><b>${statusCount['已完成']||0}</b><span>已完成</span></div>
-        <div class="stat clickable" onclick="gotoPerson()"><b style="color:${unassigned?'var(--warn)':'var(--ok)'}">${unassigned}</b><span>尚未指派負責人</span></div>
-      </div>
-    </div>
-    <div class="statgroup">
-      <div class="statgrouplabel">執行進度</div>
-      <div class="stats">
         <div class="stat"><b>${pct}%</b><span>全公司任務完成率</span></div>
       </div>
     </div>`;
