@@ -1,0 +1,807 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>三小市集 Q4 專案 x 人力儀表板</title>
+<style>
+:root{
+  --bg:#f7f5f0; --card:#ffffff; --ink:#2b2a26; --sub:#6b6a63; --line:#e4e1d8;
+  --accent:#3f6b4a; --accent2:#b5651d; --warn:#c0392b; --ok:#2e7d32; --yellow:#b7950b;
+  box-sizing:border-box;
+  padding-top:env(safe-area-inset-top,0px); padding-bottom:env(safe-area-inset-bottom,0px);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){--bg:#1c1b18;--card:#26251f;--ink:#ece9e1;--sub:#a9a69c;--line:#3a3830;}
+}
+:root[data-theme="dark"]{--bg:#1c1b18;--card:#26251f;--ink:#ece9e1;--sub:#a9a69c;--line:#3a3830;}
+html{scroll-padding-top:env(safe-area-inset-top,0px);}
+*{box-sizing:border-box;}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:"Noto Sans TC","PingFang TC",system-ui,-apple-system,sans-serif;}
+header{padding:20px 16px 8px;max-width:1260px;margin:0 auto;}
+h1{font-size:1.3rem;margin:0 0 4px;}
+.sub{color:var(--sub);font-size:.82rem;margin-bottom:10px;}
+.whoami{font-size:.78rem;color:var(--sub);margin-bottom:10px;}
+.whoami select{font-size:.78rem;padding:3px 6px;}
+.stats{display:flex;gap:10px;flex-wrap:wrap;margin:12px 0;}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 14px;min-width:110px;}
+.stat b{display:block;font-size:1.05rem;}
+.stat span{color:var(--sub);font-size:.7rem;}
+.stat span.small{display:block;margin-top:2px;}
+main{max-width:1260px;margin:0 auto;padding:0 16px 40px;}
+.tabs{display:flex;gap:8px;margin:14px 0;flex-wrap:wrap;}
+.tabs button{background:var(--card);border:1px solid var(--line);color:var(--ink);padding:7px 14px;border-radius:20px;font-size:.85rem;cursor:pointer;}
+.tabs button.active{background:var(--accent);color:#fff;border-color:var(--accent);}
+.filterbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:0 0 10px;}
+.filters{display:flex;gap:6px;flex-wrap:wrap;}
+.filters button{background:var(--card);border:1px solid var(--line);color:var(--sub);padding:4px 11px;border-radius:16px;font-size:.75rem;cursor:pointer;}
+.filters button.active{background:var(--accent2);color:#fff;border-color:var(--accent2);}
+#searchbox{padding:5px 10px;border:1px solid var(--line);border-radius:16px;background:var(--card);color:var(--ink);font-size:.78rem;width:180px;}
+.priority{border:1px solid var(--warn);background:var(--card);border-radius:10px;padding:12px 14px;margin-bottom:14px;}
+.priority h3{margin:0 0 8px;font-size:.88rem;color:var(--warn);}
+.priority.ok{border-color:var(--ok);} .priority.ok h3{color:var(--ok);}
+.priority.plain{border-color:var(--line);}
+.priority.plain h3{color:var(--ink);margin:0 0 6px;}
+.row{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:.82rem;padding:4px 0;border-bottom:1px dashed var(--line);}
+.row:last-child{border-bottom:none;}
+.trow{display:flex;align-items:center;gap:8px;font-size:.82rem;padding:4px 0;border-bottom:1px dashed var(--line);}
+.trow:last-child{border-bottom:none;}
+.badge{font-size:.68rem;padding:2px 7px;border-radius:6px;font-weight:600;white-space:nowrap;}
+.badge.overdue{background:#fbe4e1;color:var(--warn);}
+.badge.soon7{background:#fdecd2;color:var(--accent2);}
+.badge.soon30{background:#faf3cf;color:var(--yellow);}
+.badge.later{background:var(--line);color:var(--sub);}
+@media (prefers-color-scheme: dark){
+  .badge.overdue{background:#3a1f1c;} .badge.soon7{background:#3a2c14;} .badge.soon30{background:#332f14;}
+}
+.wrap{overflow-x:auto;border:1px solid var(--line);border-radius:10px;background:var(--card);}
+table{border-collapse:collapse;width:100%;font-size:.81rem;min-width:1020px;}
+th,td{padding:8px 9px;border-bottom:1px solid var(--line);text-align:left;white-space:nowrap;vertical-align:top;}
+th{color:var(--sub);font-weight:600;font-size:.68rem;text-transform:uppercase;position:sticky;top:0;background:var(--card);}
+td.name{white-space:normal;min-width:170px;cursor:pointer;}
+td.name .arrow{display:inline-block;width:14px;color:var(--sub);}
+td.name .drive{margin-left:4px;text-decoration:none;}
+.cat{display:inline-block;font-size:.7rem;padding:2px 7px;border-radius:6px;background:var(--line);color:var(--sub);}
+select,input[type=number],input[type=text],input[type=date],input[type=url]{background:var(--bg);color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:4px 6px;font-size:.76rem;}
+.status-未開始{color:var(--sub);} .status-進行中{color:var(--accent2);font-weight:600;} .status-待收款{color:var(--warn);font-weight:600;} .status-已完成{color:var(--ok);}
+.rev{text-align:right;font-variant-numeric:tabular-nums;}
+.diff{font-size:.66rem;display:block;margin-top:2px;}
+.diff.short{color:var(--warn);} .diff.over{color:var(--ok);} .diff.wait{color:var(--sub);}
+.costnote{font-size:.66rem;display:block;margin-top:2px;}
+.costnote.over{color:var(--warn);font-weight:600;} .costnote.near{color:var(--accent2);} .costnote.ok{color:var(--sub);}
+.progwrap{display:flex;align-items:center;gap:6px;min-width:90px;}
+.bar{flex:1;height:6px;background:var(--line);border-radius:3px;overflow:hidden;}
+.bar i{display:block;height:100%;background:var(--accent);}
+.progtxt{font-size:.7rem;color:var(--sub);white-space:nowrap;}
+.detail td{background:var(--bg);white-space:normal;}
+.detail h4{font-size:.72rem;color:var(--sub);margin:0 0 6px;text-transform:uppercase;}
+.basicgrid{display:flex;flex-wrap:wrap;gap:12px;margin-bottom:14px;}
+.basicgrid label{font-size:.7rem;color:var(--sub);display:flex;flex-direction:column;gap:3px;}
+.collab{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px;}
+.collab label{display:flex;align-items:center;gap:4px;font-size:.78rem;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:3px 9px;}
+.tag-staff{background:#dfe9df;color:var(--accent);padding:1px 6px;border-radius:5px;font-size:.68rem;}
+.tag-partner{background:#f4e3c9;color:var(--accent2);padding:1px 6px;border-radius:5px;font-size:.68rem;}
+.tasklist{display:flex;flex-direction:column;gap:8px;margin-bottom:8px;}
+.taskitem{border-bottom:1px dashed var(--line);padding-bottom:6px;}
+.taskitem.custom .tname{color:var(--accent2);}
+.theader{display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:.82rem;}
+.mini{background:none;border:1px solid var(--line);border-radius:4px;font-size:.65rem;padding:1px 5px;cursor:pointer;color:var(--sub);}
+.mini.danger{color:var(--warn);border-color:var(--warn);}
+.children{margin:5px 0 4px 22px;display:flex;flex-direction:column;gap:5px;}
+.subitem{display:flex;align-items:center;gap:6px;font-size:.78rem;flex-wrap:wrap;}
+.addsub{display:flex;gap:4px;margin:5px 0 2px 22px;}
+.addsub input{width:170px;}
+.addsub button,.addtask button{font-size:.7rem;padding:3px 9px;border-radius:5px;border:1px solid var(--accent);background:var(--accent);color:#fff;cursor:pointer;}
+.addtask{display:flex;gap:6px;}
+.addtask input{flex:1;}
+.people{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;margin:8px 0 16px;}
+.pcard{background:var(--card);border:1px solid var(--line);border-left:4px solid var(--line);border-radius:10px;padding:10px 12px;}
+.pcard.staff{border-left-color:var(--accent);}
+.pcard.partner{border-left-color:var(--accent2);}
+.pcard b{display:block;}
+.pcard span{color:var(--sub);font-size:.72rem;}
+.hint{color:var(--sub);font-size:.75rem;margin-top:16px;}
+.small{font-size:.7rem;color:var(--sub);}
+.chartbars{display:flex;gap:14px;align-items:flex-end;height:90px;margin-top:6px;}
+.chartcol{display:flex;flex-direction:column;align-items:center;flex:1;}
+.chartstack{width:100%;display:flex;flex-direction:column-reverse;border-radius:4px 4px 0 0;overflow:hidden;}
+.chartbar{width:100%;}
+.chartbar.confirmed{background:var(--accent);}
+.chartbar.estimated{background:var(--line);}
+</style>
+</head>
+<body>
+<header>
+  <h1>三小市集 Q4（9–12月）專案 x 人力儀表板</h1>
+  <div class="sub">依「2026年度9-12預算預估」整理，含成本追蹤、雲端資料夾、日期級進度管理。</div>
+  <div class="whoami">你是：<select id="whoami-select"></select>（用來標記「最後更新者」）</div>
+  <div class="stats" id="stats"></div>
+</header>
+<main>
+  <div class="tabs">
+    <button data-v="project" class="active">依專案</button>
+    <button data-v="person">依人力負荷</button>
+  </div>
+  <div id="restorebanner"></div>
+  <div id="priority"></div>
+  <div id="monthchart" style="margin-bottom:12px;"></div>
+  <div id="filterbar" class="filterbar">
+    <div id="filters" class="filters"></div>
+    <input id="searchbox" type="text" placeholder="🔍 搜尋專案名稱…">
+  </div>
+  <div id="addform" style="margin-bottom:12px;"></div>
+  <div id="view"></div>
+  <div class="hint" id="synchint">正在連線 Google Sheet…</div>
+  <button class="mini" onclick="manualRefresh()" style="margin-top:6px;">🔄 重新整理資料</button>
+</main>
+<script>
+const PROJECTS=[
+{id:"retail-douliu",cat:"2C零售",name:"斗六店舖",rev:280000,months:[9, 10, 11, 12]},
+{id:"retail-taipei",cat:"2C零售",name:"台北大安設攤",rev:100000,months:[9, 10, 11, 12]},
+{id:"retail-web",cat:"2C零售",name:"網站",rev:600000,months:[9, 10, 11, 12]},
+{id:"retail-market",cat:"2C零售",name:"巿集收入",rev:32000,months:[9, 10, 11, 12]},
+{id:"retail-event",cat:"2C零售",name:"活動收入",rev:40000,months:[9, 10, 11, 12]},
+{id:"haotian-baocheng2",cat:"好田",name:"保誠好田-第二期款",rev:228571,months:[10]},
+{id:"haotian-guandong",cat:"好田",name:"關東鑫林",rev:529000,months:[12]},
+{id:"haotian-zhixiao",cat:"好田",name:"直銷協會",rev:300000,months:[12]},
+{id:"haotian-jianxing",cat:"好田",name:"建興儲存科技",rev:105000,months:[9, 11]},
+{id:"biz-jti-zoudu",cat:"企業",name:"JTI-走讀 第二三期",rev:220982,months:[10]},
+{id:"biz-jti-gongyi",cat:"企業",name:"JTI-公益支持 第二期",rev:900000,months:[12]},
+{id:"biz-kaiji-shewa",cat:"企業",name:"凱基諸羅樹蛙調研",rev:380952,months:[10, 12]},
+{id:"biz-kaiji-bank",cat:"企業",name:"凱基銀行-志工活動",rev:65714,months:[9]},
+{id:"biz-kaiji-sec",cat:"企業",name:"凱基證券-志工活動",rev:49643,months:[9]},
+{id:"biz-wabei",cat:"企業",name:"挖貝集資-食通信好田良伴",rev:1061356,months:[10, 12]},
+{id:"biz-ruihe-orchard",cat:"企業",name:"睿禾林果園",rev:81900,months:[9]},
+{id:"gov-chunhe",cat:"政府",name:"經濟部 春禾-專案服務費",rev:843000,months:[9, 11]},
+{id:"gov-sbir",cat:"政府",name:"經濟部 SBIR",rev:226821,months:[9, 10]},
+{id:"gov-qingnian",cat:"政府",name:"青年署-青聚點",rev:288000,months:[10]},
+{id:"gov-qingpei-fixed",cat:"政府",name:"國發會-青培站(固定費用)",rev:640000,months:[9, 10, 11, 12]},
+{id:"gov-qingpei-event",cat:"政府",name:"國發會-青培站(活動執行費)",rev:600000,months:[9, 10, 11, 12]},
+{id:"gov-edu-intern",cat:"政府",name:"教育部見習",rev:61800,months:[9]},
+{id:"inter-goodneighbor",cat:"中介",name:"好鄰居",rev:47619,months:[12]},
+{id:"inter-chuangsheng",cat:"中介",name:"創生中區-台灣鯛王總",rev:476190,months:[12]},
+{id:"inter-huashan",cat:"中介",name:"華山共伴",rev:190476,months:[10]},
+{id:"gift-baocheng",cat:"禮盒",name:"保誠人壽",rev:80000,months:[10]},
+{id:"gift-ruihe-fashuo",cat:"禮盒",name:"睿禾-法說會",rev:40000,months:[9]},
+{id:"gift-guotai1",cat:"禮盒",name:"國泰(1)",rev:40000,months:[10]},
+{id:"gift-guotai2",cat:"禮盒",name:"國泰(2)",rev:45000,months:[10]},
+{id:"gift-ruihe-midautumn",cat:"禮盒",name:"睿禾-中秋禮盒",rev:74000,months:[9]},
+{id:"gift-chunhe-watt",cat:"禮盒",name:"春禾.瓦特-中秋禮盒",rev:10000,months:[10]},
+{id:"gift-jianxing-oil",cat:"禮盒",name:"建興儲存科技-苦茶油禮盒",rev:306000,months:[12]},
+{id:"outsource-xiliang",cat:"委外",name:"喜亮太陽能",rev:170000,months:[9, 10, 11, 12]}
+];
+const TEAM_STAFF=["宜倩","嘉妤","思敏","潔如","緯襦","宜玟","芳寧","雅芬"];
+const TEAM_PARTNER=["Jessica","鈺淳","紫倢","Mio"];
+const TEAM=TEAM_STAFF.concat(TEAM_PARTNER);
+const STATUSES=["未開始","進行中","待收款","已完成"];
+const BASE_TASKS=["需求/報價確認","簽約/合約確認","執行/交付準備","請款/開立發票","收款確認"];
+const GOV_EXTRA=["期中/期末報告","經費核銷單據整理"];
+const REF_YEAR=2026;
+const URG_RANK={overdue:0,soon7:1,soon30:2,later:3};
+const URG_LABEL={overdue:"已逾期",soon7:"7天內到期",soon30:"30天內",later:"時間充裕"};
+
+const SHEET_API_URL="https://script.google.com/a/macros/tri-small.com/s/AKfycbygVqZ435a42b83VwZX57LV3ms0HB4bs83S5mlSRGuv0ISol78v7X4YJp0Of3cyfuOj/exec";
+let state={};
+let view="project", catFilter="全部", searchTerm="", expanded=new Set(), expandedPerson=new Set(), showAddForm=false;
+let ALLP=[];
+function loadWhoAmI(){ try{ return localStorage.getItem('dash_whoami')||''; }catch(e){ return ''; } }
+function saveWhoAmI(v){ try{ localStorage.setItem('dash_whoami',v); }catch(e){} }
+let whoAmI=loadWhoAmI();
+
+function fmt(n){return "NT$"+Math.round(n).toLocaleString();}
+function pad(n){return n<10?"0"+n:""+n;}
+function lastDay(y,m){return new Date(y,m,0).getDate();}
+function todayISO(){const d=new Date();return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;}
+function addDaysISO(iso,n){const d=new Date(iso+"T00:00:00");d.setDate(d.getDate()+n);return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;}
+function shortDate(iso){ if(!iso) return ""; const [y,m,d]=iso.split("-"); return `${Number(m)}/${Number(d)}`; }
+function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;'); }
+function relTime(ts){
+  if(!ts) return "";
+  const diff=Math.max(0,Date.now()-ts); const m=Math.floor(diff/60000);
+  if(m<1) return "剛剛"; if(m<60) return m+"分鐘前";
+  const h=Math.floor(m/60); if(h<24) return h+"小時前";
+  const d=Math.floor(h/24); return d+"天前";
+}
+
+function getRow(id){
+  const r=state[id]||{};
+  return {status:r.status||"未開始", assignee:r.assignee||"", collaborators:r.collaborators||[],
+    estOverride:(r.estOverride===undefined?null:r.estOverride), actual:(r.actual===undefined?null:r.actual),
+    cost:(r.cost===undefined?null:r.cost), driveLink:r.driveLink||"", nameOverride:(r.nameOverride===undefined?null:r.nameOverride),
+    invoiceMonth:(r.invoiceMonth===undefined?null:r.invoiceMonth),
+    startDate:r.startDate||null, endDate:r.endDate||null, lastEdit:r.lastEdit||null,
+    tasks:r.tasks||{}, subtasks:r.subtasks||{}, custom:r.custom||[]};
+}
+function isStaff(n){return TEAM_STAFF.includes(n);}
+function isNonOp(p){ return p.cat==="政府"; }
+function selStyle(n){ if(!n) return ''; return isStaff(n)?'background:#dfe9df;':'background:#f4e3c9;'; }
+function getEstRev(p){ const r=getRow(p.id); return r.estOverride!==null ? r.estOverride : p.rev; }
+function getName(p){ const r=getRow(p.id); return (r.nameOverride!==null && r.nameOverride!=='') ? r.nameOverride : p.name; }
+function defaultRange(p){
+  const months=p.months||[9]; const sm=Math.min(...months), em=Math.max(...months);
+  return {start:`${REF_YEAR}-${pad(sm)}-01`, end:`${REF_YEAR}-${pad(em)}-${pad(lastDay(REF_YEAR,em))}`};
+}
+function getRange(p){
+  const r=getRow(p.id);
+  if(r.startDate && r.endDate) return {start:r.startDate, end:r.endDate};
+  return defaultRange(p);
+}
+function refreshAll(){
+  const customs=(state._customProjects||[]).map(c=>({id:c.id,cat:c.cat,name:c.name,rev:c.rev}));
+  ALLP=PROJECTS.concat(customs);
+}
+function sortedAll(){ return ALLP.slice().sort((a,b)=>new Date(getRange(a).end)-new Date(getRange(b).end) || getEstRev(b)-getEstRev(a)); }
+function visibleProjects(){
+  let s=sortedAll();
+  if(catFilter!=="全部") s=s.filter(p=>p.cat===catFilter);
+  if(searchTerm) s=s.filter(p=>getName(p).toLowerCase().includes(searchTerm.toLowerCase()));
+  return s;
+}
+function allCats(){ return [...new Set(ALLP.map(p=>p.cat))]; }
+function getProject(id){ return ALLP.find(p=>p.id===id); }
+
+function periodsFor(p){
+  const range=getRange(p);
+  let [sy,sm]=range.start.split('-').map(Number);
+  let [ey,em]=range.end.split('-').map(Number);
+  const months=[]; let y=sy,m=sm,guard=0;
+  while((y<ey || (y===ey && m<=em)) && guard<24){
+    months.push(`${m}月檔`);
+    m++; if(m>12){m=1;y++;} guard++;
+  }
+  return months.length?months:["執行檔期"];
+}
+function baseTasksFor(p){
+  if(p.cat==="政府") return BASE_TASKS.concat(GOV_EXTRA);
+  if(p.cat==="2C零售") return periodsFor(p);
+  return BASE_TASKS;
+}
+function taskList(p){return baseTasksFor(p).concat(getRow(p.id).custom);}
+function isCustomIdx(p,idx){ return idx>=baseTasksFor(p).length; }
+function customPos(p,idx){ return idx-baseTasksFor(p).length; }
+function materializedSubs(pid,t){
+  const cur=getRow(pid);
+  return (cur.subtasks[t]||[]).slice();
+}
+function taskInfo(p,name){
+  const r=getRow(p.id); const t=r.tasks[name];
+  if(!t) return {done:false,assignee:"",start:"",end:""};
+  if(typeof t==="boolean") return {done:t,assignee:"",start:"",end:""};
+  return {done:!!t.done, assignee:t.assignee||"", start:t.start||"", end:t.end||""};
+}
+function taskProgress(p){
+  const list=taskList(p);
+  let done=0,total=0;
+  list.forEach(t=>{
+    const subs=materializedSubs(p.id,t);
+    if(subs.length){ total+=subs.length; done+=subs.filter(s=>s.done).length; }
+    else if(p.cat!=="2C零售"){ total+=1; if(taskInfo(p,t).done) done+=1; }
+  });
+  return {done,total};
+}
+function personOpts(sel){
+  const so=TEAM_STAFF.map(x=>`<option ${sel===x?'selected':''}>${x}</option>`).join('');
+  const po=TEAM_PARTNER.map(x=>`<option ${sel===x?'selected':''}>${x}</option>`).join('');
+  return `<option value="">未指派</option><optgroup label="三小正式員工">${so}</optgroup><optgroup label="委外/見習">${po}</optgroup>`;
+}
+
+function urgency(p){
+  const r=getRow(p.id);
+  if(r.status==="已完成") return "later";
+  const end=new Date(getRange(p).end+"T23:59:59");
+  const diffDays=Math.ceil((end-new Date())/86400000);
+  if(diffDays<0) return "overdue";
+  if(diffDays<=7) return "soon7";
+  if(diffDays<=30) return "soon30";
+  return "later";
+}
+
+function marginOf(p){ const r=getRow(p.id); const cost=(r.cost===null||r.cost==="")?0:Number(r.cost); return getEstRev(p)-cost; }
+function costNote(p){
+  const r=getRow(p.id);
+  if(r.cost===null||r.cost==="") return `<span class="costnote ok">尚未登錄</span>`;
+  const ratio=Number(r.cost)/getEstRev(p);
+  if(ratio>=1) return `<span class="costnote over">已超支 ${Math.round(ratio*100)}%</span>`;
+  if(ratio>=0.8) return `<span class="costnote near">接近上限 ${Math.round(ratio*100)}%</span>`;
+  return `<span class="costnote ok">占營收 ${Math.round(ratio*100)}%</span>`;
+}
+function getReceipts(id){
+  const r=getRow(id);
+  if(r.receipts && r.receipts.length) return r.receipts;
+  if(r.actual!==null && r.actual!=='') return [{amount:Number(r.actual), month:r.invoiceMonth||null}];
+  return [];
+}
+function totalActual(p){ return getReceipts(p.id).reduce((s,x)=>s+Number(x.amount||0),0); }
+function diffLabel(p){
+  const list=getReceipts(p.id);
+  if(!list.length) return `<span class="diff wait">尚未登錄</span>`;
+  const total=totalActual(p);
+  const diff=total-getEstRev(p);
+  if(diff<0) return `<span class="diff short">短收 ${fmt(-diff)}</span>`;
+  if(diff>0) return `<span class="diff over">超收 ${fmt(diff)}</span>`;
+  return `<span class="diff over">✓ 相符</span>`;
+}
+
+function touch(pid){ const cur=state[pid]||{}; state[pid]=Object.assign({},cur,{lastEdit:{by:whoAmI||'',at:Date.now()}}); }
+
+function renderPriority(){
+  const list=ALLP.filter(p=>getRow(p.id).status!=="已完成" && (urgency(p)==="overdue"||urgency(p)==="soon7"))
+    .sort((a,b)=>URG_RANK[urgency(a)]-URG_RANK[urgency(b)] || getEstRev(b)-getEstRev(a));
+  const box=document.getElementById("priority");
+  if(!list.length){ box.innerHTML=`<div class="priority ok"><h3>✓ 目前沒有已逾期或7天內到期、還未完成的案子</h3></div>`; return; }
+  box.innerHTML=`<div class="priority"><h3>現在最該處理（已逾期／7天內到期，尚未完成）</h3>
+    ${list.map(p=>{const r=getRow(p.id);return `<div class="row"><span>${getName(p)}（${p.cat}・${r.assignee||"未指派"}・迄 ${shortDate(getRange(p).end)}）</span><span class="badge ${urgency(p)}">${URG_LABEL[urgency(p)]}</span></div>`;}).join("")}
+  </div>`;
+}
+
+function monthOptsQ(sel){ let s='<option value="">未填</option>'; [9,10,11,12].forEach(m=>{ s+=`<option value="${m}" ${sel===m?'selected':''}>${m}月</option>`; }); return s; }
+function renderMonthlyChart(){
+  const box=document.getElementById("monthchart");
+  if(view!=="project"){ box.innerHTML=""; return; }
+  const confirmed={9:0,10:0,11:0,12:0}, estimated={9:0,10:0,11:0,12:0};
+  ALLP.forEach(p=>{
+    const fm=Number(getRange(p).end.split('-')[1]);
+    const list=getReceipts(p.id);
+    let confirmedTotal=0;
+    list.forEach(rc=>{
+      const amt=Number(rc.amount||0);
+      if(rc.month && confirmed[rc.month]!==undefined){ confirmed[rc.month]+=amt; confirmedTotal+=amt; }
+      else { if(estimated[fm]!==undefined) estimated[fm]+=amt; confirmedTotal+=amt; }
+    });
+    const remaining=getEstRev(p)-confirmedTotal;
+    if(remaining>0 && estimated[fm]!==undefined) estimated[fm]+=remaining;
+  });
+  const totals={}; [9,10,11,12].forEach(m=>totals[m]=confirmed[m]+estimated[m]);
+  const max=Math.max(...Object.values(totals),1);
+  box.innerHTML=`<div class="priority plain"><h3>月營收分布（已依發票確認 / 估算）</h3>
+    <div class="chartbars">
+      ${[9,10,11,12].map(m=>{
+        const totalH=Math.max(4,Math.round(totals[m]/max*70));
+        const confH=totals[m]?Math.round(confirmed[m]/totals[m]*totalH):0;
+        const estH=totalH-confH;
+        return `<div class="chartcol">
+          <div class="chartstack">
+            <div class="chartbar estimated" style="height:${estH}px;"></div>
+            <div class="chartbar confirmed" style="height:${confH}px;"></div>
+          </div>
+          <div class="small" style="margin-top:4px;">${m}月</div>
+          <div class="small">${fmt(totals[m])}</div>
+        </div>`;
+      }).join('')}
+    </div>
+    <div class="small" style="margin-top:6px;">深色＝已在「實際收款」填發票月份，確定認列；淺色＝尚未開發票，暫依截止日估算月份。</div>
+  </div>`;
+}
+
+function renderStats(){
+  const coreRev=ALLP.filter(p=>!isNonOp(p)).reduce((s,p)=>s+getEstRev(p),0);
+  const nonOpRev=ALLP.filter(p=>isNonOp(p)).reduce((s,p)=>s+getEstRev(p),0);
+  const done=ALLP.filter(p=>getRow(p.id).status==="已完成").length;
+  const doing=ALLP.filter(p=>getRow(p.id).status==="進行中").length;
+  const unassigned=ALLP.filter(p=>!getRow(p.id).assignee).length;
+  let tDone=0,tAll=0; ALLP.forEach(p=>{const t=taskProgress(p); tDone+=t.done; tAll+=t.total;});
+  const pct=tAll?Math.round(tDone/tAll*100):0;
+  let actualSum=0,actualCount=0,costSum=0,costCount=0;
+  ALLP.forEach(p=>{const r=getRow(p.id);
+    { const list=getReceipts(p.id); if(list.length){ actualSum+=list.reduce((s,x)=>s+Number(x.amount||0),0); actualCount++; } }
+    if(r.cost!==null && r.cost!==""){costSum+=Number(r.cost); costCount++;}
+  });
+  document.getElementById("stats").innerHTML=`
+    <div class="stat"><b>${ALLP.length}</b><span>專案總數</span></div>
+    <div class="stat"><b>${fmt(coreRev+nonOpRev)}</b><span>Q4 預估營收合計</span><span class="small">核心 ${fmt(coreRev)}／政府補助 ${fmt(nonOpRev)}</span></div>
+    <div class="stat"><b>${fmt(actualSum)}</b><span>實際收款合計（${actualCount}／${ALLP.length}筆已登錄）</span></div>
+    <div class="stat"><b style="color:${costSum>(coreRev+nonOpRev)?'var(--warn)':'var(--ink)'}">${fmt(costSum)}</b><span>累積成本合計（${costCount}／${ALLP.length}筆已登錄）</span></div>
+    <div class="stat"><b style="color:${(coreRev+nonOpRev-costSum)<0?'var(--warn)':'var(--ok)'}">${fmt(coreRev+nonOpRev-costSum)}</b><span>專案毛利合計（營收－成本，自動算）</span></div>
+    <div class="stat"><b>${doing}</b><span>進行中</span></div>
+    <div class="stat"><b>${done}</b><span>已完成</span></div>
+    <div class="stat"><b style="color:${unassigned?'var(--warn)':'var(--ok)'}">${unassigned}</b><span>尚未指派負責人</span></div>
+    <div class="stat"><b>${pct}%</b><span>全公司任務完成率</span></div>`;
+}
+
+function renderFilters(){
+  document.getElementById("filterbar").style.display=view==="project"?"flex":"none";
+  if(view!=="project") return;
+  const cats=["全部",...allCats()];
+  document.getElementById("filters").innerHTML=cats.map(c=>
+    `<button class="${catFilter===c?'active':''}" onclick="setFilter('${c}')">${c}${c==="全部"?"":" ("+ALLP.filter(p=>p.cat===c).length+")"}</button>`
+  ).join("");
+}
+window.setFilter=function(c){ catFilter=c; renderFilters(); renderProjectView(); };
+
+function renderAddForm(){
+  const box=document.getElementById("addform");
+  if(view!=="project"){ box.innerHTML=""; return; }
+  if(!showAddForm){ box.innerHTML=`<button onclick="toggleAddForm()" style="padding:6px 14px;border-radius:16px;border:1px solid var(--accent);background:var(--card);color:var(--accent);font-size:.8rem;cursor:pointer;">＋ 新增專案</button>`; return; }
+  const catOptions=allCats().map(c=>`<option value="${c}">`).join("");
+  const t=todayISO();
+  box.innerHTML=`<div class="priority plain">
+    <h3>新增專案</h3>
+    <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
+      <input list="catlist" id="newcat" placeholder="類別（可輸入新的）" style="width:130px;">
+      <datalist id="catlist">${catOptions}</datalist>
+      <input id="newname" placeholder="專案名稱" style="width:200px;">
+      <input id="newrev" type="number" placeholder="預估營收">
+      起<input type="date" id="newstart" value="${t}">迄<input type="date" id="newend" value="${addDaysISO(t,30)}">
+      <button onclick="addProject()" style="padding:5px 14px;border-radius:6px;border:1px solid var(--accent);background:var(--accent);color:#fff;cursor:pointer;">新增</button>
+      <button class="mini" onclick="toggleAddForm()">取消</button>
+    </div>
+  </div>`;
+}
+window.toggleAddForm=function(){ showAddForm=!showAddForm; renderAddForm(); };
+window.addProject=async function(){
+  const cat=(document.getElementById('newcat').value||'其他').trim();
+  const name=(document.getElementById('newname').value||'').trim();
+  const rev=Number(document.getElementById('newrev').value||0);
+  const sd=document.getElementById('newstart').value;
+  const ed=document.getElementById('newend').value;
+  if(!name){ alert('請輸入專案名稱'); return; }
+  const id='c'+Date.now();
+  const customProjects=(state._customProjects||[]).slice();
+  customProjects.push({id,cat,name,rev});
+  state._customProjects=customProjects;
+  state[id]=Object.assign({},getRow(id),{startDate:sd,endDate:ed});
+  touch(id);
+  showAddForm=false;
+  render(); await persist();
+};
+
+function taskItemHtml(p,idx){
+  const t=taskList(p)[idx];
+  const subs=materializedSubs(p.id,t);
+  const custom=isCustomIdx(p,idx);
+  const info=taskInfo(p,t);
+  let head;
+  if(subs.length){
+    const d=subs.filter(s=>s.done).length;
+    head=`<span class="tname">${t}</span><span class="progtxt">（${d}/${subs.length} 項完成）</span>`;
+  } else if(p.cat==="2C零售"){
+    head=`<span class="tname">${t}</span><span class="progtxt">（尚未新增任務，自行加入常態或專案項目）</span>`;
+  } else {
+    head=`<input type="checkbox" ${info.done?'checked':''} onchange="toggleTask('${p.id}',${idx},this.checked)">
+      <span class="tname">${t}</span>
+      <select style="${selStyle(info.assignee)}" onchange="setTaskAssignee('${p.id}',${idx},this.value)">${personOpts(info.assignee)}</select>
+      <input type="date" value="${info.start}" onchange="setTaskDate('${p.id}',${idx},'start',this.value)" title="開始">
+      <input type="date" value="${info.end}" onchange="setTaskDate('${p.id}',${idx},'end',this.value)" title="截止">`;
+  }
+  const ctrl=custom?`<button class="mini" onclick="moveCustomTask('${p.id}',${idx},-1)">▲</button><button class="mini" onclick="moveCustomTask('${p.id}',${idx},1)">▼</button><button class="mini danger" onclick="deleteCustomTask('${p.id}',${idx})">✕</button>`:'';
+  const children=subs.map((s,si)=>`<div class="subitem">
+      <input type="checkbox" ${s.done?'checked':''} onchange="toggleSubtask('${p.id}',${idx},${si},this.checked)">
+      <span>${s.name}</span>
+      <select style="${selStyle(s.assignee)}" onchange="setSubtaskAssignee('${p.id}',${idx},${si},this.value)">${personOpts(s.assignee)}</select>
+      <input type="date" value="${s.start||''}" onchange="setSubtaskDate('${p.id}',${idx},${si},'start',this.value)" title="開始">
+      <input type="date" value="${s.end||''}" onchange="setSubtaskDate('${p.id}',${idx},${si},'end',this.value)" title="截止">
+      <button class="mini danger" onclick="deleteSubtask('${p.id}',${idx},${si})">✕</button>
+    </div>`).join("");
+  return `<div class="taskitem ${custom?'custom':''}">
+    <div class="theader">${head}${ctrl}</div>
+    ${children?`<div class="children">${children}</div>`:''}
+    <div class="addsub"><input type="text" id="subin-${p.id}-${idx}" placeholder="拆成子項目，分工用…"><button onclick="addSubtask('${p.id}',${idx})">+</button></div>
+  </div>`;
+}
+
+function receiptsHtml(p){
+  const list=getReceipts(p.id);
+  const rows=list.map((rc,i)=>`<div class="subitem">
+      <input type="number" value="${rc.amount}" onchange="setReceiptField('${p.id}',${i},'amount',this.value===''?0:Number(this.value))" style="width:110px;">
+      <select onchange="setReceiptField('${p.id}',${i},'month',this.value===''?null:Number(this.value))">${monthOptsQ(rc.month)}</select>
+      <button class="mini danger" onclick="deleteReceipt('${p.id}',${i})">✕</button>
+    </div>`).join('');
+  return `<div class="tasklist" style="margin-bottom:8px;">${rows||'<div class="small">尚未登錄任何一期收款</div>'}</div>
+    <div class="addsub" style="margin-left:0;">
+      <input type="number" id="recamt-${p.id}" placeholder="這一期金額" style="width:110px;">
+      <select id="recmonth-${p.id}">${monthOptsQ(null)}</select>
+      <button onclick="addReceipt('${p.id}')">新增一期</button>
+    </div>
+    <div class="small" style="margin:6px 0 12px;">合計已收：${fmt(totalActual(p))}／預估 ${fmt(getEstRev(p))}</div>`;
+}
+
+function detailRow(p){
+  const r=getRow(p.id);
+  const range=getRange(p);
+  const collabHtml=TEAM.map(x=>`<label><input type="checkbox" ${r.collaborators.includes(x)?'checked':''} onchange="toggleCollab('${p.id}','${x}',this.checked)"><span class="${isStaff(x)?'tag-staff':'tag-partner'}">${x}</span></label>`).join("");
+  const items=taskList(p).map((t,idx)=>taskItemHtml(p,idx)).join("");
+  return `<tr class="detail"><td colspan="10">
+    <h4>基本資料</h4>
+    <div class="basicgrid">
+      <label>專案名稱<input type="text" value="${esc(getName(p))}" onchange="saveName('${p.id}',this.value)" style="width:200px;"></label>
+      <label>預估營收<input type="number" value="${getEstRev(p)}" onchange="saveRev('${p.id}',this.value)"></label>
+      <label>累積成本（財務填）<input type="number" value="${r.cost===null?'':r.cost}" onchange="setField('${p.id}','cost',this.value===''?null:Number(this.value))"></label>
+      <label>起始日<input type="date" value="${range.start}" onchange="setField('${p.id}','startDate',this.value)"></label>
+      <label>截止日<input type="date" value="${range.end}" onchange="setField('${p.id}','endDate',this.value)"></label>
+    </div>
+    <h4>協作成員（除負責人外，一起執行此案的人）</h4>
+    <div class="collab">${collabHtml}</div>
+    <h4>實際收款（發票金額，可分期登錄）</h4>
+    ${receiptsHtml(p)}
+    <h4>雲端資料夾連結（Google Drive）</h4>
+    <input type="url" placeholder="貼上 Google Drive 資料夾連結" value="${r.driveLink}" onchange="setField('${p.id}','driveLink',this.value)" style="width:100%;max-width:420px;margin-bottom:12px;">
+    <h4>任務清單（點「＋」可拆子項目並各自標開始/截止日）</h4>
+    <div class="tasklist">${items}</div>
+    <div class="addtask">
+      <input type="text" placeholder="新增一項頂層工作…" id="add-${p.id}">
+      <button onclick="addTask('${p.id}')">新增</button>
+    </div>
+  </td></tr>`;
+}
+
+function renderProjectView(){
+  let rows=visibleProjects().map(p=>{
+    const r=getRow(p.id);
+    const range=getRange(p);
+    const opts=STATUSES.map(s=>`<option ${r.status===s?'selected':''}>${s}</option>`).join("");
+    const open=expanded.has(p.id);
+    const tp=taskProgress(p);
+    const pct=tp.total?Math.round(tp.done/tp.total*100):0;
+    const urg=urgency(p);
+    const driveIcon=r.driveLink?`<a class="drive" href="${r.driveLink}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="開啟雲端資料夾">📁</a>`:'';
+    const lastEditNote=r.lastEdit?`<div class="small">最後更新：${r.lastEdit.by||'匿名'}・${relTime(r.lastEdit.at)}</div>`:'';
+    let html=`<tr>
+      <td><span class="cat">${p.cat}</span></td>
+      <td class="name" onclick="toggleExpand('${p.id}')"><span class="arrow">${open?'▾':'▸'}</span>${getName(p)}${driveIcon}${r.collaborators.length?`<div class="small">+${r.collaborators.length} 協作</div>`:""}${lastEditNote}</td>
+      <td class="rev">${fmt(getEstRev(p))}${isNonOp(p)?'<br><span class="small">營收外收入</span>':''}</td>
+      <td class="rev">${totalActual(p)?fmt(totalActual(p)):(getReceipts(p.id).length?fmt(0):'—')}${diffLabel(p)}${getReceipts(p.id).length>1?`<span class="small">共${getReceipts(p.id).length}期</span>`:''}</td>
+      <td class="rev">${r.cost===null||r.cost===""?'—':fmt(Number(r.cost))}${costNote(p)}</td>
+      <td class="rev"><b style="color:${marginOf(p)<0?'var(--warn)':'var(--ok)'}">${fmt(marginOf(p))}</b>${r.cost===null?'<span class="small">成本未登錄，暫以0計算</span>':''}</td>
+      <td>${shortDate(range.start)}–${shortDate(range.end)}<br><span class="badge ${urg}">${URG_LABEL[urg]}</span></td>
+      <td><div class="progwrap"><div class="bar"><i style="width:${pct}%"></i></div><span class="progtxt">${tp.done}/${tp.total}</span></div></td>
+      <td><select class="status-${r.status}" onchange="setField('${p.id}','status',this.value)">${opts}</select></td>
+      <td><select style="${selStyle(r.assignee)}" onchange="setField('${p.id}','assignee',this.value)">${personOpts(r.assignee)}</select></td>
+    </tr>`;
+    if(open) html+=detailRow(p);
+    return html;
+  }).join("");
+  document.getElementById("view").innerHTML=`<div class="wrap"><table>
+    <thead><tr><th>類別</th><th>專案名稱</th><th>預估營收</th><th>實際收款</th><th>累積成本</th><th>專案毛利</th><th>執行期間/急迫</th><th>任務進度</th><th>狀態</th><th>負責人</th></tr></thead>
+    <tbody>${rows}</tbody></table></div>`;
+}
+
+function personDetailHtml(t){
+  const owned=ALLP.filter(p=>getRow(p.id).assignee===t);
+  const collab=ALLP.filter(p=>getRow(p.id).collaborators.includes(t) && getRow(p.id).assignee!==t);
+  let myTasks=[];
+  ALLP.forEach(p=>{
+    taskList(p).forEach((tn,idx)=>{
+      const subs=materializedSubs(p.id,tn);
+      if(subs.length){ subs.forEach((s,si)=>{ if(s.assignee===t) myTasks.push({p,idx,si,name:tn+'／'+s.name,done:s.done}); }); }
+      else { const info=taskInfo(p,tn); if(info.assignee===t) myTasks.push({p,idx,si:null,name:tn,done:info.done}); }
+    });
+  });
+  const ownedHtml=owned.map(p=>{const tp=taskProgress(p);return `<div class="row"><span>${getName(p)}（${p.cat}）</span><span>${getRow(p.id).status}・${tp.done}/${tp.total}</span></div>`;}).join("")||'<div class="row"><span>（無）</span></div>';
+  const collabHtml=collab.map(p=>`<div class="row"><span>${getName(p)}（協作）</span><span>${getRow(p.id).status}</span></div>`).join("")||'<div class="row"><span>（無）</span></div>';
+  const taskHtml=myTasks.map(x=>{
+    const cb=x.si===null
+      ? `<input type="checkbox" ${x.done?'checked':''} onchange="toggleTask('${x.p.id}',${x.idx},this.checked)">`
+      : `<input type="checkbox" ${x.done?'checked':''} onchange="toggleSubtask('${x.p.id}',${x.idx},${x.si},this.checked)">`;
+    return `<div class="trow">${cb}<span>${getName(x.p)} — ${x.name}</span></div>`;
+  }).join("")||'<div class="trow"><span>（目前沒有指派給你的任務項目）</span></div>';
+  return `<div class="priority plain" style="margin-top:6px;">
+    <div class="small" style="margin:2px 0;">負責的專案</div>${ownedHtml}
+    <div class="small" style="margin:10px 0 2px;">協作的專案</div>${collabHtml}
+    <div class="small" style="margin:10px 0 2px;">指派給我的任務項目</div>${taskHtml}
+  </div>`;
+}
+
+function personCard(t){
+  const group=isStaff(t)?'staff':'partner';
+  const owned=ALLP.filter(p=>getRow(p.id).assignee===t);
+  const collabOn=ALLP.filter(p=>getRow(p.id).collaborators.includes(t));
+  const activeOwned=owned.filter(p=>getRow(p.id).status!=="已完成");
+  let taskCount=0;
+  ALLP.forEach(p=>taskList(p).forEach((tn)=>{
+    const subs=materializedSubs(p.id,tn);
+    if(subs.length){ taskCount+=subs.filter(s=>s.assignee===t).length; }
+    else if(taskInfo(p,tn).assignee===t){ taskCount++; }
+  }));
+  const open=expandedPerson.has(t);
+  return `<div class="pcard ${group}" onclick="togglePerson('${t}')" style="cursor:pointer;">
+      <b>${t}</b><span>負責 ${activeOwned.length}/${owned.length} 案・協作 ${collabOn.length} 案・${taskCount} 項任務</span>
+    </div>${open?personDetailHtml(t):''}`;
+}
+
+function renderPersonView(){
+  const legend=`<div style="display:flex;gap:10px;margin:6px 0 4px;"><span class="tag-staff">■ 三小正式員工</span><span class="tag-partner">■ 委外合作夥伴/見習生</span></div>`;
+  const staffCards=`<div class="small" style="margin:4px 0;">三小正式員工</div><div class="people">${TEAM_STAFF.map(personCard).join("")}</div>`;
+  const partnerCards=`<div class="small" style="margin:14px 0 4px;">委外合作夥伴／見習生</div><div class="people">${TEAM_PARTNER.map(personCard).join("")}</div>`;
+  const un=ALLP.filter(p=>!getRow(p.id).assignee);
+  const unHtml=un.length ? `<div class="priority" style="margin-top:10px;"><h3>尚未指派負責人（${un.length}）</h3>
+      ${un.map(p=>`<div class="row"><span>${getName(p)}（${p.cat}）</span><select style="width:150px;" onchange="setField('${p.id}','assignee',this.value)">${personOpts('')}</select></div>`).join('')}
+    </div>` : `<div class="priority ok" style="margin-top:10px;"><h3>✓ 所有專案都已指派負責人</h3></div>`;
+  document.getElementById("view").innerHTML=legend+staffCards+partnerCards+unHtml;
+}
+
+function render(){
+  refreshAll();
+  renderStats(); renderPriority(); renderMonthlyChart(); renderFilters(); renderAddForm();
+  if(view==="project"){ renderProjectView(); }
+  else { renderPersonView(); }
+}
+
+function localBackupSave(){ try{ localStorage.setItem('dash_backup_v2', JSON.stringify(state)); }catch(e){} }
+function localBackupLoad(){ try{ const s=localStorage.getItem('dash_backup_v2'); return s?JSON.parse(s):null; }catch(e){ return null; } }
+function showRestoreBanner(backup){
+  const box=document.getElementById("restorebanner");
+  box.innerHTML=`<div class="priority" style="margin-bottom:14px;">
+    <h3>偵測到你這台裝置有尚未同步的本機備份資料</h3>
+    <div class="small">Google Sheet裡目前是空的，但這個瀏覽器裡有之前留下的資料。要匯入嗎？（匯入後會立刻同步給所有人）</div>
+    <div style="margin-top:8px;display:flex;gap:8px;">
+      <button onclick="restoreBackup()" style="padding:5px 14px;border-radius:6px;border:1px solid var(--accent);background:var(--accent);color:#fff;cursor:pointer;">匯入本機備份</button>
+      <button class="mini" onclick="document.getElementById('restorebanner').innerHTML=''">忽略</button>
+    </div>
+  </div>`;
+  window._pendingBackup=backup;
+}
+window.restoreBackup=async function(){
+  if(window._pendingBackup){ state=window._pendingBackup; }
+  document.getElementById("restorebanner").innerHTML="";
+  render(); await persist();
+};
+
+function setHint(msg,isWarn){
+  const hint=document.getElementById("synchint");
+  hint.textContent=msg;
+  hint.style.color=isWarn?"var(--warn)":"";
+}
+function sheetConfigured(){ return SHEET_API_URL && !SHEET_API_URL.includes("PASTE_"); }
+
+async function loadFromSheet(){
+  if(!sheetConfigured()){
+    setHint("尚未設定 Google Sheet 網址，目前只存在你這台瀏覽器（單機模式）。",true);
+    const backup=localBackupLoad(); if(backup) state=backup;
+    render();
+    return;
+  }
+  try{
+    const res=await fetch(SHEET_API_URL,{method:"GET"});
+    const data=await res.json();
+    if(data && Object.keys(data).length>0){
+      state=data;
+    } else {
+      const backup=localBackupLoad();
+      if(backup && Object.keys(backup).length>0) showRestoreBanner(backup);
+    }
+    setHint("已連接 Google Sheet：重新整理或按「重新整理資料」可看到其他人的更新。");
+    render();
+  }catch(e){
+    console.error(e);
+    setHint("⚠ 連不到 Google Sheet（可能網址錯誤或還沒部署好），目前顯示你這台瀏覽器的本機備份。",true);
+    const backup=localBackupLoad(); if(backup) state=backup;
+    render();
+  }
+}
+window.manualRefresh=function(){ loadFromSheet(); };
+
+async function persist(){
+  localBackupSave();
+  if(!sheetConfigured()){ setHint("尚未設定 Google Sheet 網址，這次修改只存在你這台瀏覽器。",true); return; }
+  try{
+    await fetch(SHEET_API_URL,{method:"POST",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify(state)});
+    setHint("已連接 Google Sheet：重新整理或按「重新整理資料」可看到其他人的更新。");
+  }catch(e){
+    console.error(e);
+    setHint("⚠ 這次修改可能沒有同步到 Google Sheet（已存一份在你這台瀏覽器）。請檢查網路後按「重新整理資料」重試。",true);
+  }
+}
+
+window.setField=async function(id,field,val){ const cur=getRow(id); state[id]=Object.assign({},cur,{[field]:val}); touch(id); render(); await persist(); };
+window.saveName=async function(pid,val){
+  const v=(val||'').trim(); if(v===''){ render(); return; }
+  const cur=getRow(pid); state[pid]=Object.assign({},cur,{nameOverride:v}); touch(pid);
+  render(); await persist();
+};
+window.saveRev=async function(pid,val){
+  const num=val===''?null:Number(val);
+  const cur=getRow(pid); state[pid]=Object.assign({},cur,{estOverride:num}); touch(pid);
+  render(); await persist();
+};
+window.toggleCollab=async function(id,name,checked){
+  const cur=getRow(id); let collaborators=cur.collaborators.slice();
+  if(checked && !collaborators.includes(name)) collaborators.push(name);
+  if(!checked) collaborators=collaborators.filter(x=>x!==name);
+  state[id]=Object.assign({},cur,{collaborators}); touch(id); render(); await persist();
+};
+window.toggleTask=async function(pid,idx,checked){
+  const p=getProject(pid); const t=taskList(p)[idx]; const cur=getRow(pid);
+  const prev=cur.tasks[t]||{};
+  const tasks=Object.assign({},cur.tasks,{[t]:Object.assign({},prev,{done:checked})});
+  state[pid]=Object.assign({},cur,{tasks}); touch(pid); render(); await persist();
+};
+window.setTaskAssignee=async function(pid,idx,val){
+  const p=getProject(pid); const t=taskList(p)[idx]; const cur=getRow(pid);
+  const prev=cur.tasks[t]||{};
+  const tasks=Object.assign({},cur.tasks,{[t]:Object.assign({},prev,{assignee:val})});
+  state[pid]=Object.assign({},cur,{tasks}); touch(pid); render(); await persist();
+};
+window.setTaskDate=async function(pid,idx,field,val){
+  const p=getProject(pid); const t=taskList(p)[idx]; const cur=getRow(pid);
+  const prev=cur.tasks[t]||{};
+  const tasks=Object.assign({},cur.tasks,{[t]:Object.assign({},prev,{[field]:val})});
+  state[pid]=Object.assign({},cur,{tasks}); touch(pid); render(); await persist();
+};
+window.addTask=async function(id){
+  const inp=document.getElementById("add-"+id); const val=(inp.value||"").trim(); if(!val) return;
+  const cur=getRow(id); state[id]=Object.assign({},cur,{custom:cur.custom.concat([val])}); touch(id);
+  expanded.add(id); render(); await persist();
+};
+window.moveCustomTask=async function(pid,idx,dir){
+  const p=getProject(pid); const pos=customPos(p,idx); const cur=getRow(pid); const custom=cur.custom.slice();
+  const np=pos+dir; if(np<0||np>=custom.length) return;
+  const tmp=custom[pos]; custom[pos]=custom[np]; custom[np]=tmp;
+  state[pid]=Object.assign({},cur,{custom}); touch(pid); render(); await persist();
+};
+window.deleteCustomTask=async function(pid,idx){
+  const p=getProject(pid); const pos=customPos(p,idx); const name=taskList(p)[idx]; const cur=getRow(pid);
+  const custom=cur.custom.slice(); custom.splice(pos,1);
+  const tasks=Object.assign({},cur.tasks); delete tasks[name];
+  const subtasks=Object.assign({},cur.subtasks); delete subtasks[name];
+  state[pid]=Object.assign({},cur,{custom,tasks,subtasks}); touch(pid); render(); await persist();
+};
+window.addSubtask=async function(pid,idx){
+  const p=getProject(pid); const t=taskList(p)[idx];
+  const inp=document.getElementById(`subin-${pid}-${idx}`); const val=(inp.value||'').trim(); if(!val) return;
+  const cur=getRow(pid); const subtasks=Object.assign({},cur.subtasks);
+  const arr=materializedSubs(pid,t); arr.push({name:val,done:false,assignee:'',start:'',end:''}); subtasks[t]=arr;
+  expanded.add(pid); state[pid]=Object.assign({},cur,{subtasks}); touch(pid); render(); await persist();
+};
+window.toggleSubtask=async function(pid,idx,si,checked){
+  const p=getProject(pid); const t=taskList(p)[idx]; const cur=getRow(pid);
+  const subtasks=Object.assign({},cur.subtasks); const arr=materializedSubs(pid,t);
+  arr[si]=Object.assign({},arr[si],{done:checked}); subtasks[t]=arr;
+  state[pid]=Object.assign({},cur,{subtasks}); touch(pid); render(); await persist();
+};
+window.setSubtaskAssignee=async function(pid,idx,si,val){
+  const p=getProject(pid); const t=taskList(p)[idx]; const cur=getRow(pid);
+  const subtasks=Object.assign({},cur.subtasks); const arr=materializedSubs(pid,t);
+  arr[si]=Object.assign({},arr[si],{assignee:val}); subtasks[t]=arr;
+  state[pid]=Object.assign({},cur,{subtasks}); touch(pid); render(); await persist();
+};
+window.setSubtaskDate=async function(pid,idx,si,field,val){
+  const p=getProject(pid); const t=taskList(p)[idx]; const cur=getRow(pid);
+  const subtasks=Object.assign({},cur.subtasks); const arr=materializedSubs(pid,t);
+  arr[si]=Object.assign({},arr[si],{[field]:val}); subtasks[t]=arr;
+  state[pid]=Object.assign({},cur,{subtasks}); touch(pid); render(); await persist();
+};
+window.deleteSubtask=async function(pid,idx,si){
+  const p=getProject(pid); const t=taskList(p)[idx]; const cur=getRow(pid);
+  const subtasks=Object.assign({},cur.subtasks); const arr=materializedSubs(pid,t);
+  arr.splice(si,1); subtasks[t]=arr;
+  state[pid]=Object.assign({},cur,{subtasks}); touch(pid); render(); await persist();
+};
+window.addReceipt=async function(pid){
+  const amtEl=document.getElementById('recamt-'+pid); const moEl=document.getElementById('recmonth-'+pid);
+  const amt=Number(amtEl.value||0); if(!amt) return;
+  const mo=moEl.value===''?null:Number(moEl.value);
+  const cur=getRow(pid); const receipts=getReceipts(pid).slice();
+  receipts.push({amount:amt, month:mo});
+  state[pid]=Object.assign({},cur,{receipts}); touch(pid);
+  expanded.add(pid); render(); await persist();
+};
+window.setReceiptField=async function(pid,idx,field,val){
+  const cur=getRow(pid); const receipts=getReceipts(pid).slice();
+  receipts[idx]=Object.assign({},receipts[idx],{[field]:val});
+  state[pid]=Object.assign({},cur,{receipts}); touch(pid); render(); await persist();
+};
+window.deleteReceipt=async function(pid,idx){
+  const cur=getRow(pid); const receipts=getReceipts(pid).slice();
+  receipts.splice(idx,1);
+  state[pid]=Object.assign({},cur,{receipts}); touch(pid); render(); await persist();
+};
+window.toggleExpand=function(id){ expanded.has(id)?expanded.delete(id):expanded.add(id); renderProjectView(); };
+window.togglePerson=function(t){ expandedPerson.has(t)?expandedPerson.delete(t):expandedPerson.add(t); renderPersonView(); };
+
+document.querySelectorAll(".tabs button").forEach(b=>b.addEventListener("click",()=>{
+  document.querySelectorAll(".tabs button").forEach(x=>x.classList.remove("active"));
+  b.classList.add("active"); view=b.dataset.v; render();
+}));
+
+const whoSel=document.getElementById("whoami-select");
+whoSel.innerHTML='<option value="">（未選擇）</option>'+personOpts(whoAmI).replace('<option value="">未指派</option>','');
+whoSel.value=whoAmI;
+whoSel.addEventListener("change",e=>{ whoAmI=e.target.value; saveWhoAmI(whoAmI); });
+
+document.getElementById("searchbox").addEventListener("input",e=>{ searchTerm=e.target.value.trim(); renderProjectView(); });
+
+render();
+loadFromSheet();
+</script>
+</body>
+</html>
