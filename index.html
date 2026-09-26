@@ -96,7 +96,7 @@ select,input[type=number],input[type=text],input[type=date],input[type=url]{back
 .ganttaxis{display:flex;justify-content:space-between;font-size:.68rem;color:var(--sub);margin-bottom:4px;}
 .ganttbody{position:relative;}
 .ganttrow{display:flex;align-items:center;gap:8px;padding:3px 0;border-bottom:1px dashed var(--line);font-size:.74rem;}
-.ganttlabel{width:150px;flex-shrink:0;}
+.ganttlabel{width:150px;flex-shrink:0;position:sticky;left:0;background:var(--bg);z-index:2;padding-right:4px;}
 .ganttgrouprow{padding-top:8px;}
 .ganttweekrow{border-bottom:1px solid var(--line);padding-bottom:4px;margin-bottom:2px;}
 .ganttweeklabel{position:absolute;top:0;font-size:.64rem;color:var(--sub);white-space:nowrap;padding-left:2px;}
@@ -805,7 +805,7 @@ function ganttHtml(p){
     <div class="ganttlabel"></div>
     <div class="ganttbararea">${weekLabels.map(w=>`<span class="ganttweeklabel" style="left:${w.pct}%;">${w.label}</span>`).join('')}</div>
   </div>`;
-  const minWidthPx=Math.max(600, Math.round(totalDays*11));
+  const minWidthPx=Math.max(500, Math.round(totalDays*8));
   const body=`<div class="ganttscroll"><div class="ganttinner" style="min-width:${minWidthPx}px;">
        <div class="ganttaxis"><span>${shortDate(proj.start)}</span><span>${shortDate(proj.end)}</span></div>
        ${weekHeaderHtml}
