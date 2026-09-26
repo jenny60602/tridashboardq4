@@ -276,7 +276,7 @@ function getRow(id){
   return {status:r.status||"未開始", assignee:r.assignee||"",
     estOverride:(r.estOverride===undefined?null:r.estOverride), actual:(r.actual===undefined?null:r.actual),
     cost:(r.cost===undefined?null:r.cost), driveLink:r.driveLink||"", nameOverride:(r.nameOverride===undefined?null:r.nameOverride),
-    invoiceMonth:(r.invoiceMonth===undefined?null:r.invoiceMonth), paymentMethod:r.paymentMethod||"",
+    invoiceMonth:(r.invoiceMonth===undefined?null:r.invoiceMonth), paymentMethod:r.paymentMethod||"", installmentCount:r.installmentCount||2,
     startDate:r.startDate||null, endDate:r.endDate||null, lastEdit:r.lastEdit||null, notes:r.notes||"",
     taskRenames:r.taskRenames||{}, taskDeletes:r.taskDeletes||[],
     tasks:r.tasks||{}, subtasks:r.subtasks||{}, custom:r.custom||[]};
@@ -355,6 +355,7 @@ function taskList(p){ return baseTasksVisible(p).map(x=>x.display).concat(getRow
 function isCustomIdx(p,idx){ return idx>=baseTasksVisible(p).length; }
 function customPos(p,idx){ return idx-baseTasksVisible(p).length; }
 function rawBaseNameAt(p,idx){ const bv=baseTasksVisible(p); return bv[idx]?bv[idx].raw:null; }
+function findTaskDisplayByRaw(p,rawName){ const bv=baseTasksVisible(p); const m=bv.find(x=>x.raw===rawName); return m?m.display:null; }
 function materializedSubs(pid,t){
   const cur=getRow(pid);
   return (cur.subtasks[t]||[]).slice();
@@ -770,6 +771,8 @@ function detailRow(p){
       <label>預估營收<input type="number" value="${getEstRev(p)}" onchange="saveRev('${p.id}',this.value)"></label>
       <label>累積成本（財務填）<input type="number" value="${r.cost===null?'':r.cost}" onchange="setField('${p.id}','cost',this.value===''?null:Number(this.value))"></label>
       <label>付款方式<select onchange="setField('${p.id}','paymentMethod',this.value)">${paymentOpts}</select></label>
+      ${r.paymentMethod==='自訂分期'?`<label>期數<input type="number" min="1" value="${r.installmentCount}" onchange="setField('${p.id}','installmentCount',Number(this.value)||2)" style="width:60px;"></label>`:''}
+      ${r.paymentMethod?`<label>對應到甘特圖<button class="mini" onclick="syncPaymentSubtasks('${p.id}')" style="white-space:nowrap;">＋ 產生付款子項目</button></label>`:''}
       <label>起始日<input type="date" value="${range.start}" onchange="setField('${p.id}','startDate',this.value)"></label>
       <label>截止日<input type="date" value="${range.end}" onchange="setField('${p.id}','endDate',this.value)"></label>
       <label style="flex:1;min-width:220px;">雲端資料夾連結
@@ -1118,6 +1121,21 @@ window.deleteTopTask=async function(pid,idx){
   const p=getProject(pid);
   if(isCustomIdx(p,idx)) return deleteCustomTask(pid,idx);
   return deleteBaseTask(pid,idx);
+};
+window.syncPaymentSubtasks=async function(pid){
+  const p=getProject(pid); const cur=getRow(pid);
+  const method=cur.paymentMethod;
+  if(!method){ alert('請先選擇付款方式'); return; }
+  let names=[];
+  if(method==='一次付清') names=['全額'];
+  else if(method==='訂金+尾款') names=['訂金','尾款'];
+  else { const n=Math.max(1,Number(cur.installmentCount)||2); for(let i=1;i<=n;i++) names.push(`第${i}期`); }
+  const target=findTaskDisplayByRaw(p,'訂金');
+  if(!target){ alert('找不到「訂金」這個任務（可能已被刪除或改名），請確認任務清單裡還有這一項。'); return; }
+  if(!confirm(`將「${target}」底下的子項目換成：${names.join('、')}？\n（會覆蓋掉這個任務目前的子項目）`)) return;
+  const newSubs=names.map(nm=>({name:nm,done:false,assignee:'',start:'',end:''}));
+  const subtasks=Object.assign({},cur.subtasks,{[target]:newSubs});
+  expanded.add(pid); state[pid]=Object.assign({},cur,{subtasks}); touch(pid); render(); await persist();
 };
 window.addSubtask=async function(pid,idx){
   const p=getProject(pid); const t=taskList(p)[idx];
