@@ -122,11 +122,16 @@ select,input[type=number],input[type=text],input[type=date],input[type=url]{back
 .addtask input{flex:1;}
 .people{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;margin:8px 0 16px;}
 .persondetail{grid-column:1/-1;margin-top:0 !important;}
-.prow{padding:6px 0;border-bottom:1px dashed var(--line);}
+.prow{padding:5px 0;border-bottom:1px dashed var(--line);}
+.todogroup{padding:6px 0;border-bottom:1px dashed var(--line);}
+.todogroup:last-child{border-bottom:none;}
+.todohead{display:flex;align-items:center;gap:6px;font-size:.82rem;margin-bottom:3px;}
+.todoitem{display:flex;align-items:center;gap:6px;font-size:.78rem;color:var(--sub);padding:2px 0 2px 4px;cursor:pointer;}
 .prow:last-child{border-bottom:none;}
 .prow-top{display:flex;align-items:center;gap:6px;font-size:.82rem;flex-wrap:wrap;}
 .prow-bottom{display:flex;justify-content:space-between;gap:8px;font-size:.72rem;color:var(--sub);margin-top:3px;}
 .pname{font-weight:600;}
+.rolelabel{font-weight:400;font-size:.7rem;color:var(--sub);}
 .pcard{background:var(--card);border:1px solid var(--line);border-left:4px solid var(--line);border-radius:10px;padding:10px 12px;}
 .pcard.staff{border-left-color:var(--accent);}
 .pcard.partner{border-left-color:var(--accent2);}
@@ -205,8 +210,15 @@ const PROJECTS=[
 {id:"gift-jianxing-oil",cat:"禮盒",name:"建興儲存科技-苦茶油禮盒",rev:306000,plan:[0, 0, 0, 306000]},
 {id:"outsource-xiliang",cat:"委外",name:"喜亮太陽能",rev:170000,plan:[25000, 65000, 40000, 40000]}
 ];
-const TEAM_STAFF=["宜倩","嘉妤","思敏","潔如","緯襦","宜玟","芳寧","雅芬"];
+const TEAM_STAFF_G1=["宜倩","嘉妤","思敏","潔如"];
+const TEAM_STAFF_G2=["緯襦","宜玟","芳寧","雅芬"];
+const TEAM_STAFF=TEAM_STAFF_G1.concat(TEAM_STAFF_G2);
 const TEAM_PARTNER=["Jessica","鈺淳","紫倢","Mio"];
+const ROLES={
+  "宜倩":"總經理","嘉妤":"行銷企劃","思敏":"業務企劃","潔如":"設計企劃",
+  "Jessica":"專案企劃","鈺淳":"編輯企劃","緯襦":"營運經理","宜玟":"行政客服",
+  "芳寧":"店務","雅芬":"會計"
+};
 const TEAM=TEAM_STAFF.concat(TEAM_PARTNER);
 const STATUSES=["未開始","進行中","待收款","已完成"];
 const BASE_TASKS=["需求/報價確認","簽約/合約確認","執行/交付準備","請款/開立發票","收款確認"];
@@ -217,7 +229,7 @@ const URG_LABEL={overdue:"已逾期",soon7:"7天內到期",soon30:"30天內",lat
 
 const SHEET_API_URL="https://script.google.com/macros/s/AKfycbymRzIunZy7hUkAzy0UTsHi-22mVACE1HlZtsGCI2H3_FekAgnbdcQ_XsOwFVcve4h2gQ/exec";
 let state={};
-let view="project", catFilter="全部", statusFilter="全部", searchTerm="", expanded=new Set(), expandedPerson=new Set(), showAddForm=false, detailTab={};
+let view="project", catFilter="全部", statusFilter="全部", searchTerm="", expanded=new Set(), expandedPerson=new Set(), showAddForm=false, detailTab={}, todoExpandedSet=new Set();
 let ALLP=[];
 function loadWhoAmI(){ try{ return localStorage.getItem('dash_whoami')||''; }catch(e){ return ''; } }
 function saveWhoAmI(v){ try{ localStorage.setItem('dash_whoami',v); }catch(e){} }
@@ -324,10 +336,16 @@ function taskProgress(p){
   });
   return {done,total};
 }
+function whoAmIOpts(sel){
+  const label=n=>ROLES[n]?`${n}｜${ROLES[n]}`:n;
+  const so=TEAM_STAFF.map(x=>`<option value="${x}" ${sel===x?'selected':''}>${label(x)}</option>`).join('');
+  const po=TEAM_PARTNER.map(x=>`<option value="${x}" ${sel===x?'selected':''}>${label(x)}</option>`).join('');
+  return `<option value="">（未選擇）</option><optgroup label="三小文創">${so}</optgroup><optgroup label="合作夥伴">${po}</optgroup>`;
+}
 function personOpts(sel){
   const so=TEAM_STAFF.map(x=>`<option ${sel===x?'selected':''}>${x}</option>`).join('');
   const po=TEAM_PARTNER.map(x=>`<option ${sel===x?'selected':''}>${x}</option>`).join('');
-  return `<option value="">未指派</option><optgroup label="三小正式員工">${so}</optgroup><optgroup label="委外/見習">${po}</optgroup>`;
+  return `<option value="">未指派</option><optgroup label="三小文創">${so}</optgroup><optgroup label="合作夥伴">${po}</optgroup>`;
 }
 
 function urgency(p){
@@ -742,17 +760,45 @@ function personDetailHtml(t){
   });
   const ownedHtml=owned.map(p=>projRowHtml(p)).join("")||'<div class="prow small">（無）</div>';
   const collabHtml=collab.map(p=>projRowHtml(p)).join("")||'<div class="prow small">（無）</div>';
-  const taskHtml=myTasks.map(x=>{
-    const cb=x.si===null
-      ? `<input type="checkbox" ${x.done?'checked':''} onchange="toggleTask('${x.p.id}',${x.idx},this.checked)">`
-      : `<input type="checkbox" ${x.done?'checked':''} onchange="toggleSubtask('${x.p.id}',${x.idx},${x.si},this.checked)">`;
-    return `<div class="prow"><div class="prow-top">${cb}<span class="pname">${getName(x.p)}</span><span class="badge ${urgency(x.p)}" style="margin-left:auto;">${URG_LABEL[urgency(x.p)]}</span></div>
-      <div class="prow-bottom"><span>${x.name}</span></div></div>`;
-  }).join("")||'<div class="prow small">（目前沒有指派給你的任務項目）</div>';
+
+  // 我的待辦：只列還沒做完的，依專案分組，專案名稱不重複
+  const pending=myTasks.filter(x=>!x.done);
+  const byProject=new Map();
+  pending.forEach(x=>{ const k=x.p.id; if(!byProject.has(k)) byProject.set(k,[]); byProject.get(k).push(x); });
+  const projIds=[...byProject.keys()].sort((a,b)=>{
+    const pa=getProject(a), pb=getProject(b);
+    return URG_RANK[urgency(pa)]-URG_RANK[urgency(pb)] || new Date(getRange(pa).end)-new Date(getRange(pb).end);
+  });
+  const TODO_LIMIT=3;
+  const todoIsExpanded=todoExpandedSet.has(t);
+  const shownIds = todoIsExpanded ? projIds : projIds.slice(0,TODO_LIMIT);
+  const todoHtml = shownIds.length ? shownIds.map(pid=>{
+    const p=getProject(pid); const items=byProject.get(pid);
+    const lines=items.map(x=>{
+      const cb=x.si===null
+        ? `<input type="checkbox" onchange="toggleTask('${x.p.id}',${x.idx},this.checked)">`
+        : `<input type="checkbox" onchange="toggleSubtask('${x.p.id}',${x.idx},${x.si},this.checked)">`;
+      return `<label class="todoitem">${cb}<span>${x.name}</span></label>`;
+    }).join("");
+    return `<div class="todogroup">
+      <div class="todohead"><span class="pname">${getName(p)}</span><span class="cat">${p.cat}</span><span class="badge ${urgency(p)}">${URG_LABEL[urgency(p)]}</span></div>
+      ${lines}
+    </div>`;
+  }).join("") : `<div class="prow small">🎉 目前沒有待辦任務</div>`;
+  const moreBtn = projIds.length>TODO_LIMIT
+    ? (todoIsExpanded
+        ? `<button class="mini" onclick="toggleTodoExpand('${t}')" style="margin-top:6px;">只顯示最急的${TODO_LIMIT}個</button>`
+        : `<button class="mini" onclick="toggleTodoExpand('${t}')" style="margin-top:6px;">顯示全部（共${projIds.length}個待辦專案）</button>`)
+    : '';
+  const doneCount=myTasks.length-pending.length;
+
   return `<div class="priority plain persondetail">
-    <h3>負責的專案（依急迫度排序）</h3>${ownedHtml}
+    <h3 style="color:var(--ink);">我的待辦事項${pending.length?`（${pending.length}項）`:''}</h3>
+    ${todoHtml}
+    ${moreBtn}
+    ${doneCount?`<div class="small" style="margin-top:6px;">已完成 ${doneCount} 項（不列出）</div>`:''}
+    <h3 style="margin-top:16px;">負責的專案（依急迫度排序）</h3>${ownedHtml}
     <h3 style="margin-top:14px;">協作的專案（依急迫度排序）</h3>${collabHtml}
-    <h3 style="margin-top:14px;">指派給我的任務項目</h3>${taskHtml}
   </div>`;
 }
 
@@ -772,16 +818,19 @@ function personCard(t){
     ? `<div class="small" style="margin-top:5px;">🔺最優先：${getName(top)} <span class="badge ${urgency(top)}">${URG_LABEL[urgency(top)]}</span></div>`
     : `<div class="small" style="margin-top:5px;color:var(--ok);">✓ 目前沒有急件</div>`;
   const open=expandedPerson.has(t);
+  const role=ROLES[t];
   return `<div class="pcard ${group}" onclick="togglePerson('${t}')" style="cursor:pointer;">
-      <b>${t}</b><span>負責 ${activeOwned.length}/${owned.length} 案・協作 ${collabOn.length} 案・${taskCount} 項任務</span>${topHtml}
+      <b>${t}${role?` <span class="rolelabel">・${role}</span>`:''}</b><span>負責 ${activeOwned.length}/${owned.length} 案・協作 ${collabOn.length} 案・${taskCount} 項任務</span>${topHtml}
     </div>${open?personDetailHtml(t):''}`;
 }
 
 
 function renderPersonView(){
-  const legend=`<div style="display:flex;gap:10px;margin:6px 0 4px;"><span class="tag-staff">■ 三小正式員工</span><span class="tag-partner">■ 委外合作夥伴/見習生</span></div>`;
-  const staffCards=`<div class="small" style="margin:4px 0;">三小正式員工</div><div class="people">${TEAM_STAFF.map(personCard).join("")}</div>`;
-  const partnerCards=`<div class="small" style="margin:14px 0 4px;">委外合作夥伴／見習生</div><div class="people">${TEAM_PARTNER.map(personCard).join("")}</div>`;
+  const legend=`<div style="display:flex;gap:10px;margin:6px 0 4px;"><span class="tag-staff">■ 三小文創</span><span class="tag-partner">■ 合作夥伴</span></div>`;
+  const staffCards=`<div class="small" style="margin:4px 0;">三小文創</div>
+    <div class="people">${TEAM_STAFF_G1.map(personCard).join("")}</div>
+    <div class="people" style="margin-top:10px;">${TEAM_STAFF_G2.map(personCard).join("")}</div>`;
+  const partnerCards=`<div class="small" style="margin:14px 0 4px;">合作夥伴</div><div class="people">${TEAM_PARTNER.map(personCard).join("")}</div>`;
   const un=ALLP.filter(p=>!getRow(p.id).assignee);
   const unHtml=un.length ? `<div class="priority" style="margin-top:10px;"><h3>尚未指派負責人（${un.length}）</h3>
       ${un.map(p=>`<div class="row"><span>${getName(p)}（${p.cat}）</span><select style="width:150px;" onchange="setField('${p.id}','assignee',this.value)">${personOpts('')}</select></div>`).join('')}
@@ -969,6 +1018,7 @@ function getDetailTab(pid){ return detailTab[pid]||'basic'; }
 window.setDetailTab=function(pid,tab){ detailTab[pid]=tab; renderProjectView(); };
 window.toggleExpand=function(id){ expanded.has(id)?expanded.delete(id):expanded.add(id); renderProjectView(); };
 window.togglePerson=function(t){ expandedPerson.has(t)?expandedPerson.delete(t):expandedPerson.add(t); renderPersonView(); };
+window.toggleTodoExpand=function(t){ todoExpandedSet.has(t)?todoExpandedSet.delete(t):todoExpandedSet.add(t); renderPersonView(); };
 
 document.querySelectorAll(".tabs button").forEach(b=>b.addEventListener("click",()=>{
   document.querySelectorAll(".tabs button").forEach(x=>x.classList.remove("active"));
@@ -976,7 +1026,7 @@ document.querySelectorAll(".tabs button").forEach(b=>b.addEventListener("click",
 }));
 
 const whoSel=document.getElementById("whoami-select");
-whoSel.innerHTML='<option value="">（未選擇）</option>'+personOpts(whoAmI).replace('<option value="">未指派</option>','');
+whoSel.innerHTML=whoAmIOpts(whoAmI);
 whoSel.value=whoAmI;
 whoSel.addEventListener("change",e=>{ whoAmI=e.target.value; saveWhoAmI(whoAmI); });
 
