@@ -138,7 +138,8 @@ select,input[type=number],input[type=text],input[type=date],input[type=url]{back
 .todogroup{padding:6px 0;border-bottom:1px dashed var(--line);}
 .todogroup:last-child{border-bottom:none;}
 .todohead{display:flex;align-items:center;gap:6px;font-size:.82rem;margin-bottom:3px;}
-.todoitem{display:flex;align-items:center;gap:6px;font-size:.78rem;color:var(--sub);padding:2px 0 2px 4px;cursor:pointer;}
+.todochips{display:flex;flex-wrap:wrap;gap:6px;margin-top:2px;}
+.todochip{display:inline-flex;align-items:center;gap:5px;font-size:.75rem;color:var(--ink);background:var(--card);border:1px solid var(--line);border-radius:12px;padding:3px 9px;cursor:pointer;}
 .prow:last-child{border-bottom:none;}
 .prow-top{display:flex;align-items:center;gap:6px;font-size:.82rem;flex-wrap:wrap;}
 .prow-bottom{display:flex;justify-content:space-between;gap:8px;font-size:.72rem;color:var(--sub);margin-top:3px;}
@@ -241,7 +242,7 @@ const URG_LABEL={overdue:"已逾期",soon7:"7天內到期",soon30:"30天內",lat
 
 const SHEET_API_URL="https://script.google.com/macros/s/AKfycbymRzIunZy7hUkAzy0UTsHi-22mVACE1HlZtsGCI2H3_FekAgnbdcQ_XsOwFVcve4h2gQ/exec";
 let state={};
-let view="project", catFilter="全部", statusFilter="全部", searchTerm="", expanded=new Set(), expandedPerson=new Set(), showAddForm=false, detailTab={}, todoExpandedSet=new Set();
+let view="project", catFilter="全部", statusFilter="全部", searchTerm="", expanded=new Set(), expandedPerson=new Set(), showAddForm=false, detailTab={}, todoExpandedSet=new Set(), ownedCollabExpandedSet=new Set();
 let ALLP=[];
 function loadWhoAmI(){ try{ return localStorage.getItem('dash_whoami')||''; }catch(e){ return ''; } }
 function saveWhoAmI(v){ try{ localStorage.setItem('dash_whoami',v); }catch(e){} }
@@ -280,7 +281,7 @@ function getRow(id){
     cost:(r.cost===undefined?null:r.cost), driveLink:r.driveLink||"", nameOverride:(r.nameOverride===undefined?null:r.nameOverride),
     invoiceMonth:(r.invoiceMonth===undefined?null:r.invoiceMonth), paymentMethod:r.paymentMethod||"", installmentCount:r.installmentCount||2,
     startDate:r.startDate||null, endDate:r.endDate||null, lastEdit:r.lastEdit||null, notes:r.notes||"",
-    taskRenames:r.taskRenames||{}, taskDeletes:r.taskDeletes||[],
+    taskRenames:r.taskRenames||{}, taskDeletes:r.taskDeletes||[], taskOrder:r.taskOrder||[],
     tasks:r.tasks||{}, subtasks:r.subtasks||{}, custom:r.custom||[]};
 }
 function isStaff(n){return TEAM_STAFF.includes(n);}
@@ -353,11 +354,31 @@ function baseTasksVisible(p){
   const deletes=new Set(cur.taskDeletes); const renames=cur.taskRenames;
   return raw.filter(n=>!deletes.has(n)).map(n=>({raw:n, display:renames[n]||n}));
 }
-function taskList(p){ return baseTasksVisible(p).map(x=>x.display).concat(getRow(p.id).custom); }
-function isCustomIdx(p,idx){ return idx>=baseTasksVisible(p).length; }
-function customPos(p,idx){ return idx-baseTasksVisible(p).length; }
-function rawBaseNameAt(p,idx){ const bv=baseTasksVisible(p); return bv[idx]?bv[idx].raw:null; }
+function taskList(p){ return orderedEntries(p).map(e=>e.display); }
+function isCustomIdx(p,idx){ const e=entryAt(p,idx); return !!e && e.type==='custom'; }
+function customPos(p,idx){ const e=entryAt(p,idx); if(!e||e.type!=='custom') return -1; return getRow(p.id).custom.indexOf(e.key); }
+function rawBaseNameAt(p,idx){ const e=entryAt(p,idx); return (e&&e.type==='base')?e.key:null; }
 function findTaskDisplayByRaw(p,rawName){ const bv=baseTasksVisible(p); const m=bv.find(x=>x.raw===rawName); return m?m.display:null; }
+function effectiveOrder(p){
+  const cur=getRow(p.id);
+  if(cur.taskOrder && cur.taskOrder.length) return cur.taskOrder;
+  return baseTasksVisible(p).map(x=>x.raw).concat(cur.custom);
+}
+function orderedEntries(p){
+  const cur=getRow(p.id);
+  const order=effectiveOrder(p);
+  const baseVisible=baseTasksVisible(p); const baseMap={}; baseVisible.forEach(x=>{ baseMap[x.raw]=x.display; });
+  const customSet=new Set(cur.custom);
+  const seen=new Set(); const result=[];
+  order.forEach(key=>{
+    if(baseMap[key]!==undefined && !seen.has('b:'+key)){ result.push({type:'base',key,display:baseMap[key]}); seen.add('b:'+key); }
+    else if(customSet.has(key) && !seen.has('c:'+key)){ result.push({type:'custom',key,display:key}); seen.add('c:'+key); }
+  });
+  baseVisible.forEach(x=>{ if(!seen.has('b:'+x.raw)){ result.push({type:'base',key:x.raw,display:x.display}); seen.add('b:'+x.raw); } });
+  cur.custom.forEach(c=>{ if(!seen.has('c:'+c)){ result.push({type:'custom',key:c,display:c}); seen.add('c:'+c); } });
+  return result;
+}
+function entryAt(p,idx){ return orderedEntries(p)[idx]||null; }
 function materializedSubs(pid,t){
   const cur=getRow(pid);
   if(cur.subtasks[t] && cur.subtasks[t].length) return cur.subtasks[t].slice();
@@ -640,8 +661,7 @@ function taskItemHtml(p,idx){
       <select style="${selStyle(info.assignee)}" onchange="setTaskAssignee('${p.id}',${idx},this.value)">${personOptsWithVendor(info.assignee)}</select>
       <input type="text" class="mddate" placeholder="月/日" value="${shortDate(info.end)}" onchange="setTaskDeadline('${p.id}',${idx},this.value)" title="截止日（例如9/15，跨年可打2027/1/15）">`;
   }
-  const ctrl=(custom?`<button class="mini" onclick="moveCustomTask('${p.id}',${idx},-1)">▲</button><button class="mini" onclick="moveCustomTask('${p.id}',${idx},1)">▼</button>`:'')
-    + `<button class="mini danger" onclick="deleteTopTask('${p.id}',${idx})">✕</button>`;
+  const ctrl=`<button class="mini" onclick="moveTopTask('${p.id}',${idx},-1)">▲</button><button class="mini" onclick="moveTopTask('${p.id}',${idx},1)">▼</button><button class="mini danger" onclick="deleteTopTask('${p.id}',${idx})">✕</button>`;
   const children=subs.map((s,si)=>`<div class="subitem">
       <input type="checkbox" ${s.done?'checked':''} onchange="toggleSubtask('${p.id}',${idx},${si},this.checked)">
       <input type="text" class="subname" value="${esc(s.name)}" onchange="renameSubtask('${p.id}',${idx},${si},this.value)">
@@ -900,11 +920,11 @@ function personDetailHtml(t){
       const cb=x.si===null
         ? `<input type="checkbox" onchange="toggleTask('${x.p.id}',${x.idx},this.checked)">`
         : `<input type="checkbox" onchange="toggleSubtask('${x.p.id}',${x.idx},${x.si},this.checked)">`;
-      return `<label class="todoitem">${cb}<span>${x.name}</span></label>`;
+      return `<label class="todochip">${cb}<span>${x.name}</span></label>`;
     }).join("");
     return `<div class="todogroup">
       <div class="todohead"><span class="pname">${getName(p)}</span><span class="cat">${p.cat}</span><span class="badge ${urgency(p)}">${URG_LABEL[urgency(p)]}</span></div>
-      ${lines}
+      <div class="todochips">${lines}</div>
     </div>`;
   }).join("") : `<div class="prow small">🎉 目前沒有待辦任務</div>`;
   const moreBtn = projIds.length>TODO_LIMIT
@@ -913,14 +933,18 @@ function personDetailHtml(t){
         : `<button class="mini" onclick="toggleTodoExpand('${t}')" style="margin-top:6px;">顯示全部（共${projIds.length}個待辦專案）</button>`)
     : '';
   const doneCount=myTasks.length-pending.length;
+  const ocExpanded=ownedCollabExpandedSet.has(t);
+  const ocPane = ocExpanded ? `
+    <h3 style="margin-top:16px;">負責的專案（依急迫度排序）</h3>${ownedHtml}
+    <h3 style="margin-top:14px;">協作的專案（依急迫度排序）</h3>${collabHtml}` : '';
 
   return `<div class="priority plain persondetail">
     <h3 style="color:var(--ink);">我的待辦事項${pending.length?`（${pending.length}項）`:''}</h3>
     ${todoHtml}
     ${moreBtn}
     ${doneCount?`<div class="small" style="margin-top:6px;">已完成 ${doneCount} 項（不列出）</div>`:''}
-    <h3 style="margin-top:16px;">負責的專案（依急迫度排序）</h3>${ownedHtml}
-    <h3 style="margin-top:14px;">協作的專案（依急迫度排序）</h3>${collabHtml}
+    <button class="mini" style="margin-top:12px;" onclick="toggleOwnedCollab('${t}')">${ocExpanded?'收合':'顯示'}負責／協作專案清單（${owned.length}負責・${collab.length}協作）</button>
+    ${ocPane}
   </div>`;
 }
 
@@ -1086,18 +1110,21 @@ window.addTask=async function(id){
   const cur=getRow(id); state[id]=Object.assign({},cur,{custom:cur.custom.concat([val])}); touch(id);
   expanded.add(id); render(); await persist();
 };
-window.moveCustomTask=async function(pid,idx,dir){
-  const p=getProject(pid); const pos=customPos(p,idx); const cur=getRow(pid); const custom=cur.custom.slice();
-  const np=pos+dir; if(np<0||np>=custom.length) return;
-  const tmp=custom[pos]; custom[pos]=custom[np]; custom[np]=tmp;
-  state[pid]=Object.assign({},cur,{custom}); touch(pid); render(); await persist();
+window.moveTopTask=async function(pid,idx,dir){
+  const p=getProject(pid); const entries=orderedEntries(p);
+  const ni=idx+dir; if(ni<0||ni>=entries.length) return;
+  const keys=entries.map(e=>e.key);
+  const tmp=keys[idx]; keys[idx]=keys[ni]; keys[ni]=tmp;
+  const cur=getRow(pid);
+  state[pid]=Object.assign({},cur,{taskOrder:keys}); touch(pid); render(); await persist();
 };
 window.deleteCustomTask=async function(pid,idx){
   const p=getProject(pid); const pos=customPos(p,idx); const name=taskList(p)[idx]; const cur=getRow(pid);
   const custom=cur.custom.slice(); custom.splice(pos,1);
   const tasks=Object.assign({},cur.tasks); delete tasks[name];
   const subtasks=Object.assign({},cur.subtasks); delete subtasks[name];
-  state[pid]=Object.assign({},cur,{custom,tasks,subtasks}); touch(pid); render(); await persist();
+  const taskOrder=(cur.taskOrder||[]).filter(k=>k!==name);
+  state[pid]=Object.assign({},cur,{custom,tasks,subtasks,taskOrder}); touch(pid); render(); await persist();
 };
 window.renameCustomTask=async function(pid,idx,newName){
   const p=getProject(pid); const pos=customPos(p,idx); const cur=getRow(pid);
@@ -1105,7 +1132,8 @@ window.renameCustomTask=async function(pid,idx,newName){
   const custom=cur.custom.slice(); custom[pos]=nn;
   const tasks=Object.assign({},cur.tasks); if(tasks[oldName]!==undefined){ tasks[nn]=tasks[oldName]; delete tasks[oldName]; }
   const subtasks=Object.assign({},cur.subtasks); if(subtasks[oldName]!==undefined){ subtasks[nn]=subtasks[oldName]; delete subtasks[oldName]; }
-  state[pid]=Object.assign({},cur,{custom,tasks,subtasks}); touch(pid); render(); await persist();
+  const taskOrder=(cur.taskOrder||[]).map(k=>k===oldName?nn:k);
+  state[pid]=Object.assign({},cur,{custom,tasks,subtasks,taskOrder}); touch(pid); render(); await persist();
 };
 window.renameBaseTask=async function(pid,idx,newName){
   const p=getProject(pid); const raw=rawBaseNameAt(p,idx); if(!raw) return;
@@ -1225,6 +1253,7 @@ window.setDetailTab=function(pid,tab){ detailTab[pid]=tab; renderProjectView(); 
 window.toggleExpand=function(id){ expanded.has(id)?expanded.delete(id):expanded.add(id); renderProjectView(); };
 window.togglePerson=function(t){ expandedPerson.has(t)?expandedPerson.delete(t):expandedPerson.add(t); renderPersonView(); };
 window.toggleTodoExpand=function(t){ todoExpandedSet.has(t)?todoExpandedSet.delete(t):todoExpandedSet.add(t); renderPersonView(); };
+window.toggleOwnedCollab=function(t){ ownedCollabExpandedSet.has(t)?ownedCollabExpandedSet.delete(t):ownedCollabExpandedSet.add(t); renderPersonView(); };
 
 document.querySelectorAll(".tabs button").forEach(b=>b.addEventListener("click",()=>{
   document.querySelectorAll(".tabs button").forEach(x=>x.classList.remove("active"));
