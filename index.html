@@ -163,6 +163,7 @@ select,input[type=number],input[type=text],input[type=date],input[type=url]{back
 .pcard b{display:block;}
 .pcard span{color:var(--sub);font-size:.72rem;}
 .hint{color:var(--sub);font-size:.75rem;margin-top:16px;}
+.undotoast{position:fixed;bottom:16px;left:16px;right:16px;max-width:420px;margin:0 auto;background:var(--card);border:1px solid var(--accent2);border-radius:10px;padding:10px 14px;box-shadow:0 2px 10px rgba(0,0,0,.15);z-index:50;display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:.82rem;}
 .small{font-size:.7rem;color:var(--sub);}
 .chartbars{display:flex;gap:14px;align-items:flex-end;height:90px;margin-top:6px;}
 .chartcol{display:flex;flex-direction:column;align-items:center;flex:1;}
@@ -185,6 +186,7 @@ select,input[type=number],input[type=text],input[type=date],input[type=url]{back
     <button data-v="person">依人員</button>
   </div>
   <div id="restorebanner"></div>
+  <div id="undotoast"></div>
   <div id="priority"></div>
   <div id="monthchart" style="margin-bottom:12px;"></div>
   <div id="filterbar" class="filterbar">
@@ -254,7 +256,18 @@ const URG_LABEL={overdue:"已逾期",soon7:"7天內到期",soon30:"30天內",lat
 
 const SHEET_API_URL="https://script.google.com/macros/s/AKfycbymRzIunZy7hUkAzy0UTsHi-22mVACE1HlZtsGCI2H3_FekAgnbdcQ_XsOwFVcve4h2gQ/exec";
 let state={};
-let view="project", catFilter="全部", statusFilter="全部", searchTerm="", expanded=new Set(), expandedPerson=new Set(), showAddForm=false, detailTab={}, todoExpandedSet=new Set(), ownedCollabExpandedSet=new Set(), ganttGroupExpanded={};
+let view="project", catFilter="全部", statusFilter="全部", searchTerm="", expanded=new Set(), expandedPerson=new Set(), showAddForm=false, detailTab={}, todoExpandedSet=new Set(), ownedCollabExpandedSet=new Set(), ganttGroupExpanded={}, lastDeleteSnapshot=null;
+function showUndoToast(label){
+  const box=document.getElementById("undotoast");
+  box.innerHTML=`<span>已刪除：${label}</span><span style="display:flex;gap:6px;"><button onclick="undoLastDelete()" style="padding:4px 12px;border-radius:6px;border:1px solid var(--accent2);background:var(--accent2);color:#fff;cursor:pointer;font-size:.78rem;">復原</button><button class="mini" onclick="document.getElementById('undotoast').innerHTML=''">✕</button></span>`;
+}
+window.undoLastDelete=async function(){
+  if(!lastDeleteSnapshot) return;
+  const {pid,row}=lastDeleteSnapshot;
+  state[pid]=row; lastDeleteSnapshot=null;
+  document.getElementById("undotoast").innerHTML="";
+  render(); await persist();
+};
 let ALLP=[];
 function loadWhoAmI(){ try{ return localStorage.getItem('dash_whoami')||''; }catch(e){ return ''; } }
 function saveWhoAmI(v){ try{ localStorage.setItem('dash_whoami',v); }catch(e){} }
@@ -501,8 +514,9 @@ function diffLabel(p){
 
 function touch(pid){ const cur=state[pid]||{}; state[pid]=Object.assign({},cur,{lastEdit:{by:whoAmI||'',at:Date.now()}}); }
 
-let priorityTab='urgent';
+let priorityTab='urgent', priorityExpandedTabs=new Set();
 window.setPriorityTab=function(k){ priorityTab=k; renderPriority(); };
+window.togglePriorityExpand=function(k){ priorityExpandedTabs.has(k)?priorityExpandedTabs.delete(k):priorityExpandedTabs.add(k); renderPriority(); };
 function renderPriority(){
   const box=document.getElementById("priority");
   if(view!=="project"){ box.innerHTML=""; return; }
@@ -540,13 +554,16 @@ function renderPriority(){
     });
   });
   taskUrgent.sort((a,b)=>a.days-b.days);
-  const taskBody=taskUrgent.length? taskUrgent.map(x=>{
+  const TASK_LIMIT=10;
+  const taskExpanded=priorityExpandedTabs.has('task');
+  const shownTask=taskExpanded?taskUrgent:taskUrgent.slice(0,TASK_LIMIT);
+  const taskBody=taskUrgent.length? shownTask.map(x=>{
     const ctx=(x.prev||x.next)?`<div class="small" style="margin-top:2px;">${x.prev?`上一步：${x.prev}`:''}${x.prev&&x.next?'　':''}${x.next?`下一步：${x.next}`:''}</div>`:'';
     return `<div class="prow">
       <div class="prow-top"><span class="pname">${getName(x.p)} － ${x.label}</span>${assigneeTag(x.assignee)}<span class="badge ${x.days<0?'overdue':'soon7'}">${x.days<0?'已逾期':'7天內到期'}（${shortDate(x.end)}）</span></div>
       ${ctx}
     </div>`;
-  }).join("") : `<div class="small">✓ 目前沒有任務層級的急迫項目</div>`;
+  }).join("") + (taskUrgent.length>TASK_LIMIT ? `<button class="mini" style="margin-top:8px;" onclick="togglePriorityExpand('task')">${taskExpanded?`只顯示前${TASK_LIMIT}項`:`顯示全部（共${taskUrgent.length}項）`}</button>` : '') : `<div class="small">✓ 目前沒有任務層級的急迫項目</div>`;
 
   // 停滯提醒：進行中/待收款但任務完全沒開始，且已過起始日7天以上
   const today=new Date(); today.setHours(0,0,0,0);
@@ -1111,7 +1128,7 @@ function vendorCard(v){
   }));
   return `<div class="pcard" style="border-left-color:#c9a227;">
       <div style="display:flex;justify-content:space-between;align-items:center;">
-        <b>${v}</b><button class="mini" onclick="renameVendor('${esc(v)}')" title="改名（會同步更新所有指派給這個名字的任務）">✎ 改名</button>
+        <b>${v}</b><button class="mini" onclick="renameVendor('${esc(v)}')" title="改名（會同步更新所有指派給這個名字的任務）">✎</button>
       </div>
       <span>${taskCount} 項任務</span>
     </div>`;
@@ -1256,11 +1273,14 @@ window.moveTopTask=async function(pid,idx,dir){
 };
 window.deleteCustomTask=async function(pid,idx){
   const p=getProject(pid); const pos=customPos(p,idx); const name=taskList(p)[idx]; const cur=getRow(pid);
+  if(!confirm(`確定要刪除「${name}」這個任務嗎？底下的子項目也會一併移除。`)) return;
+  lastDeleteSnapshot={pid,row:JSON.parse(JSON.stringify(cur))};
   const custom=cur.custom.slice(); custom.splice(pos,1);
   const tasks=Object.assign({},cur.tasks); delete tasks[name];
   const subtasks=Object.assign({},cur.subtasks); delete subtasks[name];
   const taskOrder=(cur.taskOrder||[]).filter(k=>k!==name);
   state[pid]=Object.assign({},cur,{custom,tasks,subtasks,taskOrder}); touch(pid); render(); await persist();
+  showUndoToast(`任務「${name}」`);
 };
 window.renameCustomTask=async function(pid,idx,newName){
   const p=getProject(pid); const pos=customPos(p,idx); const cur=getRow(pid);
@@ -1283,9 +1303,12 @@ window.renameBaseTask=async function(pid,idx,newName){
 };
 window.deleteBaseTask=async function(pid,idx){
   const p=getProject(pid); const raw=rawBaseNameAt(p,idx); if(!raw) return;
+  if(!confirm(`確定要刪除「${raw}」這個任務嗎？底下的子項目也會一併移除。`)) return;
   const cur=getRow(pid);
+  lastDeleteSnapshot={pid,row:JSON.parse(JSON.stringify(cur))};
   const taskDeletes=cur.taskDeletes.concat([raw]);
   state[pid]=Object.assign({},cur,{taskDeletes}); touch(pid); render(); await persist();
+  showUndoToast(`任務「${raw}」`);
 };
 window.renameTopTask=async function(pid,idx,newName){
   const p=getProject(pid);
@@ -1347,9 +1370,13 @@ window.setSubtaskDeadline=async function(pid,idx,si,mdVal){
 };
 window.deleteSubtask=async function(pid,idx,si){
   const p=getProject(pid); const t=taskList(p)[idx]; const cur=getRow(pid);
+  const peek=materializedSubs(pid,t); const subName=peek[si]?peek[si].name:'這個子項目';
+  if(!confirm(`確定要刪除子項目「${subName}」嗎？`)) return;
+  lastDeleteSnapshot={pid,row:JSON.parse(JSON.stringify(cur))};
   const subtasks=Object.assign({},cur.subtasks); const arr=materializedSubs(pid,t);
   arr.splice(si,1); subtasks[t]=arr;
   state[pid]=Object.assign({},cur,{subtasks}); touch(pid); render(); await persist();
+  showUndoToast(`子項目「${subName}」`);
 };
 window.moveSubtask=async function(pid,idx,si,dir){
   const p=getProject(pid); const t=taskList(p)[idx]; const cur=getRow(pid);
@@ -1386,9 +1413,13 @@ window.setReceiptField=async function(pid,idx,field,val){
   state[pid]=Object.assign({},cur,{receipts}); touch(pid); render(); await persist();
 };
 window.deleteReceipt=async function(pid,idx){
-  const cur=getRow(pid); const receipts=getReceipts(pid).slice();
+  const cur=getRow(pid);
+  if(!confirm('確定要刪除這一期收款紀錄嗎？')) return;
+  lastDeleteSnapshot={pid,row:JSON.parse(JSON.stringify(cur))};
+  const receipts=getReceipts(pid).slice();
   receipts.splice(idx,1);
   state[pid]=Object.assign({},cur,{receipts}); touch(pid); render(); await persist();
+  showUndoToast('這一期收款紀錄');
 };
 function getDetailTab(pid){ return detailTab[pid]||'basic'; }
 window.setDetailTab=function(pid,tab){ detailTab[pid]=tab; renderProjectView(); };
