@@ -1065,9 +1065,7 @@ function taskItemHtml(p,idx){
     const d=subs.filter(s=>s.done).length;
     const ends=subs.map(s=>s.end).filter(Boolean);
     const periodTxt = ends.length ? `・工作期 ${shortDate(ends.reduce((a,b)=>a<b?a:b))}–${shortDate(ends.reduce((a,b)=>a>b?a:b))}` : '';
-    const audiencesPresent=[...new Set(subs.map(s=>s.audience).filter(Boolean))];
-    const audienceDots=audiencesPresent.map(a=>audienceBadge(a)).join('');
-    head=`${audienceDots}${nameInput}<span class="progtxt">（${d}/${subs.length} 項完成${periodTxt}）</span>`;
+    head=`${nameInput}<span class="progtxt">（${d}/${subs.length} 項完成${periodTxt}）</span>`;
   } else if(p.cat==="2C零售"){
     head=`${nameInput}<span class="progtxt">（尚未新增任務，自行加入常態或專案項目）</span>`;
   } else {
