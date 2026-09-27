@@ -120,7 +120,8 @@ select,input[type=number],input[type=text],input[type=date],input[type=url]{back
 .ownbar-done{background:var(--line);}
 .ganttbar-done{opacity:.35;}
 .ganttToday{position:absolute;top:0;bottom:0;width:2px;background:var(--warn);z-index:2;}
-.ganttEventStar{position:absolute;top:50%;transform:translate(-50%,-50%);font-size:11px;line-height:1;color:#9b59b6;z-index:3;text-shadow:-1px -1px 0 #fff,1px -1px 0 #fff,-1px 1px 0 #fff,1px 1px 0 #fff,0 0 3px #fff;}
+.ganttEventDot{position:absolute;top:50%;left:0;transform:translate(-50%,-50%);width:10px;height:10px;border-radius:50%;background:#2c5f7c;border:2px solid #fff;z-index:3;box-shadow:0 0 0 1px rgba(0,0,0,.18);}
+.ganttEventLine{position:absolute;top:0;bottom:0;width:2px;background:#2c5f7c;z-index:1;opacity:.55;}
 .notesbox{width:100%;min-height:70px;padding:8px;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--ink);font-size:.8rem;font-family:inherit;resize:vertical;}
 .monthgridscroll{overflow-x:auto;margin-top:6px;}
 .monthgrid{display:flex;gap:8px;flex-wrap:nowrap;}
@@ -906,9 +907,8 @@ function ganttHtml(p){
   const pct=(iso)=>{ const d=new Date(iso+"T00:00:00"); const c=d<rangeStart?rangeStart:(d>rangeEnd?rangeEnd:d); return (c-rangeStart)/totalMs*100; };
   const dayCount=(a,b)=>Math.round((new Date(b+"T00:00:00")-new Date(a+"T00:00:00"))/86400000)+1;
   const prForEvent=getRow(p.id);
-  (prForEvent.eventDates||[]).forEach(ed=>{
-    overlayHtml += `<span class="ganttEventStar" style="left:${pct(ed)}%;" title="活動日：${shortDate(ed)}">★</span>`;
-  });
+  const eventDotsHtml=(prForEvent.eventDates||[]).map(ed=>`<span class="ganttEventDot" style="left:${pct(ed)}%;" title="活動日：${shortDate(ed)}"></span>`).join('');
+  (prForEvent.eventDates||[]).forEach(ed=>{ overlayHtml += `<div class="ganttEventLine" style="left:${pct(ed)}%;"></div>`; });
 
   // pre-compute each group's min/max span
   const groupSpan={};
@@ -955,11 +955,16 @@ function ganttHtml(p){
     <div class="ganttlabel"></div>
     <div class="ganttbararea">${weekLabels.map(w=>`<span class="ganttweeklabel" style="left:${w.pct}%;">${w.label}</span>`).join('')}</div>
   </div>`;
+  const eventRowHtml=eventDotsHtml?`<div class="ganttrow" style="min-height:16px;">
+    <div class="ganttlabel small">活動日</div>
+    <div class="ganttbararea">${eventDotsHtml}</div>
+  </div>`:'';
   const minWidthPx=Math.max(500, Math.round(totalDays*8));
   const body=`<div class="ganttscroll"><div class="ganttinner" style="min-width:${minWidthPx}px;">
        <div class="gantthead">
          <div class="ganttaxis"><span>${shortDate(proj.start)}</span><span>${shortDate(proj.end)}</span></div>
          ${weekHeaderHtml}
+         ${eventRowHtml}
        </div>
        <div class="ganttbody">${barsHtml}</div>
        </div></div>`;
@@ -1122,7 +1127,7 @@ function personOwnedTimelineHtml(t){
     const cls = li.done?'ownbar-done' : li.overdue?'ownbar-overdue' : li.lag>=0.2?'ownbar-lag':'ownbar-normal';
     const left=pctOf(x.r.start), width=Math.max(2,pctOf(x.r.end)-pctOf(x.r.start));
     const rowRow=getRow(x.p.id);
-    const eventMark=(rowRow.eventDates||[]).map(ed=>`<span class="ganttEventStar" style="left:${pctOf(ed)}%;" title="活動日：${shortDate(ed)}">★</span>`).join('');
+    const eventMark=(rowRow.eventDates||[]).map(ed=>`<span class="ganttEventDot" style="left:${pctOf(ed)}%;" title="活動日：${shortDate(ed)}"></span>`).join('');
     return `<div class="ganttrow" onclick="goToProject('${x.p.id}')" style="cursor:pointer;">
       <div class="ganttlabel"><span class="cat">${x.p.cat}</span> ${getName(x.p)}</div>
       <div class="ganttbararea">${overlayHtml}<div class="ganttbar ${cls}" style="left:${left}%;width:${width}%;" title="${shortDate(x.r.start)}–${shortDate(x.r.end)}"></div>${eventMark}</div>
@@ -1139,7 +1144,7 @@ function personOwnedTimelineHtml(t){
   const eventByDate={};
   ranges.forEach(x=>{ (getRow(x.p.id).eventDates||[]).forEach(ed=>{ (eventByDate[ed]=eventByDate[ed]||[]).push(getName(x.p)); }); });
   const clashes=Object.entries(eventByDate).filter(([d,names])=>names.length>1);
-  const eventClashNote=clashes.length? `<div class="small" style="margin-top:2px;color:#9b59b6;">★ 活動日撞期：${clashes.map(([d,names])=>`${shortDate(d)}（${names.join('、')}）`).join('；')}</div>` : '';
+  const eventClashNote=clashes.length? `<div class="small" style="margin-top:2px;color:#2c5f7c;">● 活動日撞期：${clashes.map(([d,names])=>`${shortDate(d)}（${names.join('、')}）`).join('；')}</div>` : '';
   return `<div class="gantt"><div class="ganttscroll"><div class="ganttinner" style="min-width:${minWidthPx}px;">
     <div class="gantthead">
       <div class="ganttaxis"><span>${shortDate(minStart)}</span><span>${shortDate(maxEnd)}</span></div>
