@@ -724,8 +724,10 @@ window.toggleAllMonths=function(){ monthTableOpen=!monthTableOpen; renderPriorit
 window.toggleMonthCatTable=function(cat){ monthCatTableExpanded.has(cat)?monthCatTableExpanded.delete(cat):monthCatTableExpanded.add(cat); renderPriority(); };
 function monthlyTotals(){
   const confirmed={}, estimated={}; CHART_MONTHS.forEach(m=>{confirmed[m]=0;estimated[m]=0;});
+  const coreByM={}, nonOpByM={}; CHART_MONTHS.forEach(m=>{coreByM[m]=0;nonOpByM[m]=0;});
   ALLP.forEach(p=>{
     const pr=getRow(p.id);
+    const nonOp=isNonOp(p);
     const receipts=getReceipts(p.id);
     const fm=pr.revMonth || Number(getRange(p).end.split('-')[1]);
     const confirmedMonths=new Set();
@@ -735,19 +737,20 @@ function monthlyTotals(){
       if(confirmed[m]===undefined) return;
       confirmed[m]+=amt;
       confirmedMonths.add(m);
+      if(nonOp) nonOpByM[m]+=amt; else coreByM[m]+=amt;
     });
     const plan=(pr.estPlan&&pr.estPlan.length) ? null : (pr.revMonth ? null : planScaled(p));
     if(pr.estPlan && pr.estPlan.length){
       pr.estPlan.forEach(e=>{
         if(estimated[e.month]===undefined) return;
-        if(!confirmedMonths.has(e.month)) estimated[e.month]+=Number(e.amount||0);
+        if(!confirmedMonths.has(e.month)){ estimated[e.month]+=Number(e.amount||0); if(nonOp) nonOpByM[e.month]+=Number(e.amount||0); else coreByM[e.month]+=Number(e.amount||0); }
       });
     } else if(plan){
       [9,10,11,12].forEach((m,i)=>{
-        if(!confirmedMonths.has(m)) estimated[m]+=plan[i];
+        if(!confirmedMonths.has(m)){ estimated[m]+=plan[i]; if(nonOp) nonOpByM[m]+=plan[i]; else coreByM[m]+=plan[i]; }
       });
     } else if(!confirmedMonths.has(fm) && estimated[fm]!==undefined){
-      estimated[fm]+=getEstRev(p);
+      estimated[fm]+=getEstRev(p); if(nonOp) nonOpByM[fm]+=getEstRev(p); else coreByM[fm]+=getEstRev(p);
     }
   });
   const totals={}; CHART_MONTHS.forEach(m=>totals[m]=confirmed[m]+estimated[m]);
@@ -755,7 +758,11 @@ function monthlyTotals(){
   const q1Total=[1,2,3].reduce((s,m)=>s+totals[m],0);
   const q4Confirmed=[9,10,11,12].reduce((s,m)=>s+confirmed[m],0);
   const q1Confirmed=[1,2,3].reduce((s,m)=>s+confirmed[m],0);
-  return {confirmed, estimated, totals, q4Total, q1Total, q4Confirmed, q1Confirmed};
+  const q4Core=[9,10,11,12].reduce((s,m)=>s+coreByM[m],0);
+  const q4NonOp=[9,10,11,12].reduce((s,m)=>s+nonOpByM[m],0);
+  const q1Core=[1,2,3].reduce((s,m)=>s+coreByM[m],0);
+  const q1NonOp=[1,2,3].reduce((s,m)=>s+nonOpByM[m],0);
+  return {confirmed, estimated, totals, q4Total, q1Total, q4Confirmed, q1Confirmed, q4Core, q4NonOp, q1Core, q1NonOp};
 }
 function monthCategoryTableHtml(){
   const cats=[]; const data={}; const projData={};
@@ -799,10 +806,23 @@ function monthCategoryTableHtml(){
     return headerLine+projLines;
   }).join('');
   const totalCells=CHART_MONTHS.map((m,mi)=>monthCell(`<b>${fmt(colTotal(m))}</b>`,mi)).join('');
+  const coreCats=cats.filter(c=>c!=="政府"), nonOpCats=cats.filter(c=>c==="政府");
+  const coreSum=m=>coreCats.reduce((s,c)=>s+(data[c][m]||0),0);
+  const nonOpSum=m=>nonOpCats.reduce((s,c)=>s+(data[c][m]||0),0);
+  const coreTotal=CHART_MONTHS.reduce((s,m)=>s+coreSum(m),0);
+  const nonOpTotal=CHART_MONTHS.reduce((s,m)=>s+nonOpSum(m),0);
+  const coreCells=CHART_MONTHS.map((m,mi)=>monthCell(fmt(coreSum(m)),mi)).join('');
+  const nonOpCells=CHART_MONTHS.map((m,mi)=>monthCell(fmt(nonOpSum(m)),mi)).join('');
+  const subtotalRows=`<div class="mtable-row" style="padding:4px 0;border-top:1px solid var(--line);color:var(--sub);">
+      <div>核心營收小計</div>${coreCells}<div style="text-align:right;">${fmt(coreTotal)}</div>
+    </div>
+    <div class="mtable-row" style="padding:4px 0;color:var(--sub);">
+      <div>營業外收入小計</div>${nonOpCells}<div style="text-align:right;">${fmt(nonOpTotal)}</div>
+    </div>`;
   const totalRow=`<div class="mtable-row" style="padding:4px 0;">
     <div style="font-weight:600;">合計</div>${totalCells}<div style="text-align:right;font-weight:600;">${fmt(grandTotal)}</div>
   </div>`;
-  return `<div style="overflow-x:auto;margin-top:8px;font-size:.78rem;">${headerRow}${bodyRows}${totalRow}</div>`;
+  return `<div style="overflow-x:auto;margin-top:8px;font-size:.78rem;">${headerRow}${bodyRows}${subtotalRows}${totalRow}</div>`;
 }
 function monthlyChartBody(){
   const {confirmed, estimated, totals, q4Total, q1Total}=monthlyTotals();
@@ -866,9 +886,9 @@ function renderStats(){
       <div class="stats">
         <div class="stat clickable" onclick="gotoStatus('全部')"><b>${ALLP.length}</b><span>專案總數</span></div>
         <div class="stat"><b>${pct}%</b><span>全公司任務完成率</span>${noTaskCount?`<span class="small" style="color:var(--accent2);cursor:pointer;text-decoration:underline;text-decoration-style:dotted;" onclick="gotoNoTaskList()">${noTaskCount}個專案還沒拆過任務清單</span>`:''}</div>
-        <div class="stat"><b>${fmt(mt.q4Total)}</b><span>2026Q4 認列營收（未稅，估+實收）</span></div>
+        <div class="stat"><b>${fmt(mt.q4Total)}</b><span>2026Q4 認列營收（未稅，估+實收）</span><span class="small">核心 ${fmt(mt.q4Core)}／營業外 ${fmt(mt.q4NonOp)}</span></div>
         <div class="stat"><b style="color:${q4Margin<0?'var(--warn)':'var(--ink)'}">${mt.q4Total?Math.round(q4Margin/mt.q4Total*100)+'%':'—'}</b><span>2026Q4 毛利率估算</span><span class="small">毛利 ${fmt(q4Margin)}</span></div>
-        <div class="stat"><b>${fmt(mt.q1Total)}</b><span>2027Q1 認列營收（未稅，估+實收）</span></div>
+        <div class="stat"><b>${fmt(mt.q1Total)}</b><span>2027Q1 認列營收（未稅，估+實收）</span><span class="small">核心 ${fmt(mt.q1Core)}／營業外 ${fmt(mt.q1NonOp)}</span></div>
         <div class="stat"><b style="color:${q1Margin<0?'var(--warn)':'var(--ink)'}">${mt.q1Total?Math.round(q1Margin/mt.q1Total*100)+'%':'—'}</b><span>2027Q1 毛利率估算</span><span class="small">毛利 ${fmt(q1Margin)}</span></div>
       </div>
     </div>`;
