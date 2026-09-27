@@ -332,7 +332,7 @@ function getRow(id){
     invoiceMonth:(r.invoiceMonth===undefined?null:r.invoiceMonth), revMonth:(r.revMonth===undefined?null:r.revMonth), estPlan:r.estPlan||[], paymentMethod:r.paymentMethod||"", installmentCount:r.installmentCount||2,
     startDate:r.startDate||null, endDate:r.endDate||null, eventDates:(r.eventDates||(r.eventDate?[r.eventDate]:[])).map(e=>typeof e==='string'?{date:e,label:''}:e), lastEdit:r.lastEdit||null, notes:r.notes||"",
     taskRenames:r.taskRenames||{}, taskDeletes:r.taskDeletes||[], taskOrder:r.taskOrder||[],
-    tasks:r.tasks||{}, subtasks:r.subtasks||{}, custom:r.custom||[]};
+    tasks:r.tasks||{}, subtasks:r.subtasks||{}, custom:r.custom||[], receipts:r.receipts||[]};
 }
 function isStaff(n){return TEAM_STAFF.includes(n);}
 function isVendor(n){ return !!n && !TEAM.includes(n); }
@@ -1531,7 +1531,7 @@ function render(){
   if(aid){
     const el=document.getElementById(aid);
     if(el){
-      el.focus();
+      try{ el.focus(); }catch(e){}
       if(selStart!=null && typeof el.setSelectionRange==="function"){
         try{ el.setSelectionRange(selStart,selEnd); }catch(e){}
       }
@@ -1801,7 +1801,9 @@ window.setSubtaskNote=async function(pid,idx,si,val){
 };
 window.addReceipt=async function(pid){
   const amtEl=document.getElementById('recamt-'+pid); const moEl=document.getElementById('recmonth-'+pid);
-  const amt=Number(amtEl.value||0); if(!amt) return;
+  if(!amtEl||!moEl){ alert('發生錯誤，請重新整理頁面再試一次'); return; }
+  const amt=Number(amtEl.value||0);
+  if(!amt){ alert('請先輸入金額（不能是空白或0）'); amtEl.focus(); return; }
   const mo=moEl.value===''?null:Number(moEl.value);
   const cur=getRow(pid); const receipts=getReceipts(pid).slice();
   receipts.push({amount:amt, month:mo});
