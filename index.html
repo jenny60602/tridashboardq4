@@ -114,6 +114,10 @@ select,input[type=number],input[type=text],input[type=date],input[type=url]{back
 .ganttbar-partner{background:var(--accent2);}
 .ganttbar-vendor{background:#c9a227;}
 .ganttbar-none{background:var(--line);}
+.ownbar-normal{background:#5a8a5a;}
+.ownbar-lag{background:var(--accent2);}
+.ownbar-overdue{background:var(--warn);}
+.ownbar-done{background:var(--line);}
 .ganttbar-done{opacity:.35;}
 .ganttToday{position:absolute;top:0;bottom:0;width:2px;background:var(--warn);z-index:2;}
 .notesbox{width:100%;min-height:70px;padding:8px;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--ink);font-size:.8rem;font-family:inherit;resize:vertical;}
@@ -1067,6 +1071,62 @@ function projRowHtml(p,badgeHtml){
     <div class="prow-bottom"><span>${r.status}・迄 ${shortDate(getRange(p).end)}</span><span>任務 ${tp.done}/${tp.total}（${pct}%）</span></div>
   </div>`;
 }
+function personOwnedTimelineHtml(t){
+  const owned=ALLP.filter(p=>getRow(p.id).status!=="已完成" && getRow(p.id).assignee===t);
+  if(!owned.length) return `<div class="small">目前沒有負責中的專案</div>`;
+  const ranges=owned.map(p=>({p,r:getRange(p)}));
+  let minStart=ranges[0].r.start, maxEnd=ranges[0].r.end;
+  ranges.forEach(x=>{ if(x.r.start<minStart) minStart=x.r.start; if(x.r.end>maxEnd) maxEnd=x.r.end; });
+  ranges.sort((a,b)=>a.r.start.localeCompare(b.r.start));
+  const rangeStart=new Date(minStart+"T00:00:00"), rangeEnd=new Date(maxEnd+"T00:00:00");
+  const totalMs=(rangeEnd-rangeStart)||1;
+  const totalDays=Math.max(1,Math.round(totalMs/86400000));
+  const pctOf=d=>{ const dt=new Date(d+"T00:00:00"); return Math.max(0,Math.min(100,(dt-rangeStart)/totalMs*100)); };
+  const today=new Date(); today.setHours(0,0,0,0);
+  const todayPct=(today>=rangeStart&&today<=rangeEnd)?((today-rangeStart)/totalMs*100):null;
+  const gridLines=[]; const weekLabels=[];
+  for(let d=0;d<=totalDays;d+=7){
+    gridLines.push(d/totalDays*100);
+    if(d<totalDays){
+      const wd=new Date(rangeStart); wd.setDate(wd.getDate()+d);
+      const wom=Math.ceil(wd.getDate()/7);
+      weekLabels.push({pct:d/totalDays*100, label:`${wd.getMonth()+1}月W${wom}`});
+    }
+  }
+  const overlayHtml=gridLines.map(pc=>`<div class="ganttgrid" style="left:${pc}%;"></div>`).join('')
+    + (todayPct!==null?`<div class="ganttToday" style="left:${todayPct}%;"></div>`:'');
+  let maxOverlap=0, maxOverlapDate=null;
+  for(let d=0; d<=totalDays; d++){
+    const day=new Date(rangeStart); day.setDate(day.getDate()+d);
+    const dayStr=`${day.getFullYear()}-${pad(day.getMonth()+1)}-${pad(day.getDate())}`;
+    const count=ranges.filter(x=>dayStr>=x.r.start && dayStr<=x.r.end).length;
+    if(count>maxOverlap){ maxOverlap=count; maxOverlapDate=dayStr; }
+  }
+  const rows=ranges.map(x=>{
+    const li=lagInfo(x.p);
+    const cls = li.done?'ownbar-done' : li.overdue?'ownbar-overdue' : li.lag>=0.2?'ownbar-lag':'ownbar-normal';
+    const left=pctOf(x.r.start), width=Math.max(2,pctOf(x.r.end)-pctOf(x.r.start));
+    return `<div class="ganttrow" onclick="goToProject('${x.p.id}')" style="cursor:pointer;">
+      <div class="ganttlabel"><span class="cat">${x.p.cat}</span> ${getName(x.p)}</div>
+      <div class="ganttbararea">${overlayHtml}<div class="ganttbar ${cls}" style="left:${left}%;width:${width}%;" title="${shortDate(x.r.start)}–${shortDate(x.r.end)}"></div></div>
+    </div>`;
+  }).join('');
+  const weekHeaderHtml=`<div class="ganttrow ganttweekrow">
+    <div class="ganttlabel"></div>
+    <div class="ganttbararea">${weekLabels.map(w=>`<span class="ganttweeklabel" style="left:${w.pct}%;">${w.label}</span>`).join('')}</div>
+  </div>`;
+  const minWidthPx=Math.max(500, Math.round(totalDays*6));
+  const overlapNote = maxOverlap>=3
+    ? `<div class="small" style="margin-top:6px;color:var(--warn);">⚠ ${shortDate(maxOverlapDate)} 前後同時有 ${maxOverlap} 個負責的專案重疊執行，負荷可能偏重。</div>`
+    : `<div class="small" style="margin-top:6px;">目前最多同時重疊 ${maxOverlap} 個負責的專案。</div>`;
+  return `<div class="gantt"><div class="ganttscroll"><div class="ganttinner" style="min-width:${minWidthPx}px;">
+    <div class="gantthead">
+      <div class="ganttaxis"><span>${shortDate(minStart)}</span><span>${shortDate(maxEnd)}</span></div>
+      ${weekHeaderHtml}
+    </div>
+    <div class="ganttbody">${rows}</div>
+  </div></div>${overlapNote}</div>`;
+}
 function personMonthlyHtml(t){
   const items=[];
   ALLP.forEach(p=>{
@@ -1145,6 +1205,7 @@ function personDetailHtml(t){
     ${todoHtml}
     ${moreBtn}
     ${doneCount?`<div class="small" style="margin-top:6px;">已完成 ${doneCount} 項（不列出）</div>`:''}
+    ${owned.length?`<h3 style="margin-top:16px;">負責專案時間軸（看是否重疊過多）</h3>${personOwnedTimelineHtml(t)}`:''}
     <h3 style="margin-top:16px;">本季每月重點（依截止日）</h3>
     ${personMonthlyHtml(t)}
     <button class="mini" style="margin-top:12px;" onclick="toggleOwnedCollab('${t}')">${ocExpanded?'收合':'顯示'}負責／協作專案清單（${owned.length}負責・${collab.length}協作）</button>
