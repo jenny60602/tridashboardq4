@@ -120,6 +120,7 @@ tr.rowopen td:first-child{box-shadow:inset 4px 0 0 var(--accent2);}
 .ownbar-lag{background:#d3a86a;}
 .ownbar-overdue{background:var(--warn);}
 .ownbar-done{background:var(--line);}
+.collabbar{opacity:.55;border:1px dashed rgba(0,0,0,.35);}
 .ganttbar-done{opacity:.35;}
 .ganttToday{position:absolute;top:0;bottom:0;width:2px;background:var(--warn);z-index:2;}
 .ganttEventDot{position:absolute;top:50%;left:0;transform:translate(-50%,-50%);width:10px;height:10px;border-radius:50%;background:#2c5f7c;border:2px solid #fff;z-index:3;box-shadow:0 0 0 1px rgba(0,0,0,.18);}
@@ -1151,24 +1152,25 @@ function projRowHtml(p,badgeHtml){
 }
 function capacityOverviewHtml(){
   const today=new Date(); today.setHours(0,0,0,0);
+  const isActive=p=>{ const r=getRange(p); return today>=new Date(r.start+"T00:00:00") && today<=new Date(r.end+"T23:59:59"); };
   const names=[...TEAM_STAFF, ...TEAM_PARTNER].filter((n,i,arr)=>arr.indexOf(n)===i);
   const groups=names.map(name=>{
     const owned=ALLP.filter(p=>getRow(p.id).status!=="已完成" && getRow(p.id).assignee===name);
-    if(!owned.length) return null;
-    const activeNow=owned.filter(p=>{
-      const r=getRange(p); return today>=new Date(r.start+"T00:00:00") && today<=new Date(r.end+"T23:59:59");
-    });
-    return {name, owned, activeNow};
+    const collab=ALLP.filter(p=>getRow(p.id).status!=="已完成" && getRow(p.id).assignee!==name && collaboratorsOf(p).includes(name));
+    if(!owned.length && !collab.length) return null;
+    const activeNow=owned.filter(isActive);
+    const activeCollab=collab.filter(isActive);
+    return {name, owned, collab, activeNow, activeCollab};
   }).filter(Boolean);
-  if(!groups.length) return `<div class="small">目前沒有人負責中的專案</div>`;
-  groups.sort((a,b)=>b.activeNow.length-a.activeNow.length);
+  if(!groups.length) return `<div class="small">目前沒有人負責或協作中的專案</div>`;
+  groups.sort((a,b)=>(b.activeNow.length+b.activeCollab.length)-(a.activeNow.length+a.activeCollab.length));
   const customOrder=state._personOrder||[];
   const ordered=customOrder.map(n=>groups.find(g=>g.name===n)).filter(Boolean)
     .concat(groups.filter(g=>!customOrder.includes(g.name)));
   lastCapacityOrder=ordered.map(g=>g.name);
 
   let minStart=null, maxEnd=null;
-  ordered.forEach(g=>g.owned.forEach(p=>{ const r=getRange(p); if(!minStart||r.start<minStart) minStart=r.start; if(!maxEnd||r.end>maxEnd) maxEnd=r.end; }));
+  ordered.forEach(g=>g.owned.concat(g.collab).forEach(p=>{ const r=getRange(p); if(!minStart||r.start<minStart) minStart=r.start; if(!maxEnd||r.end>maxEnd) maxEnd=r.end; }));
   const monthStart=new Date(today.getFullYear(),today.getMonth(),1);
   const monthStartStr=`${monthStart.getFullYear()}-${pad(monthStart.getMonth()+1)}-01`;
   if(!minStart || minStart<monthStartStr) minStart=monthStartStr;
@@ -1187,15 +1189,16 @@ function capacityOverviewHtml(){
   const LBL="width:200px;";
 
   const rowsHtml=ordered.map((g,gi)=>{
-    const severityBg = g.activeNow.length===0?'rgba(46,125,50,.08)' : g.activeNow.length>=3?'rgba(192,57,43,.10)' : 'rgba(181,101,29,.08)';
+    const totalActive=g.activeNow.length+g.activeCollab.length;
+    const severityBg = totalActive===0?'rgba(46,125,50,.08)' : totalActive>=3?'rgba(192,57,43,.10)' : 'rgba(181,101,29,.08)';
     const isOpen=capacityExpanded.has(g.name);
     const moveBtns=`<button class="mini" onclick="event.stopPropagation();moveCapacityPerson('${g.name}',-1)">▲</button><button class="mini" onclick="event.stopPropagation();moveCapacityPerson('${g.name}',1)">▼</button>`;
     const header=`<div class="ganttrow" onclick="toggleCapacityGroup('${g.name}')" style="cursor:pointer;background:${severityBg};">
-      <div class="ganttlabel" style="${LBL}display:flex;align-items:center;gap:2px;"><span class="arrow">${isOpen?'▾':'▸'}</span><b onclick="event.stopPropagation();goToPersonCard('${g.name}')" style="text-decoration:underline;text-decoration-style:dotted;">${g.name}</b> <span class="small">(同時${g.activeNow.length}／共${g.owned.length})</span>${moveBtns}</div>
+      <div class="ganttlabel" style="${LBL}display:flex;align-items:center;gap:2px;"><span class="arrow">${isOpen?'▾':'▸'}</span><b onclick="event.stopPropagation();goToPersonCard('${g.name}')" style="text-decoration:underline;text-decoration-style:dotted;">${g.name}</b> <span class="small">(同時${totalActive}：負責${g.activeNow.length}・協作${g.activeCollab.length})</span>${moveBtns}</div>
       <div class="ganttbararea">${overlayHtml}</div>
     </div>`;
     if(!isOpen) return header;
-    const projRows=g.owned.slice().sort((a,b)=>getRange(a).start.localeCompare(getRange(b).start)).map(p=>{
+    const ownRows=g.owned.slice().sort((a,b)=>getRange(a).start.localeCompare(getRange(b).start)).map(p=>{
       const r=getRange(p);
       const li=lagInfo(p);
       const cls = li.done?'ownbar-done' : li.overdue?'ownbar-overdue' : li.lag>=0.2?'ownbar-lag':'ownbar-normal';
@@ -1207,12 +1210,23 @@ function capacityOverviewHtml(){
         <div class="ganttbararea">${overlayHtml}<div class="ganttbar ${cls}" style="left:${left}%;width:${width}%;" title="${shortDate(r.start)}–${shortDate(r.end)}"></div>${evDots}</div>
       </div>`;
     }).join('');
-    return header+projRows;
+    const collabRows=g.collab.slice().sort((a,b)=>getRange(a).start.localeCompare(getRange(b).start)).map(p=>{
+      const r=getRange(p);
+      const li=lagInfo(p);
+      const cls = li.done?'ownbar-done' : li.overdue?'ownbar-overdue' : li.lag>=0.2?'ownbar-lag':'ownbar-normal';
+      const left=pctOf(r.start), width=Math.max(2,pctOf(r.end)-pctOf(r.start));
+      const rr=getRow(p.id);
+      return `<div class="ganttrow" onclick="goToProject('${p.id}')" style="cursor:pointer;">
+        <div class="ganttlabel" style="${LBL}">　└ <span class="cat" style="font-size:.62rem;padding:1px 4px;">${p.cat}</span> ${getName(p)} <span class="small">(協作・負責:${rr.assignee||'未指派'})</span></div>
+        <div class="ganttbararea">${overlayHtml}<div class="ganttbar collabbar ${cls}" style="left:${left}%;width:${width}%;" title="協作・${shortDate(r.start)}–${shortDate(r.end)}"></div></div>
+      </div>`;
+    }).join('');
+    return header+ownRows+collabRows;
   }).join('');
 
   const weekHeaderHtml=`<div class="ganttrow ganttweekrow"><div class="ganttlabel" style="${LBL}"></div><div class="ganttbararea">${weekLabels.map(w=>`<span class="ganttweeklabel" style="left:${w.pct}%;">${w.label}</span>`).join('')}</div></div>`;
   const minWidthPx=Math.max(560, Math.round(totalDays*8));
-  const legend=`<div class="small" style="margin-bottom:4px;">顏色：<span style="color:#8fb28f;">●</span>正常　<span style="color:#d3a86a;">●</span>落後　<span style="color:var(--warn);">●</span>逾期　<span style="color:var(--line);">●</span>完成</div>`;
+  const legend=`<div class="small" style="margin-bottom:4px;">顏色：<span style="color:#8fb28f;">●</span>正常　<span style="color:#d3a86a;">●</span>落後　<span style="color:var(--warn);">●</span>逾期　<span style="color:var(--line);">●</span>完成　｜　實心＝負責，虛線淺色＝協作</div>`;
   return `${legend}<div class="gantt"><div class="ganttscroll"><div class="ganttinner" style="min-width:${minWidthPx}px;">
     <div class="gantthead"><div class="ganttaxis"><span>${shortDate(minStart)}</span><span>${shortDate(maxEnd)}</span></div>${weekHeaderHtml}</div>
     <div class="ganttbody">${rowsHtml}</div>
