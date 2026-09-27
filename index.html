@@ -120,8 +120,7 @@ select,input[type=number],input[type=text],input[type=date],input[type=url]{back
 .ownbar-done{background:var(--line);}
 .ganttbar-done{opacity:.35;}
 .ganttToday{position:absolute;top:0;bottom:0;width:2px;background:var(--warn);z-index:2;}
-.ganttEvent{position:absolute;top:0;bottom:0;width:2px;background:#9b59b6;z-index:2;}
-.ganttEvent::after{content:"★活動日";position:absolute;top:-14px;left:2px;font-size:.6rem;color:#9b59b6;white-space:nowrap;}
+.ganttEventStar{position:absolute;top:50%;transform:translate(-50%,-50%);font-size:11px;line-height:1;color:#9b59b6;z-index:3;text-shadow:-1px -1px 0 #fff,1px -1px 0 #fff,-1px 1px 0 #fff,1px 1px 0 #fff,0 0 3px #fff;}
 .notesbox{width:100%;min-height:70px;padding:8px;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--ink);font-size:.8rem;font-family:inherit;resize:vertical;}
 .monthgridscroll{overflow-x:auto;margin-top:6px;}
 .monthgrid{display:flex;gap:8px;flex-wrap:nowrap;}
@@ -908,7 +907,7 @@ function ganttHtml(p){
   const dayCount=(a,b)=>Math.round((new Date(b+"T00:00:00")-new Date(a+"T00:00:00"))/86400000)+1;
   const prForEvent=getRow(p.id);
   (prForEvent.eventDates||[]).forEach(ed=>{
-    overlayHtml += `<div class="ganttEvent" style="left:${pct(ed)}%;" title="活動日：${shortDate(ed)}"></div>`;
+    overlayHtml += `<span class="ganttEventStar" style="left:${pct(ed)}%;" title="活動日：${shortDate(ed)}">★</span>`;
   });
 
   // pre-compute each group's min/max span
@@ -1123,7 +1122,7 @@ function personOwnedTimelineHtml(t){
     const cls = li.done?'ownbar-done' : li.overdue?'ownbar-overdue' : li.lag>=0.2?'ownbar-lag':'ownbar-normal';
     const left=pctOf(x.r.start), width=Math.max(2,pctOf(x.r.end)-pctOf(x.r.start));
     const rowRow=getRow(x.p.id);
-    const eventMark=(rowRow.eventDates||[]).map(ed=>`<div class="ganttEvent" style="left:${pctOf(ed)}%;" title="活動日：${shortDate(ed)}"></div>`).join('');
+    const eventMark=(rowRow.eventDates||[]).map(ed=>`<span class="ganttEventStar" style="left:${pctOf(ed)}%;" title="活動日：${shortDate(ed)}">★</span>`).join('');
     return `<div class="ganttrow" onclick="goToProject('${x.p.id}')" style="cursor:pointer;">
       <div class="ganttlabel"><span class="cat">${x.p.cat}</span> ${getName(x.p)}</div>
       <div class="ganttbararea">${overlayHtml}<div class="ganttbar ${cls}" style="left:${left}%;width:${width}%;" title="${shortDate(x.r.start)}–${shortDate(x.r.end)}"></div>${eventMark}</div>
