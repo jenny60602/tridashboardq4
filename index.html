@@ -120,6 +120,8 @@ select,input[type=number],input[type=text],input[type=date],input[type=url]{back
 .ownbar-done{background:var(--line);}
 .ganttbar-done{opacity:.35;}
 .ganttToday{position:absolute;top:0;bottom:0;width:2px;background:var(--warn);z-index:2;}
+.ganttEvent{position:absolute;top:0;bottom:0;width:2px;background:#9b59b6;z-index:2;}
+.ganttEvent::after{content:"★活動日";position:absolute;top:-14px;left:2px;font-size:.6rem;color:#9b59b6;white-space:nowrap;}
 .notesbox{width:100%;min-height:70px;padding:8px;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--ink);font-size:.8rem;font-family:inherit;resize:vertical;}
 .monthgridscroll{overflow-x:auto;margin-top:6px;}
 .monthgrid{display:flex;gap:8px;flex-wrap:nowrap;}
@@ -322,7 +324,7 @@ function getRow(id){
     estOverride:(r.estOverride===undefined?null:r.estOverride), actual:(r.actual===undefined?null:r.actual),
     cost:(r.cost===undefined?null:r.cost), driveLink:r.driveLink||"", nameOverride:(r.nameOverride===undefined?null:r.nameOverride),
     invoiceMonth:(r.invoiceMonth===undefined?null:r.invoiceMonth), paymentMethod:r.paymentMethod||"", installmentCount:r.installmentCount||2,
-    startDate:r.startDate||null, endDate:r.endDate||null, lastEdit:r.lastEdit||null, notes:r.notes||"",
+    startDate:r.startDate||null, endDate:r.endDate||null, eventDate:r.eventDate||"", lastEdit:r.lastEdit||null, notes:r.notes||"",
     taskRenames:r.taskRenames||{}, taskDeletes:r.taskDeletes||[], taskOrder:r.taskOrder||[],
     tasks:r.tasks||{}, subtasks:r.subtasks||{}, custom:r.custom||[]};
 }
@@ -900,10 +902,14 @@ function ganttHtml(p){
       weekLabels.push({pct:d/totalDays*100, label:`${wd.getMonth()+1}月W${wom}`});
     }
   }
-  const overlayHtml=gridLines.map(pct=>`<div class="ganttgrid" style="left:${pct}%;"></div>`).join('')
+  let overlayHtml=gridLines.map(pct=>`<div class="ganttgrid" style="left:${pct}%;"></div>`).join('')
     + (todayPct!==null?`<div class="ganttToday" style="left:${todayPct}%;"></div>`:'');
   const pct=(iso)=>{ const d=new Date(iso+"T00:00:00"); const c=d<rangeStart?rangeStart:(d>rangeEnd?rangeEnd:d); return (c-rangeStart)/totalMs*100; };
   const dayCount=(a,b)=>Math.round((new Date(b+"T00:00:00")-new Date(a+"T00:00:00"))/86400000)+1;
+  const prForEvent=getRow(p.id);
+  if(prForEvent.eventDate){
+    overlayHtml += `<div class="ganttEvent" style="left:${pct(prForEvent.eventDate)}%;" title="活動日：${shortDate(prForEvent.eventDate)}"></div>`;
+  }
 
   // pre-compute each group's min/max span
   const groupSpan={};
@@ -983,6 +989,7 @@ function detailRow(p){
       ${r.paymentMethod?`<label>對應到甘特圖<button class="mini" onclick="syncPaymentSubtasks('${p.id}')" style="white-space:nowrap;">＋ 產生付款子項目</button></label>`:''}
       <label>起始日<input type="date" value="${range.start}" onchange="setField('${p.id}','startDate',this.value)"></label>
       <label>截止日<input type="date" value="${range.end}" onchange="setField('${p.id}','endDate',this.value)"></label>
+      <label>活動日<input type="date" value="${r.eventDate||''}" onchange="setField('${p.id}','eventDate',this.value)" title="這個專案最重要的活動／執行當天，會標在甘特圖上，方便看人力撞期"></label>
       <label style="flex:1;min-width:220px;">雲端資料夾連結
         <div style="display:flex;gap:6px;">
           <input type="url" placeholder="貼上 Google Drive 連結" value="${r.driveLink}" onchange="setField('${p.id}','driveLink',this.value)" style="flex:1;">
@@ -1106,9 +1113,11 @@ function personOwnedTimelineHtml(t){
     const li=lagInfo(x.p);
     const cls = li.done?'ownbar-done' : li.overdue?'ownbar-overdue' : li.lag>=0.2?'ownbar-lag':'ownbar-normal';
     const left=pctOf(x.r.start), width=Math.max(2,pctOf(x.r.end)-pctOf(x.r.start));
+    const rowRow=getRow(x.p.id);
+    const eventMark=rowRow.eventDate?`<div class="ganttEvent" style="left:${pctOf(rowRow.eventDate)}%;" title="活動日：${shortDate(rowRow.eventDate)}"></div>`:'';
     return `<div class="ganttrow" onclick="goToProject('${x.p.id}')" style="cursor:pointer;">
       <div class="ganttlabel"><span class="cat">${x.p.cat}</span> ${getName(x.p)}</div>
-      <div class="ganttbararea">${overlayHtml}<div class="ganttbar ${cls}" style="left:${left}%;width:${width}%;" title="${shortDate(x.r.start)}–${shortDate(x.r.end)}"></div></div>
+      <div class="ganttbararea">${overlayHtml}<div class="ganttbar ${cls}" style="left:${left}%;width:${width}%;" title="${shortDate(x.r.start)}–${shortDate(x.r.end)}"></div>${eventMark}</div>
     </div>`;
   }).join('');
   const weekHeaderHtml=`<div class="ganttrow ganttweekrow">
@@ -1119,13 +1128,17 @@ function personOwnedTimelineHtml(t){
   const overlapNote = maxOverlap>=3
     ? `<div class="small" style="margin-top:6px;color:var(--warn);">⚠ ${shortDate(maxOverlapDate)} 前後同時有 ${maxOverlap} 個負責的專案重疊執行，負荷可能偏重。</div>`
     : `<div class="small" style="margin-top:6px;">目前最多同時重疊 ${maxOverlap} 個負責的專案。</div>`;
+  const eventByDate={};
+  ranges.forEach(x=>{ const ed=getRow(x.p.id).eventDate; if(ed){ (eventByDate[ed]=eventByDate[ed]||[]).push(getName(x.p)); } });
+  const clashes=Object.entries(eventByDate).filter(([d,names])=>names.length>1);
+  const eventClashNote=clashes.length? `<div class="small" style="margin-top:2px;color:#9b59b6;">★ 活動日撞期：${clashes.map(([d,names])=>`${shortDate(d)}（${names.join('、')}）`).join('；')}</div>` : '';
   return `<div class="gantt"><div class="ganttscroll"><div class="ganttinner" style="min-width:${minWidthPx}px;">
     <div class="gantthead">
       <div class="ganttaxis"><span>${shortDate(minStart)}</span><span>${shortDate(maxEnd)}</span></div>
       ${weekHeaderHtml}
     </div>
     <div class="ganttbody">${rows}</div>
-  </div></div>${overlapNote}</div>`;
+  </div></div>${overlapNote}${eventClashNote}</div>`;
 }
 function personMonthlyHtml(t){
   const items=[];
