@@ -675,11 +675,8 @@ function renderPriority(){
     {key:'cost', label:`成本壓力 (${overCost.length})`, body:costBody},
     {key:'pay', label:`待收款 (${payGroup.length})`, body:payBody},
   ];
-  const noTaskList=ALLP.filter(p=>getRow(p.id).status!=="已完成" && taskProgress(p).done===0);
-  const noTaskBody=noTaskList.length? noTaskList.map(p=>projRowHtml(p)).join('') : `<div class="small">✓ 目前所有進行中的專案都已經有任務進度</div>`;
   const projectTabs=[
     {key:'month', label:`月營收分布`, body:monthlyChartBody()},
-    {key:'notasks', label:`尚未拆分任務 (${noTaskList.length})`, body:noTaskBody},
   ];
   const tabs = view==="person" ? personTabs : projectTabs;
   const tabBtns = tabs.length>1 ? `<div class="dtabs" style="margin-bottom:2px;">${tabs.map(tb=>`<button class="dtab ${priorityTab===tb.key?'active':''}" onclick="setPriorityTab('${tb.key}')">${tb.label}</button>`).join('')}</div>` : '';
@@ -924,11 +921,11 @@ window.goBack=function(){
   setTimeout(()=>window.scrollTo({top:bs.scrollY,behavior:"smooth"}),50);
 };
 window.gotoNoTaskList=function(){
-  view="project"; priorityTab="notasks";
+  view="person";
   document.querySelectorAll(".tabs button").forEach(x=>x.classList.remove("active"));
-  document.querySelector('.tabs button[data-v="project"]').classList.add("active");
+  document.querySelector('.tabs button[data-v="person"]').classList.add("active");
   render();
-  document.getElementById("priority").scrollIntoView({behavior:"smooth"});
+  document.getElementById("view").scrollIntoView({behavior:"smooth", block:"end"});
 };
 window.goToTaskList=function(pid){
   captureBackState();
@@ -1520,7 +1517,11 @@ function renderPersonView(){
   const unHtml=un.length ? `<div class="priority" style="margin-top:10px;"><h3>尚未指派負責人（${un.length}）</h3>
       ${un.map(p=>`<div class="row"><span>${getName(p)}（${p.cat}）</span><select style="width:150px;" onchange="setField('${p.id}','assignee',this.value)">${personOpts('')}</select></div>`).join('')}
     </div>` : `<div class="priority ok" style="margin-top:10px;"><h3>✓ 所有專案都已指派負責人</h3></div>`;
-  document.getElementById("view").innerHTML=legend+staffCards+partnerCards+vendorCards+unHtml;
+  const noTasks=ALLP.filter(p=>getRow(p.id).status!=="已完成" && taskProgress(p).done===0);
+  const noTasksHtml=noTasks.length ? `<div class="priority" style="margin-top:10px;"><h3>尚未拆分任務清單（${noTasks.length}）</h3>
+      ${noTasks.map(p=>projRowHtml(p)).join('')}
+    </div>` : `<div class="priority ok" style="margin-top:10px;"><h3>✓ 所有進行中的專案都已經有任務進度</h3></div>`;
+  document.getElementById("view").innerHTML=legend+staffCards+partnerCards+vendorCards+unHtml+noTasksHtml;
 }
 
 function renderInner(){
