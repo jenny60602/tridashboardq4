@@ -1216,9 +1216,10 @@ function capacityOverviewHtml(){
       const cls = li.done?'ownbar-done' : li.overdue?'ownbar-overdue' : li.lag>=0.2?'ownbar-lag':'ownbar-normal';
       const left=pctOf(r.start), width=Math.max(2,pctOf(r.end)-pctOf(r.start));
       const rr=getRow(p.id);
+      const evDots=(rr.eventDates||[]).map(ed=>`<span class="ganttEventDot" style="left:${pctOf(ed)}%;" title="活動日：${shortDate(ed)}"></span>`).join('');
       return `<div class="ganttrow" onclick="goToProject('${p.id}')" style="cursor:pointer;">
         <div class="ganttlabel" style="${LBL}overflow:hidden;white-space:nowrap;" title="協作・負責:${rr.assignee||'未指派'}">　└ <span class="cat" style="font-size:.62rem;padding:1px 4px;">${p.cat}</span> ${getName(p)}</div>
-        <div class="ganttbararea">${overlayHtml}<div class="ganttbar collabbar ${cls}" style="left:${left}%;width:${width}%;" title="協作・${shortDate(r.start)}–${shortDate(r.end)}"></div></div>
+        <div class="ganttbararea">${overlayHtml}<div class="ganttbar collabbar ${cls}" style="left:${left}%;width:${width}%;" title="協作・${shortDate(r.start)}–${shortDate(r.end)}"></div>${evDots}</div>
       </div>`;
     }).join('');
     return header+ownRows+collabRows;
