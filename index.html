@@ -263,6 +263,34 @@ const ROLES={
 const TEAM=TEAM_STAFF.concat(TEAM_PARTNER);
 const STATUSES=["未開始","進行中","待收款","已完成"];
 const BASE_TASKS=["企劃","成本","報價/合約","款項","執行","結案"];
+const MARKET_TEMPLATE_PHASES=[
+  {name:"1. 企劃期", subs:[
+    {name:"[內部] 市集主題發想", audience:"內部"},
+    {name:"[客戶] 提案確認", audience:"客戶"},
+    {name:"[內部] 預算抓訂", audience:"內部"},
+  ]},
+  {name:"2. 籌備期", subs:[
+    {name:"[攤商] 攤位規劃與招募文件準備", audience:"攤商"},
+    {name:"[內部] 場地與物流確認", audience:"內部"},
+  ]},
+  {name:"3. 招商與行銷期", subs:[
+    {name:"[攤商] 發布入選通知", audience:"攤商"},
+    {name:"[消費者] 報名上線", audience:"消費者"},
+    {name:"[消費者] 社群宣傳曝光", audience:"消費者"},
+    {name:"[攤商] 攤商說明會", audience:"攤商"},
+  ]},
+  {name:"4. 行前衝刺期", subs:[
+    {name:"[攤商] 攤位配置與進場通知", audience:"攤商"},
+    {name:"[消費者] 現場動線與活動流程確認", audience:"消費者"},
+    {name:"[內部] 人力排班確認", audience:"內部"},
+  ]},
+  {name:"5. 執行與結案", subs:[
+    {name:"[內部] 現場執行", audience:"內部"},
+    {name:"[客戶] 成果報告提交", audience:"客戶"},
+    {name:"[內部] 案例建置", audience:"內部"},
+    {name:"[內部] 宣傳曝光", audience:"內部"},
+  ]},
+];
 const GOV_EXTRA=["期中/期末報告","經費核銷單據整理"];
 const REF_YEAR=2026;
 const URG_RANK={overdue:0,soon7:1,soon30:2,later:3};
@@ -351,6 +379,8 @@ function collaboratorsOf(p){
 }
 function isNonOp(p){ return p.cat==="政府"; }
 function selStyle(n){ if(!n) return ''; if(isVendor(n)) return 'background:#f3e6c4;'; return isStaff(n)?'background:#dfe9df;':'background:#f4e3c9;'; }
+const AUDIENCE_COLORS={"攤商":"#f3e6c4","消費者":"#d6e6f0","客戶":"#e6dcf0","內部":"#dfe9df"};
+function audienceStyle(a){ return a&&AUDIENCE_COLORS[a] ? `background:${AUDIENCE_COLORS[a]};` : ''; }
 function getEstRev(p){ const r=getRow(p.id); return r.estOverride!==null ? r.estOverride : p.rev; }
 function getName(p){ const r=getRow(p.id); return (r.nameOverride!==null && r.nameOverride!=='') ? r.nameOverride : p.name; }
 function planScaled(p){
@@ -672,6 +702,7 @@ function renderPriority(){
 
   const personTabs=[
     {key:'capacity', label:`執行總覽`, body:capacityOverviewHtml()},
+    {key:'audience', label:`依對象`, body:audienceOverviewHtml()},
     {key:'urgent', label:`急迫案件 (${execGroup.length})`, body:urgentBody},
     {key:'task', label:`任務急迫 (${taskUrgent.length})`, body:taskBody},
     {key:'stagnant', label:`未指派任務 (${unassignedTasks.length})`, body:stagnantBody},
@@ -1046,6 +1077,10 @@ function taskItemHtml(p,idx){
       <input type="checkbox" ${s.done?'checked':''} onchange="toggleSubtask('${p.id}',${idx},${si},this.checked)">
       <input type="text" class="subname" value="${esc(s.name)}" onchange="renameSubtask('${p.id}',${idx},${si},this.value)">
       <select style="${selStyle(s.assignee)}" onchange="setSubtaskAssignee('${p.id}',${idx},${si},this.value)">${personOptsWithVendor(s.assignee)}</select>
+      <select onchange="setSubtaskAudience('${p.id}',${idx},${si},this.value)" style="${audienceStyle(s.audience)}" title="對象/分類">
+        <option value="">未分類</option>
+        ${["攤商","消費者","客戶","內部"].map(a=>`<option ${s.audience===a?'selected':''}>${a}</option>`).join('')}
+      </select>
       <input type="text" class="mddate" placeholder="月/日" value="${shortDate(s.end)}" onchange="setSubtaskDeadline('${p.id}',${idx},${si},this.value)" title="截止日（例如9/15，跨年可打2027/1/15）">
       <input type="text" class="subnote" placeholder="備註或連結" value="${esc(s.note||'')}" onchange="setSubtaskNote('${p.id}',${idx},${si},this.value)">
       ${isUrl?`<a href="${esc(s.note)}" target="_blank" rel="noopener" class="mini" style="text-decoration:none;">🔗</a>`:''}
@@ -1247,6 +1282,7 @@ function detailRow(p){
     ${receiptsHtml(p)}`;
 
   const taskPane=`
+    <div style="margin-bottom:10px;"><button class="mini" onclick="applyMarketTemplate('${p.id}')">🏪 套用市集工作模組（適合市集／擺攤類專案：5大時間階段＋對象標記）</button></div>
     <h4>甘特圖（依任務起訖日自動產生，紅線＝今天）</h4>
     ${ganttHtml(p)}
     <h4>任務清單（點「＋」可拆子項目並各自標開始/截止日）</h4>
@@ -1321,6 +1357,26 @@ function projRowHtml(p,badgeHtml){
     <div class="prow-top"><span class="pname">${getName(p)}</span><span class="cat">${p.cat}</span>${assigneeTag(r.assignee)}${badge}</div>
     <div class="prow-bottom"><span>${r.status}・迄 ${shortDate(getRange(p).end)}</span><span>任務 ${tp.done}/${tp.total}（${pct}%）</span></div>
   </div>`;
+}
+function audienceOverviewHtml(){
+  const AUDIENCES=["攤商","消費者","客戶","內部"];
+  const groups={}; AUDIENCES.forEach(a=>groups[a]=[]);
+  ALLP.forEach(p=>{
+    if(getRow(p.id).status==="已完成") return;
+    taskList(p).forEach(tn=>{
+      materializedSubs(p.id,tn).forEach(s=>{
+        if(s.done || !s.audience || !groups[s.audience]) return;
+        groups[s.audience].push({p, label:`${tn}／${s.name}`, end:s.end, assignee:s.assignee});
+      });
+    });
+  });
+  const anyItems=AUDIENCES.some(a=>groups[a].length);
+  if(!anyItems) return `<div class="small">目前沒有任務標記對象（攤商／消費者／客戶／內部）</div>`;
+  return AUDIENCES.filter(a=>groups[a].length).map(a=>{
+    const items=groups[a].sort((x,y)=>{ if(x.end&&y.end) return x.end.localeCompare(y.end); if(x.end) return -1; if(y.end) return 1; return 0; });
+    const body=items.map(x=>`<div class="prow" onclick="goToProject('${x.p.id}')" style="cursor:pointer;"><div class="prow-top"><span class="pname">${getName(x.p)} － ${x.label}</span>${x.assignee?assigneeTag(x.assignee):''}<span class="small">${x.end?shortDate(x.end):'未標日期'}</span></div></div>`).join('');
+    return `<div class="small" style="font-weight:600;margin:10px 0 4px;background:${AUDIENCE_COLORS[a]};display:inline-block;padding:2px 8px;border-radius:5px;">${a}（${items.length}）</div>${body}`;
+  }).join('');
 }
 function capacityOverviewHtml(){
   const today=new Date(); today.setHours(0,0,0,0);
@@ -1788,6 +1844,26 @@ window.setSubtaskAssignee=async function(pid,idx,si,val){
   const subtasks=Object.assign({},cur.subtasks); const arr=materializedSubs(pid,t);
   arr[si]=Object.assign({},arr[si],{assignee:val}); subtasks[t]=arr;
   state[pid]=Object.assign({},cur,{subtasks}); touch(pid); render(); await persist();
+};
+window.setSubtaskAudience=async function(pid,idx,si,val){
+  const p=getProject(pid); const t=taskList(p)[idx]; const cur=getRow(pid);
+  const subtasks=Object.assign({},cur.subtasks); const arr=materializedSubs(pid,t);
+  arr[si]=Object.assign({},arr[si],{audience:val}); subtasks[t]=arr;
+  state[pid]=Object.assign({},cur,{subtasks}); touch(pid); render(); await persist();
+};
+window.applyMarketTemplate=async function(pid){
+  if(!confirm('套用「市集工作模組」會：\n1. 把目前的6大項工作（企劃/成本/報價合約/款項/執行/結案）換成5個時間階段\n2. 每個階段預設幾個含「對象」標記的子項目\n\n確定要套用嗎？（可能會蓋掉目前已經填的任務資料）')) return;
+  const p=getProject(pid); const cur=getRow(pid);
+  const taskDeletes=[...new Set([...(cur.taskDeletes||[]), ...BASE_TASKS])];
+  const newPhaseNames=MARKET_TEMPLATE_PHASES.map(ph=>ph.name);
+  const custom=(cur.custom||[]).filter(c=>!newPhaseNames.includes(c)).concat(newPhaseNames);
+  const subtasks=Object.assign({},cur.subtasks);
+  MARKET_TEMPLATE_PHASES.forEach(ph=>{
+    subtasks[ph.name]=ph.subs.map(s=>({name:s.name,done:false,assignee:'',start:'',end:'',note:'',audience:s.audience}));
+  });
+  const taskOrder=newPhaseNames.slice();
+  state[pid]=Object.assign({},cur,{taskDeletes,custom,subtasks,taskOrder});
+  touch(pid); expanded.add(pid); detailTab[pid]='tasks'; render(); await persist();
 };
 window.setSubtaskDate=async function(pid,idx,si,field,val){
   const p=getProject(pid); const t=taskList(p)[idx]; const cur=getRow(pid);
