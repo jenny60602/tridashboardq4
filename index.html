@@ -1037,8 +1037,8 @@ function detailRow(p){
     </div>
     <div class="small" style="font-weight:600;margin:12px 0 4px;color:var(--accent2);">時程</div>
     <div class="basicgrid">
-      <label>起始日<input type="date" value="${range.start}" onchange="setField('${p.id}','startDate',this.value)"></label>
-      <label>截止日<input type="date" value="${range.end}" onchange="setField('${p.id}','endDate',this.value)"></label>
+      <label>起始日<input type="date" id="startdate-${p.id}" value="${range.start}" onchange="setField('${p.id}','startDate',this.value)"></label>
+      <label>截止日<input type="date" id="enddate-${p.id}" value="${range.end}" onchange="setField('${p.id}','endDate',this.value)"></label>
       <div style="min-width:240px;">
         <label title="可新增多個，會標在甘特圖上，方便看人力撞期">活動日
           <div style="display:flex;gap:6px;">
@@ -1355,11 +1355,30 @@ function renderPersonView(){
   document.getElementById("view").innerHTML=legend+staffCards+partnerCards+vendorCards+unHtml;
 }
 
-function render(){
+function renderInner(){
   refreshAll();
   renderStats(); renderPriority(); renderFilters(); renderAddForm();
   if(view==="project"){ renderProjectView(); }
   else { renderPersonView(); }
+}
+function render(){
+  const active=document.activeElement;
+  const aid=active&&active.id;
+  const tag=active&&active.tagName;
+  let selStart=null, selEnd=null;
+  if(active && (tag==="INPUT"||tag==="TEXTAREA")){
+    try{ selStart=active.selectionStart; selEnd=active.selectionEnd; }catch(e){}
+  }
+  renderInner();
+  if(aid){
+    const el=document.getElementById(aid);
+    if(el){
+      el.focus();
+      if(selStart!=null && typeof el.setSelectionRange==="function"){
+        try{ el.setSelectionRange(selStart,selEnd); }catch(e){}
+      }
+    }
+  }
 }
 
 function localBackupSave(){ try{ localStorage.setItem('dash_backup_v2', JSON.stringify(state)); }catch(e){} }
