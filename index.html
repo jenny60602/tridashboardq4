@@ -163,8 +163,9 @@ tr.rowopen td:first-child{box-shadow:inset 4px 0 0 var(--accent2);}
 .todogroup{padding:6px 0;border-bottom:1px dashed var(--line);}
 .todogroup:last-child{border-bottom:none;}
 .todohead{display:flex;align-items:center;gap:6px;font-size:.82rem;margin-bottom:3px;}
-.todochips{display:flex;flex-wrap:wrap;gap:6px;margin-top:2px;}
-.todochip{display:inline-flex;align-items:center;gap:5px;font-size:.75rem;color:var(--ink);background:var(--card);border:1px solid var(--line);border-radius:12px;padding:3px 9px;cursor:pointer;}
+.todochips{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:6px;margin-top:2px;}
+.todochip{display:flex;align-items:flex-start;gap:5px;font-size:.75rem;color:var(--ink);background:var(--card);border:1px solid var(--line);border-radius:8px;padding:3px 9px;cursor:pointer;}
+.todochip span{word-break:break-word;}
 .prow:last-child{border-bottom:none;}
 .prow-top{display:flex;align-items:center;gap:6px;font-size:.82rem;flex-wrap:wrap;}
 .prow-bottom{display:flex;justify-content:space-between;gap:8px;font-size:.72rem;color:var(--sub);margin-top:3px;}
@@ -265,27 +266,33 @@ const STATUSES=["未開始","進行中","待收款","已完成"];
 const BASE_TASKS=["企劃","成本","報價/合約","款項","執行","結案"];
 const MARKET_TEMPLATE_PHASES=[
   {name:"1. 企劃期", subs:[
-    {name:"市集主題發想", audience:"內部"},
-    {name:"提案確認", audience:"客戶"},
-    {name:"預算抓訂", audience:"內部"},
+    {name:"企劃提案", audience:"內部"},
+    {name:"預算專案表", audience:"內部"},
+    {name:"提案確認報價回簽", audience:"客戶"},
+    {name:"訂金30%", audience:"客戶"},
   ]},
-  {name:"2. 籌備期", subs:[
-    {name:"攤位規劃與招募文件準備", audience:"攤商"},
-    {name:"場地與物流確認", audience:"內部"},
-  ]},
-  {name:"3. 招商與行銷期", subs:[
+  {name:"2. 籌備與招商期", subs:[
+    {name:"攤位報名表", audience:"攤商"},
     {name:"發布入選通知", audience:"攤商"},
-    {name:"報名上線", audience:"消費者"},
-    {name:"社群宣傳曝光", audience:"消費者"},
-    {name:"攤商說明會", audience:"攤商"},
+    {name:"保證金收集完畢", audience:"攤商"},
+    {name:"場地圖安排", audience:"內部"},
+  ]},
+  {name:"3. 行銷期", subs:[
+    {name:"主視覺設計定稿", audience:"客戶"},
+    {name:"市集文宣資訊提供", audience:"攤商"},
+    {name:"主視覺設計延伸文宣完成", audience:"客戶"},
+    {name:"公司活動報名上線", audience:"消費者"},
+    {name:"輸出物設計與輸出", audience:"客戶"},
   ]},
   {name:"4. 行前衝刺期", subs:[
+    {name:"人力排班確認", audience:"內部"},
     {name:"攤位配置與進場通知", audience:"攤商"},
     {name:"現場動線與活動流程確認", audience:"消費者"},
-    {name:"人力排班確認", audience:"內部"},
+    {name:"活動報名行前通知", audience:"消費者"},
+    {name:"攤商行前會", audience:"消費者"},
+    {name:"客戶行前會", audience:"客戶"},
   ]},
   {name:"5. 執行與結案", subs:[
-    {name:"現場執行", audience:"內部"},
     {name:"成果報告提交", audience:"客戶"},
     {name:"案例建置", audience:"內部"},
     {name:"宣傳曝光", audience:"內部"},
@@ -1212,9 +1219,9 @@ function ganttHtml(p){
     <div class="ganttbararea">${eventDotsHtml}</div>
   </div>`:'';
   const minWidthPx=Math.max(500, Math.round(totalDays*8));
-  const body=`<div class="ganttscroll"><div class="ganttinner" style="min-width:${minWidthPx}px;">
+  const body=`<div class="small" style="margin-bottom:2px;">起訖：${shortDate(proj.start)}–${shortDate(proj.end)}</div>
+    <div class="ganttscroll"><div class="ganttinner" style="min-width:${minWidthPx}px;">
        <div class="gantthead">
-         <div class="ganttaxis"><span style="position:sticky;left:250px;">${shortDate(proj.start)}</span><span>${shortDate(proj.end)}</span></div>
          ${weekHeaderHtml}
          ${eventRowHtml}
        </div>
@@ -1462,8 +1469,9 @@ function capacityOverviewHtml(){
   const weekHeaderHtml=`<div class="ganttrow ganttweekrow"><div class="ganttlabel" style="${LBL}"></div><div class="ganttbararea">${weekLabels.map(w=>`<span class="ganttweeklabel" style="left:${w.pct}%;">${w.label}</span>`).join('')}</div></div>`;
   const minWidthPx=Math.max(560, Math.round(totalDays*8));
   const legend=`<div class="small" style="margin-bottom:4px;">顏色：<span style="color:#8fb28f;">●</span>正常　<span style="color:#d3a86a;">●</span>落後　<span style="color:var(--warn);">●</span>逾期　<span style="color:var(--line);">●</span>完成　｜　實心橫桿＝負責，虛線淺色＝協作　｜　活動日：<span style="color:#2c5f7c;">●</span>負責　<span style="color:#9b7cb6;">●</span>協作</div>`;
-  return `${legend}<div class="gantt"><div class="ganttscroll"><div class="ganttinner" style="min-width:${minWidthPx}px;">
-    <div class="gantthead"><div class="ganttaxis"><span style="position:sticky;left:200px;">${shortDate(minStart)}</span><span>${shortDate(maxEnd)}</span></div>${weekHeaderHtml}</div>
+  return `${legend}<div class="small" style="margin-bottom:2px;">起訖：${shortDate(minStart)}–${shortDate(maxEnd)}</div>
+    <div class="gantt"><div class="ganttscroll"><div class="ganttinner" style="min-width:${minWidthPx}px;">
+    <div class="gantthead">${weekHeaderHtml}</div>
     <div class="ganttbody">${rowsHtml}</div>
   </div></div></div>`;
 }
