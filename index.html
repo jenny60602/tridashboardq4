@@ -1194,7 +1194,7 @@ function capacityOverviewHtml(){
     const isOpen=capacityExpanded.has(g.name);
     const moveBtns=`<button class="mini" onclick="event.stopPropagation();moveCapacityPerson('${g.name}',-1)">▲</button><button class="mini" onclick="event.stopPropagation();moveCapacityPerson('${g.name}',1)">▼</button>`;
     const header=`<div class="ganttrow" onclick="toggleCapacityGroup('${g.name}')" style="cursor:pointer;background:${severityBg};">
-      <div class="ganttlabel" style="${LBL}display:flex;align-items:center;gap:2px;"><span class="arrow">${isOpen?'▾':'▸'}</span><b onclick="event.stopPropagation();goToPersonCard('${g.name}')" style="text-decoration:underline;text-decoration-style:dotted;">${g.name}</b> <span class="small">(同時${totalActive}：負責${g.activeNow.length}・協作${g.activeCollab.length})</span>${moveBtns}</div>
+      <div class="ganttlabel" style="${LBL}display:flex;align-items:center;gap:2px;overflow:hidden;white-space:nowrap;"><span class="arrow">${isOpen?'▾':'▸'}</span><b onclick="event.stopPropagation();goToPersonCard('${g.name}')" title="同時${totalActive}案：負責${g.activeNow.length}・協作${g.activeCollab.length}" style="text-decoration:underline;text-decoration-style:dotted;">${g.name}</b>${moveBtns}</div>
       <div class="ganttbararea">${overlayHtml}</div>
     </div>`;
     if(!isOpen) return header;
@@ -1206,7 +1206,7 @@ function capacityOverviewHtml(){
       const evRow=getRow(p.id);
       const evDots=(evRow.eventDates||[]).map(ed=>`<span class="ganttEventDot" style="left:${pctOf(ed)}%;" title="活動日：${shortDate(ed)}"></span>`).join('');
       return `<div class="ganttrow" onclick="goToProject('${p.id}')" style="cursor:pointer;">
-        <div class="ganttlabel" style="${LBL}">　└ <span class="cat" style="font-size:.62rem;padding:1px 4px;">${p.cat}</span> ${getName(p)}</div>
+        <div class="ganttlabel" style="${LBL}overflow:hidden;white-space:nowrap;">　└ <span class="cat" style="font-size:.62rem;padding:1px 4px;">${p.cat}</span> ${getName(p)}</div>
         <div class="ganttbararea">${overlayHtml}<div class="ganttbar ${cls}" style="left:${left}%;width:${width}%;" title="${shortDate(r.start)}–${shortDate(r.end)}"></div>${evDots}</div>
       </div>`;
     }).join('');
@@ -1217,7 +1217,7 @@ function capacityOverviewHtml(){
       const left=pctOf(r.start), width=Math.max(2,pctOf(r.end)-pctOf(r.start));
       const rr=getRow(p.id);
       return `<div class="ganttrow" onclick="goToProject('${p.id}')" style="cursor:pointer;">
-        <div class="ganttlabel" style="${LBL}">　└ <span class="cat" style="font-size:.62rem;padding:1px 4px;">${p.cat}</span> ${getName(p)} <span class="small">(協作・負責:${rr.assignee||'未指派'})</span></div>
+        <div class="ganttlabel" style="${LBL}overflow:hidden;white-space:nowrap;" title="協作・負責:${rr.assignee||'未指派'}">　└ <span class="cat" style="font-size:.62rem;padding:1px 4px;">${p.cat}</span> ${getName(p)}</div>
         <div class="ganttbararea">${overlayHtml}<div class="ganttbar collabbar ${cls}" style="left:${left}%;width:${width}%;" title="協作・${shortDate(r.start)}–${shortDate(r.end)}"></div></div>
       </div>`;
     }).join('');
