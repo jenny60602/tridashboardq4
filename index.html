@@ -185,8 +185,8 @@ tr.rowopen td:first-child{box-shadow:inset 4px 0 0 var(--accent2);}
 </head>
 <body>
 <header>
-  <h1>三小市集 Q4（9–12月）專案 x 人力儀表板</h1>
-  <div class="sub">依「2026年度9-12預算預估」整理，含成本追蹤、雲端資料夾、日期級進度管理。</div>
+  <h1>三小市集 專案執行儀表板</h1>
+  <div class="sub">追蹤每個專案的進度、成本與收款，掌握人力負載與現金流。</div>
   <div class="whoami">你是：<select id="whoami-select"></select>（用來標記「最後更新者」）</div>
   <div class="stats" id="stats"></div>
 </header>
@@ -683,9 +683,11 @@ function renderPriority(){
   box.innerHTML=`<div class="priority plain">${tabBtns}${active.body}</div>`;
 }
 
-function monthOptsQ(sel){ let s='<option value="">未填</option>'; [9,10,11,12].forEach(m=>{ s+=`<option value="${m}" ${sel===m?'selected':''}>${m}月</option>`; }); return s; }
-function monthlyChartBody(){
-  const confirmed={9:0,10:0,11:0,12:0}, estimated={9:0,10:0,11:0,12:0};
+const CHART_MONTHS=[9,10,11,12,1,2,3];
+function monthLabel(m){ return m<=3? `2027/${m}` : `${m}月`; }
+function monthOptsQ(sel){ let s='<option value="">未填</option>'; CHART_MONTHS.forEach(m=>{ s+=`<option value="${m}" ${sel===m?'selected':''}>${monthLabel(m)}</option>`; }); return s; }
+function monthlyTotals(){
+  const confirmed={}, estimated={}; CHART_MONTHS.forEach(m=>{confirmed[m]=0;estimated[m]=0;});
   ALLP.forEach(p=>{
     const pr=getRow(p.id);
     const receipts=getReceipts(p.id);
@@ -712,31 +714,61 @@ function monthlyChartBody(){
       estimated[fm]+=getEstRev(p);
     }
   });
-  const totals={}; [9,10,11,12].forEach(m=>totals[m]=confirmed[m]+estimated[m]);
+  const totals={}; CHART_MONTHS.forEach(m=>totals[m]=confirmed[m]+estimated[m]);
+  const q4Total=[9,10,11,12].reduce((s,m)=>s+totals[m],0);
+  const q1Total=[1,2,3].reduce((s,m)=>s+totals[m],0);
+  const q4Confirmed=[9,10,11,12].reduce((s,m)=>s+confirmed[m],0);
+  const q1Confirmed=[1,2,3].reduce((s,m)=>s+confirmed[m],0);
+  return {confirmed, estimated, totals, q4Total, q1Total, q4Confirmed, q1Confirmed};
+}
+function monthlyChartBody(){
+  const {confirmed, estimated, totals, q4Total, q1Total}=monthlyTotals();
   const max=Math.max(...Object.values(totals),1);
-  return `<div class="chartbars">
-      ${[9,10,11,12].map(m=>{
+  return `<div class="small" style="margin-bottom:6px;">2026Q4 合計：${fmt(q4Total)}　｜　2027Q1 合計：${fmt(q1Total)}</div>
+    <div class="chartbars">
+      ${CHART_MONTHS.map((m,mi)=>{
         const totalH=Math.max(4,Math.round(totals[m]/max*70));
         const confH=totals[m]?Math.round(confirmed[m]/totals[m]*totalH):0;
         const estH=totalH-confH;
-        return `<div class="chartcol">
+        return `<div class="chartcol" style="${mi===4?'border-left:1px dashed var(--line);padding-left:8px;margin-left:4px;':''}">
           <div class="chartstack">
             <div class="chartbar estimated" style="height:${estH}px;"></div>
             <div class="chartbar confirmed" style="height:${confH}px;"></div>
           </div>
-          <div class="small" style="margin-top:4px;">${m}月</div>
+          <div class="small" style="margin-top:4px;">${monthLabel(m)}</div>
           <div class="small">${fmt(totals[m])}</div>
         </div>`;
       }).join('')}
     </div>
-    <div class="small" style="margin-top:6px;">淺色＝預估（優先用「基本資料」裡自訂的預估認列月份，沒設定的話依原始預算表安排，都沒有就依截止日估算）；深色＝那個月已在「實際收款」登錄發票，用實收金額取代原本的估算（不會重複累加）。</div>`;
+    <div class="small" style="margin-top:6px;">淺色＝預估（優先用「基本資料」裡自訂的預估認列月份，沒設定的話依原始預算表安排，都沒有就依截止日估算）；深色＝那個月已在「實際收款」登錄發票，用實收金額取代原本的估算（不會重複累加）。2027年1-3月為Q1，跟前面的2026Q4用虛線隔開。</div>`;
 }
 
+function quarterCost(){
+  let q4Cost=0, q1Cost=0;
+  ALLP.forEach(p=>{
+    const pr=getRow(p.id);
+    const cost=(pr.cost===null||pr.cost==="")?0:Number(pr.cost);
+    if(!cost) return;
+    if(pr.estPlan && pr.estPlan.length){
+      const totalPlanned=pr.estPlan.reduce((s,e)=>s+Number(e.amount||0),0)||1;
+      const q4Amt=pr.estPlan.filter(e=>e.month>=9).reduce((s,e)=>s+Number(e.amount||0),0);
+      const q1Amt=pr.estPlan.filter(e=>e.month<=3).reduce((s,e)=>s+Number(e.amount||0),0);
+      q4Cost += cost*(q4Amt/totalPlanned);
+      q1Cost += cost*(q1Amt/totalPlanned);
+    } else {
+      const fm=pr.revMonth || Number(getRange(p).end.split('-')[1]);
+      if(fm>=9) q4Cost+=cost; else if(fm<=3) q1Cost+=cost;
+    }
+  });
+  return {q4Cost, q1Cost};
+}
 function renderStats(){
-  const coreRev=ALLP.filter(p=>!isNonOp(p)).reduce((s,p)=>s+getEstRev(p),0);
-  const nonOpRev=ALLP.filter(p=>isNonOp(p)).reduce((s,p)=>s+getEstRev(p),0);
+  const mt=monthlyTotals();
+  const {q4Cost, q1Cost}=quarterCost();
+  const q4Margin=mt.q4Total-q4Cost, q1Margin=mt.q1Total-q1Cost;
   let tDone=0,tAll=0; ALLP.forEach(p=>{const t=taskProgress(p); tDone+=t.done; tAll+=t.total;});
   const pct=tAll?Math.round(tDone/tAll*100):0;
+  const noTaskCount=ALLP.filter(p=>getRow(p.id).status!=="已完成" && taskProgress(p).done===0).length;
   let actualSum=0,actualCount=0,costSum=0,costCount=0;
   ALLP.forEach(p=>{const r=getRow(p.id);
     { const list=getReceipts(p.id); if(list.length){ actualSum+=list.reduce((s,x)=>s+Number(x.amount||0),0); actualCount++; } }
@@ -747,11 +779,11 @@ function renderStats(){
       <div class="statgrouplabel">財務</div>
       <div class="stats">
         <div class="stat clickable" onclick="gotoStatus('全部')"><b>${ALLP.length}</b><span>專案總數</span></div>
-        <div class="stat"><b>${fmt(coreRev+nonOpRev)}</b><span>Q4 預估營收合計（未稅）</span><span class="small">核心 ${fmt(coreRev)}／政府補助 ${fmt(nonOpRev)}</span></div>
-        <div class="stat"><b>${fmt(actualSum)}</b><span>實際收款合計（${actualCount}／${ALLP.length}筆已登錄）</span></div>
-        <div class="stat"><b style="color:${costSum>(coreRev+nonOpRev)?'var(--warn)':'var(--ink)'}">${fmt(costSum)}</b><span>累積成本合計（${costCount}／${ALLP.length}筆已登錄）</span></div>
-        <div class="stat"><b style="color:${(coreRev+nonOpRev-costSum)<0?'var(--warn)':'var(--ok)'}">${fmt(coreRev+nonOpRev-costSum)}</b><span>專案毛利合計（營收－成本，自動算）</span></div>
-        <div class="stat"><b>${pct}%</b><span>全公司任務完成率</span></div>
+        <div class="stat"><b>${fmt(mt.q4Total)}</b><span>2026Q4 認列營收（未稅，估+實收）</span><span class="small" style="color:${q4Margin<0?'var(--warn)':'var(--ok)'}">毛利估算 ${fmt(q4Margin)}</span></div>
+        <div class="stat"><b>${fmt(mt.q1Total)}</b><span>2027Q1 認列營收（未稅，估+實收）</span><span class="small" style="color:${q1Margin<0?'var(--warn)':'var(--ok)'}">毛利估算 ${fmt(q1Margin)}</span></div>
+        <div class="stat"><b style="color:${(actualSum-costSum)<0?'var(--warn)':'var(--ok)'}">${fmt(actualSum-costSum)}</b><span>累積毛利金額（實收－成本）</span><span class="small">實收 ${fmt(actualSum)}／成本 ${fmt(costSum)}</span></div>
+        <div class="stat"><b style="color:${actualSum&&(actualSum-costSum)/actualSum<0?'var(--warn)':'var(--ink)'}">${actualSum?Math.round((actualSum-costSum)/actualSum*100)+'%':'—'}</b><span>平均毛利率（依實收計算）</span><span class="small">實收${actualCount}筆・成本${costCount}筆已登錄</span></div>
+        <div class="stat"><b>${pct}%</b><span>全公司任務完成率</span>${noTaskCount?`<span class="small" style="color:var(--accent2);">${noTaskCount}個專案還沒拆過任務清單</span>`:''}</div>
       </div>
     </div>`;
 }
@@ -1089,10 +1121,10 @@ function detailRow(p){
     <h4>協作成員（自動統計：任務指派名單中，除負責人外出現過的人）</h4>
     <div class="collab">${collabHtml}</div>
     <h4>預估認列月份（可拆多期，像實際收款一樣；直接影響月營收分布圖）</h4>
-    <div class="small">${(r.estPlan||[]).length?(r.estPlan||[]).map((e,ei)=>`<span class="todochip">${e.month}月：${fmt(e.amount)}<button class="mini danger" style="padding:0 4px;" onclick="removeEstPlan('${p.id}',${ei})">✕</button></span>`).join(' '):'尚未拆分（目前依原始月份規劃或截止日自動估算）'}</div>
+    <div class="small">${(r.estPlan||[]).length?(r.estPlan||[]).map((e,ei)=>`<span class="todochip">${monthLabel(e.month)}：${fmt(e.amount)}<button class="mini danger" style="padding:0 4px;" onclick="removeEstPlan('${p.id}',${ei})">✕</button></span>`).join(' '):'尚未拆分（目前依原始月份規劃或截止日自動估算）'}</div>
     <div style="display:flex;gap:6px;margin-top:6px;align-items:center;">
       <input type="number" placeholder="這期金額" id="estamt-${p.id}" style="width:120px;">
-      <select id="estmon-${p.id}">${[9,10,11,12].map(m=>`<option value="${m}">${m}月</option>`).join('')}</select>
+      <select id="estmon-${p.id}">${CHART_MONTHS.map(m=>`<option value="${m}">${monthLabel(m)}</option>`).join('')}</select>
       <button onclick="addEstPlan('${p.id}')">＋ 新增一期</button>
     </div>
     ${(r.estPlan||[]).length?`<div class="small" style="margin-top:4px;${Math.abs(estPlanTotal-getEstRev(p))>1?'color:var(--warn);':''}">已拆分合計：${fmt(estPlanTotal)}／預估營收 ${fmt(getEstRev(p))}${Math.abs(estPlanTotal-getEstRev(p))>1?'（兩者對不起來，請確認）':''}</div>`:''}
