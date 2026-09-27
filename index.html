@@ -176,6 +176,7 @@ tr.rowopen td:first-child{box-shadow:inset 4px 0 0 var(--accent2);}
 .undotoast{position:fixed;bottom:16px;left:16px;right:16px;max-width:420px;margin:0 auto;background:var(--card);border:1px solid var(--accent2);border-radius:10px;padding:10px 14px;box-shadow:0 2px 10px rgba(0,0,0,.15);z-index:50;display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:.82rem;}
 .small{font-size:.7rem;color:var(--sub);}
 .chartbars{display:flex;gap:14px;align-items:flex-end;height:90px;margin-top:6px;}
+.mtable-row{display:grid;grid-template-columns:110px repeat(7,1fr) 110px;align-items:center;column-gap:6px;}
 .chartcol{display:flex;flex-direction:column;align-items:center;flex:1;}
 .chartstack{width:100%;display:flex;flex-direction:column-reverse;border-radius:4px 4px 0 0;overflow:hidden;}
 .chartbar{width:100%;}
@@ -686,6 +687,41 @@ function renderPriority(){
 const CHART_MONTHS=[9,10,11,12,1,2,3];
 function monthLabel(m){ return m<=3? `2027/${m}` : `${m}月`; }
 function monthOptsQ(sel){ let s='<option value="">未填</option>'; CHART_MONTHS.forEach(m=>{ s+=`<option value="${m}" ${sel===m?'selected':''}>${monthLabel(m)}</option>`; }); return s; }
+function monthContributions(m){
+  const list=[];
+  ALLP.forEach(p=>{
+    const pr=getRow(p.id);
+    const receipts=getReceipts(p.id);
+    const fm=pr.revMonth || Number(getRange(p).end.split('-')[1]);
+    const confirmedMonths=new Set();
+    let confirmedAmt=0;
+    receipts.forEach(rc=>{
+      const amt=Number(rc.amount||0);
+      const mm=(rc.month && CHART_MONTHS.includes(rc.month)) ? rc.month : fm;
+      confirmedMonths.add(mm);
+      if(mm===m) confirmedAmt+=amt;
+    });
+    if(confirmedAmt>0) list.push({p, amount:confirmedAmt, confirmed:true});
+    if(!confirmedMonths.has(m)){
+      if(pr.estPlan && pr.estPlan.length){
+        const e=pr.estPlan.find(x=>x.month===m);
+        if(e && Number(e.amount)) list.push({p, amount:Number(e.amount), confirmed:false});
+      } else if(!pr.revMonth){
+        const plan=planScaled(p);
+        if(plan){
+          const idx=[9,10,11,12].indexOf(m);
+          if(idx>=0 && plan[idx]) list.push({p, amount:plan[idx], confirmed:false});
+        } else if(fm===m && getEstRev(p)) list.push({p, amount:getEstRev(p), confirmed:false});
+      } else if(fm===m && getEstRev(p)){
+        list.push({p, amount:getEstRev(p), confirmed:false});
+      }
+    }
+  });
+  return list.sort((a,b)=>b.amount-a.amount);
+}
+let monthTableOpen=false, monthCatTableExpanded=new Set();
+window.toggleAllMonths=function(){ monthTableOpen=!monthTableOpen; renderPriority(); };
+window.toggleMonthCatTable=function(cat){ monthCatTableExpanded.has(cat)?monthCatTableExpanded.delete(cat):monthCatTableExpanded.add(cat); renderPriority(); };
 function monthlyTotals(){
   const confirmed={}, estimated={}; CHART_MONTHS.forEach(m=>{confirmed[m]=0;estimated[m]=0;});
   ALLP.forEach(p=>{
@@ -721,16 +757,61 @@ function monthlyTotals(){
   const q1Confirmed=[1,2,3].reduce((s,m)=>s+confirmed[m],0);
   return {confirmed, estimated, totals, q4Total, q1Total, q4Confirmed, q1Confirmed};
 }
+function monthCategoryTableHtml(){
+  const cats=[]; const data={}; const projData={};
+  CHART_MONTHS.forEach(m=>{
+    monthContributions(m).forEach(x=>{
+      const cat=x.p.cat;
+      if(!data[cat]){ data[cat]={}; cats.push(cat); projData[cat]={}; }
+      data[cat][m]=(data[cat][m]||0)+x.amount;
+      if(!projData[cat][x.p.id]) projData[cat][x.p.id]={p:x.p, monthly:{}};
+      projData[cat][x.p.id].monthly[m]=(projData[cat][x.p.id].monthly[m]||0)+x.amount;
+    });
+  });
+  const rowTotal=cat=>CHART_MONTHS.reduce((s,m)=>s+(data[cat][m]||0),0);
+  cats.sort((a,b)=>rowTotal(b)-rowTotal(a));
+  const colTotal=m=>cats.reduce((s,cat)=>s+(data[cat][m]||0),0);
+  const grandTotal=cats.reduce((s,cat)=>s+rowTotal(cat),0);
+  const monthCell=(v,mi)=>`<div style="text-align:right;${mi===4?'border-left:1px dashed var(--line);padding-left:8px;':''}">${v}</div>`;
+  const headerRow=`<div class="mtable-row" style="font-weight:600;border-bottom:2px solid var(--line);padding:4px 0;">
+    <div>類別</div>${CHART_MONTHS.map((m,mi)=>monthCell(monthLabel(m),mi)).join('')}<div style="text-align:right;">合計</div>
+  </div>`;
+  const bodyRows=cats.map(cat=>{
+    const isOpen=monthCatTableExpanded.has(cat);
+    const cells=CHART_MONTHS.map((m,mi)=>monthCell(data[cat][m]?fmt(data[cat][m]):'—',mi)).join('');
+    const headerLine=`<div class="mtable-row" onclick="toggleMonthCatTable('${cat}')" style="cursor:pointer;border-bottom:1px solid var(--line);padding:4px 0;">
+      <div><span class="arrow">${isOpen?'▾':'▸'}</span><span class="cat">${cat}</span></div>${cells}<div style="text-align:right;font-weight:600;">${fmt(rowTotal(cat))}</div>
+    </div>`;
+    let projLines='';
+    if(isOpen){
+      const plist=Object.values(projData[cat]).sort((a,b)=>{
+        const ta=CHART_MONTHS.reduce((s,m)=>s+(a.monthly[m]||0),0), tb=CHART_MONTHS.reduce((s,m)=>s+(b.monthly[m]||0),0);
+        return tb-ta;
+      });
+      projLines=plist.map(pd=>{
+        const ptotal=CHART_MONTHS.reduce((s,m)=>s+(pd.monthly[m]||0),0);
+        const pcells=CHART_MONTHS.map((m,mi)=>monthCell(pd.monthly[m]?fmt(pd.monthly[m]):'—',mi)).join('');
+        return `<div class="mtable-row" onclick="goToProject('${pd.p.id}')" style="cursor:pointer;background:rgba(0,0,0,.025);border-bottom:1px dashed var(--line);padding:4px 0;">
+          <div style="padding-left:20px;">└ ${getName(pd.p)}</div>${pcells}<div style="text-align:right;">${fmt(ptotal)}</div>
+        </div>`;
+      }).join('');
+    }
+    return headerLine+projLines;
+  }).join('');
+  const totalCells=CHART_MONTHS.map((m,mi)=>monthCell(`<b>${fmt(colTotal(m))}</b>`,mi)).join('');
+  const totalRow=`<div class="mtable-row" style="padding:4px 0;">
+    <div style="font-weight:600;">合計</div>${totalCells}<div style="text-align:right;font-weight:600;">${fmt(grandTotal)}</div>
+  </div>`;
+  return `<div style="overflow-x:auto;margin-top:8px;font-size:.78rem;">${headerRow}${bodyRows}${totalRow}</div>`;
+}
 function monthlyChartBody(){
   const {confirmed, estimated, totals, q4Total, q1Total}=monthlyTotals();
   const max=Math.max(...Object.values(totals),1);
-  return `<div class="small" style="margin-bottom:6px;">2026Q4 合計：${fmt(q4Total)}　｜　2027Q1 合計：${fmt(q1Total)}</div>
-    <div class="chartbars">
-      ${CHART_MONTHS.map((m,mi)=>{
-        const totalH=Math.max(4,Math.round(totals[m]/max*70));
-        const confH=totals[m]?Math.round(confirmed[m]/totals[m]*totalH):0;
-        const estH=totalH-confH;
-        return `<div class="chartcol" style="${mi===4?'border-left:1px dashed var(--line);padding-left:8px;margin-left:4px;':''}">
+  const chartHtml=CHART_MONTHS.map((m,mi)=>{
+    const totalH=Math.max(4,Math.round(totals[m]/max*70));
+    const confH=totals[m]?Math.round(confirmed[m]/totals[m]*totalH):0;
+    const estH=totalH-confH;
+    return `<div style="cursor:pointer;display:flex;flex-direction:column;align-items:center;${mi===4?'border-left:1px dashed var(--line);padding-left:8px;':''}" onclick="toggleAllMonths()">
           <div class="chartstack">
             <div class="chartbar estimated" style="height:${estH}px;"></div>
             <div class="chartbar confirmed" style="height:${confH}px;"></div>
@@ -738,11 +819,16 @@ function monthlyChartBody(){
           <div class="small" style="margin-top:4px;">${monthLabel(m)}</div>
           <div class="small">${fmt(totals[m])}</div>
         </div>`;
-      }).join('')}
+  }).join('');
+  const detailHtml=monthTableOpen? monthCategoryTableHtml() : '';
+  return `<div class="small" style="margin-bottom:6px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+      <span>2026Q4 合計：${fmt(q4Total)}　｜　2027Q1 合計：${fmt(q1Total)}</span>
+      <button class="mini" onclick="toggleAllMonths()">${monthTableOpen?'收合明細':'展開明細'}</button>
     </div>
-    <div class="small" style="margin-top:6px;">淺色＝預估（優先用「基本資料」裡自訂的預估認列月份，沒設定的話依原始預算表安排，都沒有就依截止日估算）；深色＝那個月已在「實際收款」登錄發票，用實收金額取代原本的估算（不會重複累加）。2027年1-3月為Q1，跟前面的2026Q4用虛線隔開。</div>`;
+    <div class="mtable-row" style="align-items:flex-end;margin-bottom:10px;"><div></div>${chartHtml}<div></div></div>
+    ${detailHtml}
+    <div class="small" style="margin-top:6px;">淺色＝預估；深色＝已在「實際收款」登錄發票，取代預估（不重複累加）。2027年1-3月為Q1（虛線右側）。點長條或按鈕看各類別／專案貢獻金額。</div>`;
 }
-
 function quarterCost(){
   let q4Cost=0, q1Cost=0;
   ALLP.forEach(p=>{
@@ -779,11 +865,11 @@ function renderStats(){
       <div class="statgrouplabel">財務</div>
       <div class="stats">
         <div class="stat clickable" onclick="gotoStatus('全部')"><b>${ALLP.length}</b><span>專案總數</span></div>
-        <div class="stat"><b>${fmt(mt.q4Total)}</b><span>2026Q4 認列營收（未稅，估+實收）</span><span class="small" style="color:${q4Margin<0?'var(--warn)':'var(--ok)'}">毛利估算 ${fmt(q4Margin)}</span></div>
-        <div class="stat"><b>${fmt(mt.q1Total)}</b><span>2027Q1 認列營收（未稅，估+實收）</span><span class="small" style="color:${q1Margin<0?'var(--warn)':'var(--ok)'}">毛利估算 ${fmt(q1Margin)}</span></div>
-        <div class="stat"><b style="color:${(actualSum-costSum)<0?'var(--warn)':'var(--ok)'}">${fmt(actualSum-costSum)}</b><span>累積毛利金額（實收－成本）</span><span class="small">實收 ${fmt(actualSum)}／成本 ${fmt(costSum)}</span></div>
-        <div class="stat"><b style="color:${actualSum&&(actualSum-costSum)/actualSum<0?'var(--warn)':'var(--ink)'}">${actualSum?Math.round((actualSum-costSum)/actualSum*100)+'%':'—'}</b><span>平均毛利率（依實收計算）</span><span class="small">實收${actualCount}筆・成本${costCount}筆已登錄</span></div>
         <div class="stat"><b>${pct}%</b><span>全公司任務完成率</span>${noTaskCount?`<span class="small" style="color:var(--accent2);">${noTaskCount}個專案還沒拆過任務清單</span>`:''}</div>
+        <div class="stat"><b>${fmt(mt.q4Total)}</b><span>2026Q4 認列營收（未稅，估+實收）</span></div>
+        <div class="stat"><b style="color:${q4Margin<0?'var(--warn)':'var(--ink)'}">${mt.q4Total?Math.round(q4Margin/mt.q4Total*100)+'%':'—'}</b><span>2026Q4 毛利率估算</span><span class="small">毛利 ${fmt(q4Margin)}</span></div>
+        <div class="stat"><b>${fmt(mt.q1Total)}</b><span>2027Q1 認列營收（未稅，估+實收）</span></div>
+        <div class="stat"><b style="color:${q1Margin<0?'var(--warn)':'var(--ink)'}">${mt.q1Total?Math.round(q1Margin/mt.q1Total*100)+'%':'—'}</b><span>2027Q1 毛利率估算</span><span class="small">毛利 ${fmt(q1Margin)}</span></div>
       </div>
     </div>`;
 }
