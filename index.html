@@ -675,8 +675,11 @@ function renderPriority(){
     {key:'cost', label:`成本壓力 (${overCost.length})`, body:costBody},
     {key:'pay', label:`待收款 (${payGroup.length})`, body:payBody},
   ];
+  const noTaskList=ALLP.filter(p=>getRow(p.id).status!=="已完成" && taskProgress(p).done===0);
+  const noTaskBody=noTaskList.length? noTaskList.map(p=>projRowHtml(p)).join('') : `<div class="small">✓ 目前所有進行中的專案都已經有任務進度</div>`;
   const projectTabs=[
     {key:'month', label:`月營收分布`, body:monthlyChartBody()},
+    {key:'notasks', label:`尚未拆分任務 (${noTaskList.length})`, body:noTaskBody},
   ];
   const tabs = view==="person" ? personTabs : projectTabs;
   const tabBtns = tabs.length>1 ? `<div class="dtabs" style="margin-bottom:2px;">${tabs.map(tb=>`<button class="dtab ${priorityTab===tb.key?'active':''}" onclick="setPriorityTab('${tb.key}')">${tb.label}</button>`).join('')}</div>` : '';
@@ -865,7 +868,7 @@ function renderStats(){
       <div class="statgrouplabel">財務</div>
       <div class="stats">
         <div class="stat clickable" onclick="gotoStatus('全部')"><b>${ALLP.length}</b><span>專案總數</span></div>
-        <div class="stat"><b>${pct}%</b><span>全公司任務完成率</span>${noTaskCount?`<span class="small" style="color:var(--accent2);">${noTaskCount}個專案還沒拆過任務清單</span>`:''}</div>
+        <div class="stat"><b>${pct}%</b><span>全公司任務完成率</span>${noTaskCount?`<span class="small" style="color:var(--accent2);cursor:pointer;text-decoration:underline;text-decoration-style:dotted;" onclick="gotoNoTaskList()">${noTaskCount}個專案還沒拆過任務清單</span>`:''}</div>
         <div class="stat"><b>${fmt(mt.q4Total)}</b><span>2026Q4 認列營收（未稅，估+實收）</span></div>
         <div class="stat"><b style="color:${q4Margin<0?'var(--warn)':'var(--ink)'}">${mt.q4Total?Math.round(q4Margin/mt.q4Total*100)+'%':'—'}</b><span>2026Q4 毛利率估算</span><span class="small">毛利 ${fmt(q4Margin)}</span></div>
         <div class="stat"><b>${fmt(mt.q1Total)}</b><span>2027Q1 認列營收（未稅，估+實收）</span></div>
@@ -919,6 +922,13 @@ window.goBack=function(){
   render();
   document.getElementById("backbtn").innerHTML="";
   setTimeout(()=>window.scrollTo({top:bs.scrollY,behavior:"smooth"}),50);
+};
+window.gotoNoTaskList=function(){
+  view="project"; priorityTab="notasks";
+  document.querySelectorAll(".tabs button").forEach(x=>x.classList.remove("active"));
+  document.querySelector('.tabs button[data-v="project"]').classList.add("active");
+  render();
+  document.getElementById("priority").scrollIntoView({behavior:"smooth"});
 };
 window.goToTaskList=function(pid){
   captureBackState();
@@ -1370,7 +1380,7 @@ function capacityOverviewHtml(){
 
   const weekHeaderHtml=`<div class="ganttrow ganttweekrow"><div class="ganttlabel" style="${LBL}"></div><div class="ganttbararea">${weekLabels.map(w=>`<span class="ganttweeklabel" style="left:${w.pct}%;">${w.label}</span>`).join('')}</div></div>`;
   const minWidthPx=Math.max(560, Math.round(totalDays*8));
-  const legend=`<div class="small" style="margin-bottom:4px;">顏色：<span style="color:#8fb28f;">●</span>正常　<span style="color:#d3a86a;">●</span>落後　<span style="color:var(--warn);">●</span>逾期　<span style="color:var(--line);">●</span>完成　｜　實心橫桿＝負責，虛線淺色＝協作　｜　活動日：<span style="color:#2c5f7c;">●</span>負責一定要到　<span style="color:#9b7cb6;">●</span>協作不一定要到</div>`;
+  const legend=`<div class="small" style="margin-bottom:4px;">顏色：<span style="color:#8fb28f;">●</span>正常　<span style="color:#d3a86a;">●</span>落後　<span style="color:var(--warn);">●</span>逾期　<span style="color:var(--line);">●</span>完成　｜　實心橫桿＝負責，虛線淺色＝協作　｜　活動日：<span style="color:#2c5f7c;">●</span>負責　<span style="color:#9b7cb6;">●</span>協作</div>`;
   return `${legend}<div class="gantt"><div class="ganttscroll"><div class="ganttinner" style="min-width:${minWidthPx}px;">
     <div class="gantthead"><div class="ganttaxis" style="padding-left:200px;"><span>${shortDate(minStart)}</span><span>${shortDate(maxEnd)}</span></div>${weekHeaderHtml}</div>
     <div class="ganttbody">${rowsHtml}</div>
