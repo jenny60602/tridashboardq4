@@ -129,7 +129,7 @@ tr.rowopen td:first-child{box-shadow:inset 4px 0 0 var(--accent2);}
 .notesbox{width:100%;min-height:70px;padding:8px;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--ink);font-size:.8rem;font-family:inherit;resize:vertical;}
 .monthgridscroll{overflow-x:auto;margin-top:6px;}
 .monthgrid{display:flex;gap:8px;flex-wrap:nowrap;}
-.monthcol{flex:0 0 130px;min-width:130px;background:var(--card);border:1px solid var(--line);border-radius:8px;padding:6px 8px;}
+.monthcol{flex:1 1 200px;min-width:170px;max-width:260px;background:var(--card);border:1px solid var(--line);border-radius:8px;padding:6px 8px;}
 .monthcolhead{font-weight:600;font-size:.78rem;margin-bottom:4px;color:var(--accent2);}
 .monthitem{font-size:.68rem;padding:2px 0;border-bottom:1px dashed var(--line);}
 .monthproj{color:var(--accent2);font-weight:600;}
@@ -163,7 +163,7 @@ tr.rowopen td:first-child{box-shadow:inset 4px 0 0 var(--accent2);}
 .todogroup{padding:6px 0;border-bottom:1px dashed var(--line);}
 .todogroup:last-child{border-bottom:none;}
 .todohead{display:flex;align-items:center;gap:6px;font-size:.82rem;margin-bottom:3px;}
-.todochips{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:6px;margin-top:2px;}
+.todochips{display:flex;flex-direction:column;gap:4px;margin-top:2px;}
 .todochip{display:flex;align-items:flex-start;gap:5px;font-size:.75rem;color:var(--ink);background:var(--card);border:1px solid var(--line);border-radius:8px;padding:3px 9px;cursor:pointer;}
 .todochip span{word-break:break-word;}
 .prow:last-child{border-bottom:none;}
@@ -714,7 +714,6 @@ function renderPriority(){
 
   const personTabs=[
     {key:'capacity', label:`執行總覽`, body:capacityOverviewHtml()},
-    {key:'audience', label:`依對象`, body:audienceOverviewHtml()},
     {key:'urgent', label:`急迫案件 (${execGroup.length})`, body:urgentBody},
     {key:'task', label:`任務急迫 (${taskUrgent.length})`, body:taskBody},
     {key:'stagnant', label:`未指派任務 (${unassignedTasks.length})`, body:stagnantBody},
@@ -1371,26 +1370,6 @@ function projRowHtml(p,badgeHtml){
     <div class="prow-bottom"><span>${r.status}・迄 ${shortDate(getRange(p).end)}</span><span>任務 ${tp.done}/${tp.total}（${pct}%）</span></div>
   </div>`;
 }
-function audienceOverviewHtml(){
-  const AUDIENCES=["攤商","消費者","客戶","內部"];
-  const groups={}; AUDIENCES.forEach(a=>groups[a]=[]);
-  ALLP.forEach(p=>{
-    if(getRow(p.id).status==="已完成") return;
-    taskList(p).forEach(tn=>{
-      materializedSubs(p.id,tn).forEach(s=>{
-        if(s.done || !s.audience || !groups[s.audience]) return;
-        groups[s.audience].push({p, label:`${tn}／${s.name}`, end:s.end, assignee:s.assignee});
-      });
-    });
-  });
-  const anyItems=AUDIENCES.some(a=>groups[a].length);
-  if(!anyItems) return `<div class="small">目前沒有任務標記對象（攤商／消費者／客戶／內部）</div>`;
-  return AUDIENCES.filter(a=>groups[a].length).map(a=>{
-    const items=groups[a].sort((x,y)=>{ if(x.end&&y.end) return x.end.localeCompare(y.end); if(x.end) return -1; if(y.end) return 1; return 0; });
-    const body=items.map(x=>`<div class="prow" onclick="goToProject('${x.p.id}')" style="cursor:pointer;"><div class="prow-top"><span class="pname">${getName(x.p)} － ${x.label}</span>${x.assignee?assigneeTag(x.assignee):''}<span class="small">${x.end?shortDate(x.end):'未標日期'}</span></div></div>`).join('');
-    return `<div class="small" style="font-weight:600;margin:10px 0 4px;background:${AUDIENCE_COLORS[a]};display:inline-block;padding:2px 8px;border-radius:5px;">${a}（${items.length}）</div>${body}`;
-  }).join('');
-}
 function capacityOverviewHtml(){
   const today=new Date(); today.setHours(0,0,0,0);
   const isActive=p=>{ const r=getRange(p); return today>=new Date(r.start+"T00:00:00") && today<=new Date(r.end+"T23:59:59"); };
@@ -1506,8 +1485,8 @@ function personDetailHtml(t){
   ALLP.forEach(p=>{
     taskList(p).forEach((tn,idx)=>{
       const subs=materializedSubs(p.id,tn);
-      if(subs.length){ subs.forEach((s,si)=>{ if(s.assignee===t) myTasks.push({p,idx,si,name:tn+'／'+s.name,done:s.done}); }); }
-      else { const info=taskInfo(p,tn); if(info.assignee===t) myTasks.push({p,idx,si:null,name:tn,done:info.done}); }
+      if(subs.length){ subs.forEach((s,si)=>{ if(s.assignee===t) myTasks.push({p,idx,si,parent:tn,name:s.name,done:s.done}); }); }
+      else { const info=taskInfo(p,tn); if(info.assignee===t) myTasks.push({p,idx,si:null,parent:null,name:tn,done:info.done}); }
     });
   });
   const ownedHtml=owned.map(p=>projRowHtml(p)).join("")||'<div class="prow small">（無）</div>';
@@ -1526,15 +1505,21 @@ function personDetailHtml(t){
   const shownIds = todoIsExpanded ? projIds : projIds.slice(0,TODO_LIMIT);
   const todoHtml = shownIds.length ? shownIds.map(pid=>{
     const p=getProject(pid); const items=byProject.get(pid);
-    const lines=items.map(x=>{
-      const cb=x.si===null
-        ? `<input type="checkbox" onchange="toggleTask('${x.p.id}',${x.idx},this.checked)">`
-        : `<input type="checkbox" onchange="toggleSubtask('${x.p.id}',${x.idx},${x.si},this.checked)">`;
-      return `<label class="todochip">${cb}<span>${x.name}</span></label>`;
+    const byParent=new Map();
+    items.forEach(x=>{ const k=x.parent||'__leaf__'; if(!byParent.has(k)) byParent.set(k,[]); byParent.get(k).push(x); });
+    const groupsHtml=[...byParent.entries()].map(([parent,arr])=>{
+      const lines=arr.map(x=>{
+        const cb=x.si===null
+          ? `<input type="checkbox" onchange="toggleTask('${x.p.id}',${x.idx},this.checked)">`
+          : `<input type="checkbox" onchange="toggleSubtask('${x.p.id}',${x.idx},${x.si},this.checked)">`;
+        return `<label class="todochip">${cb}<span>${x.name}</span></label>`;
+      }).join("");
+      const parentLabel = parent!=='__leaf__' ? `<div class="small" style="font-weight:600;margin:6px 0 2px;">${parent}</div>` : '';
+      return `${parentLabel}<div class="todochips">${lines}</div>`;
     }).join("");
     return `<div class="todogroup">
       <div class="todohead"><span class="pname">${getName(p)}</span><span class="cat">${p.cat}</span><span class="badge ${urgency(p)}">${URG_LABEL[urgency(p)]}</span></div>
-      <div class="todochips">${lines}</div>
+      ${groupsHtml}
     </div>`;
   }).join("") : `<div class="prow small">🎉 目前沒有待辦任務</div>`;
   const moreBtn = projIds.length>TODO_LIMIT
