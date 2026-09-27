@@ -100,7 +100,7 @@ tr.rowopen td:first-child{box-shadow:inset 4px 0 0 var(--accent2);}
 .ganttaxis{display:flex;justify-content:space-between;font-size:.68rem;color:var(--sub);margin-bottom:4px;}
 .ganttbody{position:relative;}
 .ganttrow{display:flex;align-items:center;gap:8px;padding:3px 0;border-bottom:1px dashed var(--line);font-size:.74rem;}
-.ganttlabel{width:210px;flex-shrink:0;position:sticky;left:0;background:var(--bg);z-index:2;padding-right:4px;}
+.ganttlabel{width:250px;flex-shrink:0;position:sticky;left:0;background:var(--bg);z-index:2;padding-right:4px;}
 .ganttgrouprow{padding-top:8px;}
 .ganttweekrow{border-bottom:1px solid var(--line);padding-bottom:4px;margin-bottom:2px;}
 .ganttweeklabel{position:absolute;top:0;font-size:.64rem;color:var(--sub);white-space:nowrap;padding-left:2px;}
@@ -1197,7 +1197,7 @@ function ganttHtml(p){
     const labelText = r.group ? `　└ ${r.label}` : r.label;
     const audDot = audienceBadge(r.audience);
     return `${groupHeader}<div class="ganttrow ${r.group?'ganttchildrow':''}">
-      <div class="ganttlabel" style="display:flex;align-items:center;gap:3px;white-space:nowrap;" title="${labelText.replace(/^\s*└\s*/,'')}${r.assignee?`（${r.assignee}）`:''}">${audDot}<span>${labelText}</span></div>
+      <div class="ganttlabel" style="display:flex;align-items:center;gap:3px;white-space:nowrap;">${audDot}<span>${labelText}</span>${r.assignee?`<span class="small" style="color:var(--sub);">・${r.assignee}</span>`:''}</div>
       <div class="ganttbararea">${overlayHtml}${markerHtml}${dateTag}</div>
     </div>`;
   }).join('');
@@ -1214,7 +1214,7 @@ function ganttHtml(p){
   const minWidthPx=Math.max(500, Math.round(totalDays*8));
   const body=`<div class="ganttscroll"><div class="ganttinner" style="min-width:${minWidthPx}px;">
        <div class="gantthead">
-         <div class="ganttaxis" style="padding-left:210px;"><span>${shortDate(proj.start)}</span><span>${shortDate(proj.end)}</span></div>
+         <div class="ganttaxis"><span style="position:sticky;left:250px;">${shortDate(proj.start)}</span><span>${shortDate(proj.end)}</span></div>
          ${weekHeaderHtml}
          ${eventRowHtml}
        </div>
@@ -1463,7 +1463,7 @@ function capacityOverviewHtml(){
   const minWidthPx=Math.max(560, Math.round(totalDays*8));
   const legend=`<div class="small" style="margin-bottom:4px;">顏色：<span style="color:#8fb28f;">●</span>正常　<span style="color:#d3a86a;">●</span>落後　<span style="color:var(--warn);">●</span>逾期　<span style="color:var(--line);">●</span>完成　｜　實心橫桿＝負責，虛線淺色＝協作　｜　活動日：<span style="color:#2c5f7c;">●</span>負責　<span style="color:#9b7cb6;">●</span>協作</div>`;
   return `${legend}<div class="gantt"><div class="ganttscroll"><div class="ganttinner" style="min-width:${minWidthPx}px;">
-    <div class="gantthead"><div class="ganttaxis" style="padding-left:200px;"><span>${shortDate(minStart)}</span><span>${shortDate(maxEnd)}</span></div>${weekHeaderHtml}</div>
+    <div class="gantthead"><div class="ganttaxis"><span style="position:sticky;left:200px;">${shortDate(minStart)}</span><span>${shortDate(maxEnd)}</span></div>${weekHeaderHtml}</div>
     <div class="ganttbody">${rowsHtml}</div>
   </div></div></div>`;
 }
