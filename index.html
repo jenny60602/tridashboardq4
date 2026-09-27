@@ -261,7 +261,7 @@ const URG_LABEL={overdue:"已逾期",soon7:"7天內到期",soon30:"30天內",lat
 
 const SHEET_API_URL="https://script.google.com/macros/s/AKfycbymRzIunZy7hUkAzy0UTsHi-22mVACE1HlZtsGCI2H3_FekAgnbdcQ_XsOwFVcve4h2gQ/exec";
 let state={};
-let view="project", catFilter="全部", statusFilter="全部", searchTerm="", expanded=new Set(), expandedPerson=new Set(), showAddForm=false, detailTab={}, todoExpandedSet=new Set(), ownedCollabExpandedSet=new Set(), ganttGroupExpanded={}, lastDeleteSnapshot=null;
+let view="project", catFilter="全部", statusFilter="全部", searchTerm="", expanded=new Set(), expandedPerson=new Set(), showAddForm=false, detailTab={}, todoExpandedSet=new Set(), ownedCollabExpandedSet=new Set(), ganttGroupExpanded={}, lastDeleteSnapshot=null, capacityExpanded=new Set();
 function showUndoToast(label){
   const box=document.getElementById("undotoast");
   box.innerHTML=`<span>已刪除：${label}</span><span style="display:flex;gap:6px;"><button onclick="undoLastDelete()" style="padding:4px 12px;border-radius:6px;border:1px solid var(--accent2);background:var(--accent2);color:#fff;cursor:pointer;font-size:.78rem;">復原</button><button class="mini" onclick="document.getElementById('undotoast').innerHTML=''">✕</button></span>`;
@@ -650,6 +650,7 @@ function renderPriority(){
   const costBody=paginatedBody('cost', costItemsHtml, `<div class="small">✓ 沒有成本壓力超過60%的專案</div>`);
 
   const personTabs=[
+    {key:'capacity', label:`執行總覽`, body:capacityOverviewHtml()},
     {key:'urgent', label:`急迫案件 (${execGroup.length})`, body:urgentBody},
     {key:'task', label:`任務急迫 (${taskUrgent.length})`, body:taskBody},
     {key:'stagnant', label:`未指派任務 (${unassignedTasks.length})`, body:stagnantBody},
@@ -767,6 +768,14 @@ window.goToProject=function(pid){
   expanded.add(pid);
   render();
   setTimeout(()=>{ const el=document.getElementById("proj-"+pid); if(el) el.scrollIntoView({behavior:"smooth",block:"center"}); },50);
+};
+window.goToPersonCard=function(name){
+  view="person";
+  document.querySelectorAll(".tabs button").forEach(x=>x.classList.remove("active"));
+  document.querySelector('.tabs button[data-v="person"]').classList.add("active");
+  expandedPerson.add(name);
+  render();
+  setTimeout(()=>{ const el=document.getElementById("pcard-"+name); if(el) el.scrollIntoView({behavior:"smooth",block:"center"}); },50);
 };
 
 function renderAddForm(){
@@ -1091,67 +1100,64 @@ function projRowHtml(p,badgeHtml){
     <div class="prow-bottom"><span>${r.status}・迄 ${shortDate(getRange(p).end)}</span><span>任務 ${tp.done}/${tp.total}（${pct}%）</span></div>
   </div>`;
 }
-function personOwnedTimelineHtml(t){
-  const owned=ALLP.filter(p=>getRow(p.id).status!=="已完成" && getRow(p.id).assignee===t);
-  if(!owned.length) return `<div class="small">目前沒有負責中的專案</div>`;
-  const ranges=owned.map(p=>({p,r:getRange(p)}));
-  let minStart=ranges[0].r.start, maxEnd=ranges[0].r.end;
-  ranges.forEach(x=>{ if(x.r.start<minStart) minStart=x.r.start; if(x.r.end>maxEnd) maxEnd=x.r.end; });
-  ranges.sort((a,b)=>a.r.start.localeCompare(b.r.start));
+function capacityOverviewHtml(){
+  const today=new Date(); today.setHours(0,0,0,0);
+  const names=[...TEAM_STAFF, ...TEAM_PARTNER].filter((n,i,arr)=>arr.indexOf(n)===i);
+  const groups=names.map(name=>{
+    const owned=ALLP.filter(p=>getRow(p.id).status!=="已完成" && getRow(p.id).assignee===name);
+    if(!owned.length) return null;
+    const activeNow=owned.filter(p=>{
+      const r=getRange(p); return today>=new Date(r.start+"T00:00:00") && today<=new Date(r.end+"T23:59:59");
+    });
+    return {name, owned, activeNow};
+  }).filter(Boolean);
+  if(!groups.length) return `<div class="small">目前沒有人負責中的專案</div>`;
+  groups.sort((a,b)=>b.activeNow.length-a.activeNow.length);
+
+  let minStart=null, maxEnd=null;
+  groups.forEach(g=>g.owned.forEach(p=>{ const r=getRange(p); if(!minStart||r.start<minStart) minStart=r.start; if(!maxEnd||r.end>maxEnd) maxEnd=r.end; }));
   const rangeStart=new Date(minStart+"T00:00:00"), rangeEnd=new Date(maxEnd+"T00:00:00");
   const totalMs=(rangeEnd-rangeStart)||1;
   const totalDays=Math.max(1,Math.round(totalMs/86400000));
   const pctOf=d=>{ const dt=new Date(d+"T00:00:00"); return Math.max(0,Math.min(100,(dt-rangeStart)/totalMs*100)); };
-  const today=new Date(); today.setHours(0,0,0,0);
-  const todayPct=(today>=rangeStart&&today<=rangeEnd)?((today-rangeStart)/totalMs*100):null;
+  const today0=new Date(); today0.setHours(0,0,0,0);
+  const todayPct=(today0>=rangeStart&&today0<=rangeEnd)?((today0-rangeStart)/totalMs*100):null;
   const gridLines=[]; const weekLabels=[];
-  for(let d=0;d<=totalDays;d+=7){
+  for(let d=0; d<=totalDays; d+=7){
     gridLines.push(d/totalDays*100);
-    if(d<totalDays){
-      const wd=new Date(rangeStart); wd.setDate(wd.getDate()+d);
-      const wom=Math.ceil(wd.getDate()/7);
-      weekLabels.push({pct:d/totalDays*100, label:`${wd.getMonth()+1}月W${wom}`});
-    }
+    if(d<totalDays){ const wd=new Date(rangeStart); wd.setDate(wd.getDate()+d); const wom=Math.ceil(wd.getDate()/7); weekLabels.push({pct:d/totalDays*100, label:`${wd.getMonth()+1}月W${wom}`}); }
   }
-  const overlayHtml=gridLines.map(pc=>`<div class="ganttgrid" style="left:${pc}%;"></div>`).join('')
-    + (todayPct!==null?`<div class="ganttToday" style="left:${todayPct}%;"></div>`:'');
-  let maxOverlap=0, maxOverlapDate=null;
-  for(let d=0; d<=totalDays; d++){
-    const day=new Date(rangeStart); day.setDate(day.getDate()+d);
-    const dayStr=`${day.getFullYear()}-${pad(day.getMonth()+1)}-${pad(day.getDate())}`;
-    const count=ranges.filter(x=>dayStr>=x.r.start && dayStr<=x.r.end).length;
-    if(count>maxOverlap){ maxOverlap=count; maxOverlapDate=dayStr; }
-  }
-  const rows=ranges.map(x=>{
-    const li=lagInfo(x.p);
-    const cls = li.done?'ownbar-done' : li.overdue?'ownbar-overdue' : li.lag>=0.2?'ownbar-lag':'ownbar-normal';
-    const left=pctOf(x.r.start), width=Math.max(2,pctOf(x.r.end)-pctOf(x.r.start));
-    const rowRow=getRow(x.p.id);
-    const eventMark=(rowRow.eventDates||[]).map(ed=>`<span class="ganttEventDot" style="left:${pctOf(ed)}%;" title="活動日：${shortDate(ed)}"></span>`).join('');
-    return `<div class="ganttrow" onclick="goToProject('${x.p.id}')" style="cursor:pointer;">
-      <div class="ganttlabel"><span class="cat">${x.p.cat}</span> ${getName(x.p)}</div>
-      <div class="ganttbararea">${overlayHtml}<div class="ganttbar ${cls}" style="left:${left}%;width:${width}%;" title="${shortDate(x.r.start)}–${shortDate(x.r.end)}"></div>${eventMark}</div>
+  const overlayHtml=gridLines.map(pc=>`<div class="ganttgrid" style="left:${pc}%;"></div>`).join('') + (todayPct!==null?`<div class="ganttToday" style="left:${todayPct}%;"></div>`:'');
+
+  const rowsHtml=groups.map(g=>{
+    const severityBg = g.activeNow.length===0?'rgba(46,125,50,.08)' : g.activeNow.length>=3?'rgba(192,57,43,.10)' : 'rgba(181,101,29,.08)';
+    const isOpen=capacityExpanded.has(g.name);
+    const header=`<div class="ganttrow" onclick="toggleCapacityGroup('${g.name}')" style="cursor:pointer;background:${severityBg};">
+      <div class="ganttlabel"><span class="arrow">${isOpen?'▾':'▸'}</span><b onclick="event.stopPropagation();goToPersonCard('${g.name}')" style="text-decoration:underline;text-decoration-style:dotted;">${g.name}</b> <span class="small">(同時${g.activeNow.length}案／共${g.owned.length}案)</span></div>
+      <div class="ganttbararea">${overlayHtml}</div>
     </div>`;
+    if(!isOpen) return header;
+    const projRows=g.owned.slice().sort((a,b)=>getRange(a).start.localeCompare(getRange(b).start)).map(p=>{
+      const r=getRange(p);
+      const li=lagInfo(p);
+      const cls = li.done?'ownbar-done' : li.overdue?'ownbar-overdue' : li.lag>=0.2?'ownbar-lag':'ownbar-normal';
+      const left=pctOf(r.start), width=Math.max(2,pctOf(r.end)-pctOf(r.start));
+      const evRow=getRow(p.id);
+      const evDots=(evRow.eventDates||[]).map(ed=>`<span class="ganttEventDot" style="left:${pctOf(ed)}%;" title="活動日：${shortDate(ed)}"></span>`).join('');
+      return `<div class="ganttrow" onclick="goToProject('${p.id}')" style="cursor:pointer;">
+        <div class="ganttlabel">　└ <span class="cat">${p.cat}</span> ${getName(p)}</div>
+        <div class="ganttbararea">${overlayHtml}<div class="ganttbar ${cls}" style="left:${left}%;width:${width}%;" title="${shortDate(r.start)}–${shortDate(r.end)}"></div>${evDots}</div>
+      </div>`;
+    }).join('');
+    return header+projRows;
   }).join('');
-  const weekHeaderHtml=`<div class="ganttrow ganttweekrow">
-    <div class="ganttlabel"></div>
-    <div class="ganttbararea">${weekLabels.map(w=>`<span class="ganttweeklabel" style="left:${w.pct}%;">${w.label}</span>`).join('')}</div>
-  </div>`;
-  const minWidthPx=Math.max(500, Math.round(totalDays*6));
-  const overlapNote = maxOverlap>=3
-    ? `<div class="small" style="margin-top:6px;color:var(--warn);">⚠ ${shortDate(maxOverlapDate)} 前後同時有 ${maxOverlap} 個負責的專案重疊執行，負荷可能偏重。</div>`
-    : `<div class="small" style="margin-top:6px;">目前最多同時重疊 ${maxOverlap} 個負責的專案。</div>`;
-  const eventByDate={};
-  ranges.forEach(x=>{ (getRow(x.p.id).eventDates||[]).forEach(ed=>{ (eventByDate[ed]=eventByDate[ed]||[]).push(getName(x.p)); }); });
-  const clashes=Object.entries(eventByDate).filter(([d,names])=>names.length>1);
-  const eventClashNote=clashes.length? `<div class="small" style="margin-top:2px;color:#2c5f7c;">● 活動日撞期：${clashes.map(([d,names])=>`${shortDate(d)}（${names.join('、')}）`).join('；')}</div>` : '';
+
+  const weekHeaderHtml=`<div class="ganttrow ganttweekrow"><div class="ganttlabel"></div><div class="ganttbararea">${weekLabels.map(w=>`<span class="ganttweeklabel" style="left:${w.pct}%;">${w.label}</span>`).join('')}</div></div>`;
+  const minWidthPx=Math.max(500, Math.round(totalDays*8));
   return `<div class="gantt"><div class="ganttscroll"><div class="ganttinner" style="min-width:${minWidthPx}px;">
-    <div class="gantthead">
-      <div class="ganttaxis"><span>${shortDate(minStart)}</span><span>${shortDate(maxEnd)}</span></div>
-      ${weekHeaderHtml}
-    </div>
-    <div class="ganttbody">${rows}</div>
-  </div></div>${overlapNote}${eventClashNote}</div>`;
+    <div class="gantthead"><div class="ganttaxis"><span>${shortDate(minStart)}</span><span>${shortDate(maxEnd)}</span></div>${weekHeaderHtml}</div>
+    <div class="ganttbody">${rowsHtml}</div>
+  </div></div></div>`;
 }
 function personMonthlyHtml(t){
   const items=[];
@@ -1231,7 +1237,6 @@ function personDetailHtml(t){
     ${todoHtml}
     ${moreBtn}
     ${doneCount?`<div class="small" style="margin-top:6px;">已完成 ${doneCount} 項（不列出）</div>`:''}
-    ${owned.length?`<h3 style="margin-top:16px;">負責專案時間軸</h3>${personOwnedTimelineHtml(t)}`:''}
     <h3 style="margin-top:16px;">本季每月重點（依截止日）</h3>
     ${personMonthlyHtml(t)}
     <button class="mini" style="margin-top:12px;" onclick="toggleOwnedCollab('${t}')">${ocExpanded?'收合':'顯示'}負責／協作專案清單（${owned.length}負責・${collab.length}協作）</button>
@@ -1256,7 +1261,7 @@ function personCard(t){
     : `<div class="small" style="margin-top:5px;color:var(--ok);">✓ 目前沒有急件</div>`;
   const open=expandedPerson.has(t);
   const role=ROLES[t];
-  return `<div class="pcard ${group}" onclick="togglePerson('${t}')" style="cursor:pointer;">
+  return `<div class="pcard ${group}" id="pcard-${t}" onclick="togglePerson('${t}')" style="cursor:pointer;">
       <b>${t}${role?` <span class="rolelabel">・${role}</span>`:''}</b><span>負責 ${activeOwned.length}/${owned.length} 案・協作 ${collabOn.length} 案・${taskCount} 項任務</span>${topHtml}
     </div>${open?personDetailHtml(t):''}`;
 }
@@ -1615,6 +1620,7 @@ window.renameVendor=async function(oldName){
 };
 window.toggleTodoExpand=function(t){ todoExpandedSet.has(t)?todoExpandedSet.delete(t):todoExpandedSet.add(t); renderPersonView(); };
 window.toggleGanttGroup=function(pid,group){ const key=pid+'::'+group; ganttGroupExpanded[key]=!ganttGroupExpanded[key]; renderProjectView(); };
+window.toggleCapacityGroup=function(name){ capacityExpanded.has(name)?capacityExpanded.delete(name):capacityExpanded.add(name); renderPriority(); };
 window.toggleOwnedCollab=function(t){ ownedCollabExpandedSet.has(t)?ownedCollabExpandedSet.delete(t):ownedCollabExpandedSet.add(t); renderPersonView(); };
 
 document.querySelectorAll(".tabs button").forEach(b=>b.addEventListener("click",()=>{
