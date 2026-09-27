@@ -1470,9 +1470,17 @@ function isValidISODate(v){
   const y=Number(v.slice(0,4));
   return y>=2000 && y<=2100;
 }
+let dateRenderTimer=null;
 window.setField=async function(id,field,val){
   if((field==="startDate"||field==="endDate") && !isValidISODate(val)) return;
-  const cur=getRow(id); state[id]=Object.assign({},cur,{[field]:val}); touch(id); render(); await persist();
+  const cur=getRow(id); state[id]=Object.assign({},cur,{[field]:val}); touch(id);
+  if(field==="startDate"||field==="endDate"){
+    clearTimeout(dateRenderTimer);
+    dateRenderTimer=setTimeout(()=>{ render(); },700);
+  } else {
+    render();
+  }
+  await persist();
 };
 window.saveName=async function(pid,val){
   const v=(val||'').trim(); if(v===''){ render(); return; }
