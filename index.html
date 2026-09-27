@@ -124,6 +124,7 @@ tr.rowopen td:first-child{box-shadow:inset 4px 0 0 var(--accent2);}
 .ganttbar-done{opacity:.35;}
 .ganttToday{position:absolute;top:0;bottom:0;width:2px;background:var(--warn);z-index:2;}
 .ganttEventDot{position:absolute;top:50%;left:0;transform:translate(-50%,-50%);width:10px;height:10px;border-radius:50%;background:#2c5f7c;border:2px solid #fff;z-index:3;box-shadow:0 0 0 1px rgba(0,0,0,.18);}
+.ganttEventDotCollab{position:absolute;top:50%;left:0;transform:translate(-50%,-50%);width:10px;height:10px;border-radius:50%;background:#9b7cb6;border:2px solid #fff;z-index:3;box-shadow:0 0 0 1px rgba(0,0,0,.18);}
 .ganttEventLine{position:absolute;top:0;bottom:0;width:2px;background:#2c5f7c;z-index:1;opacity:.55;}
 .notesbox{width:100%;min-height:70px;padding:8px;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--ink);font-size:.8rem;font-family:inherit;resize:vertical;}
 .monthgridscroll{overflow-x:auto;margin-top:6px;}
@@ -1216,7 +1217,7 @@ function capacityOverviewHtml(){
       const cls = li.done?'ownbar-done' : li.overdue?'ownbar-overdue' : li.lag>=0.2?'ownbar-lag':'ownbar-normal';
       const left=pctOf(r.start), width=Math.max(2,pctOf(r.end)-pctOf(r.start));
       const rr=getRow(p.id);
-      const evDots=(rr.eventDates||[]).map(ed=>`<span class="ganttEventDot" style="left:${pctOf(ed)}%;" title="活動日：${shortDate(ed)}"></span>`).join('');
+      const evDots=(rr.eventDates||[]).map(ed=>`<span class="ganttEventDotCollab" style="left:${pctOf(ed)}%;" title="活動日（協作）：${shortDate(ed)}"></span>`).join('');
       return `<div class="ganttrow" onclick="goToProject('${p.id}')" style="cursor:pointer;">
         <div class="ganttlabel" style="${LBL}overflow:hidden;white-space:nowrap;" title="協作・負責:${rr.assignee||'未指派'}">　└ <span class="cat" style="font-size:.62rem;padding:1px 4px;">${p.cat}</span> ${getName(p)}</div>
         <div class="ganttbararea">${overlayHtml}<div class="ganttbar collabbar ${cls}" style="left:${left}%;width:${width}%;" title="協作・${shortDate(r.start)}–${shortDate(r.end)}"></div>${evDots}</div>
@@ -1227,7 +1228,7 @@ function capacityOverviewHtml(){
 
   const weekHeaderHtml=`<div class="ganttrow ganttweekrow"><div class="ganttlabel" style="${LBL}"></div><div class="ganttbararea">${weekLabels.map(w=>`<span class="ganttweeklabel" style="left:${w.pct}%;">${w.label}</span>`).join('')}</div></div>`;
   const minWidthPx=Math.max(560, Math.round(totalDays*8));
-  const legend=`<div class="small" style="margin-bottom:4px;">顏色：<span style="color:#8fb28f;">●</span>正常　<span style="color:#d3a86a;">●</span>落後　<span style="color:var(--warn);">●</span>逾期　<span style="color:var(--line);">●</span>完成　｜　實心＝負責，虛線淺色＝協作</div>`;
+  const legend=`<div class="small" style="margin-bottom:4px;">顏色：<span style="color:#8fb28f;">●</span>正常　<span style="color:#d3a86a;">●</span>落後　<span style="color:var(--warn);">●</span>逾期　<span style="color:var(--line);">●</span>完成　｜　實心橫桿＝負責，虛線淺色＝協作　｜　活動日：<span style="color:#2c5f7c;">●</span>負責一定要到　<span style="color:#9b7cb6;">●</span>協作不一定要到</div>`;
   return `${legend}<div class="gantt"><div class="ganttscroll"><div class="ganttinner" style="min-width:${minWidthPx}px;">
     <div class="gantthead"><div class="ganttaxis" style="padding-left:200px;"><span>${shortDate(minStart)}</span><span>${shortDate(maxEnd)}</span></div>${weekHeaderHtml}</div>
     <div class="ganttbody">${rowsHtml}</div>
