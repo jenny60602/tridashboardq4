@@ -164,6 +164,8 @@ tr.rowopen td:first-child{box-shadow:inset 4px 0 0 var(--accent2);}
 .todogroup:last-child{border-bottom:none;}
 .todohead{display:flex;align-items:center;gap:6px;font-size:.82rem;margin-bottom:3px;}
 .todochips{display:flex;flex-direction:column;gap:4px;margin-top:2px;}
+.todoparentgrid{display:flex;gap:12px;overflow-x:auto;margin-top:4px;padding-bottom:4px;}
+.todoparentcol{flex:0 0 220px;min-width:200px;}
 .todochip{display:flex;align-items:flex-start;gap:5px;font-size:.75rem;color:var(--ink);background:var(--card);border:1px solid var(--line);border-radius:8px;padding:3px 9px;cursor:pointer;}
 .todochip span{word-break:break-word;}
 .prow:last-child{border-bottom:none;}
@@ -1514,12 +1516,12 @@ function personDetailHtml(t){
           : `<input type="checkbox" onchange="toggleSubtask('${x.p.id}',${x.idx},${x.si},this.checked)">`;
         return `<label class="todochip">${cb}<span>${x.name}</span></label>`;
       }).join("");
-      const parentLabel = parent!=='__leaf__' ? `<div class="small" style="font-weight:600;margin:6px 0 2px;">${parent}</div>` : '';
-      return `${parentLabel}<div class="todochips">${lines}</div>`;
+      const parentLabel = parent!=='__leaf__' ? `<div class="small" style="font-weight:600;margin-bottom:2px;">${parent}</div>` : '';
+      return `<div class="todoparentcol">${parentLabel}<div class="todochips">${lines}</div></div>`;
     }).join("");
     return `<div class="todogroup">
       <div class="todohead"><span class="pname">${getName(p)}</span><span class="cat">${p.cat}</span><span class="badge ${urgency(p)}">${URG_LABEL[urgency(p)]}</span></div>
-      ${groupsHtml}
+      <div class="todoparentgrid">${groupsHtml}</div>
     </div>`;
   }).join("") : `<div class="prow small">🎉 目前沒有待辦任務</div>`;
   const moreBtn = projIds.length>TODO_LIMIT
