@@ -372,7 +372,8 @@ function getRow(id){
     invoiceMonth:(r.invoiceMonth===undefined?null:r.invoiceMonth), revMonth:(r.revMonth===undefined?null:r.revMonth), estPlan:r.estPlan||[], paymentMethod:r.paymentMethod||"", installmentCount:r.installmentCount||2,
     startDate:r.startDate||null, endDate:r.endDate||null, eventDates:(r.eventDates||(r.eventDate?[r.eventDate]:[])).map(e=>typeof e==='string'?{date:e,label:''}:e), lastEdit:r.lastEdit||null, notes:r.notes||"",
     taskRenames:r.taskRenames||{}, taskDeletes:r.taskDeletes||[], taskOrder:r.taskOrder||[],
-    tasks:r.tasks||{}, subtasks:r.subtasks||{}, custom:r.custom||[], receipts:r.receipts||[]};
+    tasks:r.tasks||{}, subtasks:r.subtasks||{}, custom:r.custom||[], receipts:r.receipts||[],
+    audienceOptions:(r.audienceOptions&&r.audienceOptions.length)?r.audienceOptions:["攤商","消費者","客戶","內部"]};
 }
 function isStaff(n){return TEAM_STAFF.includes(n);}
 function isVendor(n){ return !!n && !TEAM.includes(n); }
@@ -390,11 +391,19 @@ function isNonOp(p){ return p.cat==="政府"; }
 function selStyle(n){ if(!n) return ''; if(isVendor(n)) return 'background:#f3e6c4;'; return isStaff(n)?'background:#dfe9df;':'background:#f4e3c9;'; }
 const AUDIENCE_COLORS={"攤商":"#f3e6c4","消費者":"#d6e6f0","客戶":"#e6dcf0","內部":"#dfe9df"};
 const AUDIENCE_LETTER={"攤商":"攤","消費者":"消","客戶":"客","內部":"內"};
-function audienceBadge(a){
-  if(!a||!AUDIENCE_LETTER[a]) return '';
-  return `<span style="display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;border-radius:3px;background:${AUDIENCE_COLORS[a]};font-size:.62rem;flex-shrink:0;" title="${a}">${AUDIENCE_LETTER[a]}</span>`;
+const AUDIENCE_FALLBACK_PALETTE=["#f3e6c4","#d6e6f0","#e6dcf0","#dfe9df","#f4d9d9","#dcecec","#ece0cf","#e0e8f7"];
+function audienceColorFor(a){
+  if(!a) return '';
+  if(AUDIENCE_COLORS[a]) return AUDIENCE_COLORS[a];
+  let h=0; for(let i=0;i<a.length;i++) h=(h*31+a.charCodeAt(i))>>>0;
+  return AUDIENCE_FALLBACK_PALETTE[h%AUDIENCE_FALLBACK_PALETTE.length];
 }
-function audienceStyle(a){ return a&&AUDIENCE_COLORS[a] ? `background:${AUDIENCE_COLORS[a]};` : ''; }
+function audienceBadge(a){
+  if(!a) return '';
+  const letter = AUDIENCE_LETTER[a] || a.slice(0,1);
+  return `<span style="display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;border-radius:3px;background:${audienceColorFor(a)};font-size:.62rem;flex-shrink:0;" title="${a}">${letter}</span>`;
+}
+function audienceStyle(a){ return a ? `background:${audienceColorFor(a)};` : ''; }
 function getEstRev(p){ const r=getRow(p.id); return r.estOverride!==null ? r.estOverride : p.rev; }
 function getName(p){ const r=getRow(p.id); return (r.nameOverride!==null && r.nameOverride!=='') ? r.nameOverride : p.name; }
 function planScaled(p){
@@ -1090,7 +1099,7 @@ function taskItemHtml(p,idx){
       <input type="checkbox" ${s.done?'checked':''} onchange="toggleSubtask('${p.id}',${idx},${si},this.checked)">
       <select onchange="setSubtaskAudience('${p.id}',${idx},${si},this.value)" style="${audienceStyle(s.audience)}" title="對象/分類">
         <option value="">未分類</option>
-        ${["攤商","消費者","客戶","內部"].map(a=>`<option ${s.audience===a?'selected':''}>${a}</option>`).join('')}
+        ${getRow(p.id).audienceOptions.map(a=>`<option ${s.audience===a?'selected':''}>${a}</option>`).join('')}
       </select>
       <input type="text" class="subname" value="${esc(s.name)}" onchange="renameSubtask('${p.id}',${idx},${si},this.value)">
       <select style="${selStyle(s.assignee)}" onchange="setSubtaskAssignee('${p.id}',${idx},${si},this.value)">${personOptsWithVendor(s.assignee)}</select>
@@ -1297,6 +1306,16 @@ function detailRow(p){
 
   const taskPane=`
     <div style="margin-bottom:10px;"><button class="mini" onclick="applyMarketTemplate('${p.id}')">🏪 套用市集工作模組</button></div>
+    <div class="small" style="margin-bottom:10px;">
+      對象分類（子項目「對象」欄位的選項，這個專案自己的設定）：
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin:4px 0;">
+        ${r.audienceOptions.map((a,ai)=>`<span class="todochip" style="background:${audienceColorFor(a)};">${a}<button class="mini danger" style="padding:0 4px;" onclick="removeAudienceOption('${p.id}',${ai})">✕</button></span>`).join('')}
+      </div>
+      <div style="display:flex;gap:6px;">
+        <input type="text" id="newaudopt-${p.id}" placeholder="新增對象分類，例如：董事會" style="width:160px;">
+        <button class="mini" onclick="addAudienceOption('${p.id}')">＋</button>
+      </div>
+    </div>
     <h4>甘特圖（依任務起訖日自動產生，紅線＝今天）</h4>
     ${ganttHtml(p)}
     <h4>任務清單（點「＋」可拆子項目並各自標開始/截止日）</h4>
@@ -1851,6 +1870,22 @@ window.setSubtaskAudience=async function(pid,idx,si,val){
   const subtasks=Object.assign({},cur.subtasks); const arr=materializedSubs(pid,t);
   arr[si]=Object.assign({},arr[si],{audience:val}); subtasks[t]=arr;
   state[pid]=Object.assign({},cur,{subtasks}); touch(pid); render(); await persist();
+};
+window.addAudienceOption=async function(pid){
+  const input=document.getElementById("newaudopt-"+pid);
+  const val=(input?input.value:"").trim();
+  if(!val){ alert("請輸入分類名稱"); return; }
+  const cur=getRow(pid);
+  if(cur.audienceOptions.includes(val)){ alert("這個分類已經存在了"); return; }
+  const audienceOptions=cur.audienceOptions.concat([val]);
+  state[pid]=Object.assign({},cur,{audienceOptions}); touch(pid); render(); await persist();
+};
+window.removeAudienceOption=async function(pid,idx){
+  const cur=getRow(pid);
+  const removed=cur.audienceOptions[idx];
+  if(!confirm(`確定要刪除「${removed}」這個對象分類嗎？已經用這個分類標記的子項目不會被清掉，只是選單裡不會再看到它。`)) return;
+  const audienceOptions=cur.audienceOptions.slice(); audienceOptions.splice(idx,1);
+  state[pid]=Object.assign({},cur,{audienceOptions}); touch(pid); render(); await persist();
 };
 window.applyMarketTemplate=async function(pid){
   if(!confirm('套用「市集工作模組」會：\n1. 清空目前所有的頂層工作（不管是內建的還是你自己加的自訂項目）\n2. 換成5個時間階段＋預設子項目\n\n確定要套用嗎？（原本的任務資料會被取代，無法復原）')) return;
