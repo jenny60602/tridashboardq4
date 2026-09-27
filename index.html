@@ -380,6 +380,11 @@ function collaboratorsOf(p){
 function isNonOp(p){ return p.cat==="政府"; }
 function selStyle(n){ if(!n) return ''; if(isVendor(n)) return 'background:#f3e6c4;'; return isStaff(n)?'background:#dfe9df;':'background:#f4e3c9;'; }
 const AUDIENCE_COLORS={"攤商":"#f3e6c4","消費者":"#d6e6f0","客戶":"#e6dcf0","內部":"#dfe9df"};
+const AUDIENCE_LETTER={"攤商":"攤","消費者":"消","客戶":"客","內部":"內"};
+function audienceBadge(a){
+  if(!a||!AUDIENCE_LETTER[a]) return '';
+  return `<span style="display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;border-radius:3px;background:${AUDIENCE_COLORS[a]};font-size:.62rem;flex-shrink:0;" title="${a}">${AUDIENCE_LETTER[a]}</span>`;
+}
 function audienceStyle(a){ return a&&AUDIENCE_COLORS[a] ? `background:${AUDIENCE_COLORS[a]};` : ''; }
 function getEstRev(p){ const r=getRow(p.id); return r.estOverride!==null ? r.estOverride : p.rev; }
 function getName(p){ const r=getRow(p.id); return (r.nameOverride!==null && r.nameOverride!=='') ? r.nameOverride : p.name; }
@@ -1060,7 +1065,9 @@ function taskItemHtml(p,idx){
     const d=subs.filter(s=>s.done).length;
     const ends=subs.map(s=>s.end).filter(Boolean);
     const periodTxt = ends.length ? `・工作期 ${shortDate(ends.reduce((a,b)=>a<b?a:b))}–${shortDate(ends.reduce((a,b)=>a>b?a:b))}` : '';
-    head=`${nameInput}<span class="progtxt">（${d}/${subs.length} 項完成${periodTxt}）</span>`;
+    const audiencesPresent=[...new Set(subs.map(s=>s.audience).filter(Boolean))];
+    const audienceDots=audiencesPresent.map(a=>audienceBadge(a)).join('');
+    head=`${audienceDots}${nameInput}<span class="progtxt">（${d}/${subs.length} 項完成${periodTxt}）</span>`;
   } else if(p.cat==="2C零售"){
     head=`${nameInput}<span class="progtxt">（尚未新增任務，自行加入常態或專案項目）</span>`;
   } else {
@@ -1115,7 +1122,7 @@ function ganttRows(p){
   taskList(p).forEach((t)=>{
     const subs=materializedSubs(p.id,t);
     if(subs.length){
-      subs.forEach(s=>{ rows.push({group:t, label:s.name, start:s.start, end:s.end, assignee:s.assignee, done:s.done}); });
+      subs.forEach(s=>{ rows.push({group:t, label:s.name, start:s.start, end:s.end, assignee:s.assignee, done:s.done, audience:s.audience}); });
     } else {
       const info=taskInfo(p,t);
       rows.push({group:null, label:t, start:info.start, end:info.end, assignee:info.assignee, done:info.done});
@@ -1190,8 +1197,9 @@ function ganttHtml(p){
     }
     if(r.group && !curGroupExpanded) return groupHeader;
     const labelText = r.group ? `　└ ${r.label}` : r.label;
+    const audDot = audienceBadge(r.audience);
     return `${groupHeader}<div class="ganttrow ${r.group?'ganttchildrow':''}">
-      <div class="ganttlabel">${labelText}${r.assignee?` <span class="small">・${r.assignee}</span>`:''}</div>
+      <div class="ganttlabel" style="display:flex;align-items:center;gap:3px;">${audDot}${labelText}${r.assignee?` <span class="small">・${r.assignee}</span>`:''}</div>
       <div class="ganttbararea">${overlayHtml}${markerHtml}${dateTag}</div>
     </div>`;
   }).join('');
