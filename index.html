@@ -329,7 +329,7 @@ function getRow(id){
     estOverride:(r.estOverride===undefined?null:r.estOverride), actual:(r.actual===undefined?null:r.actual),
     cost:(r.cost===undefined?null:r.cost), driveLink:r.driveLink||"", nameOverride:(r.nameOverride===undefined?null:r.nameOverride),
     invoiceMonth:(r.invoiceMonth===undefined?null:r.invoiceMonth), revMonth:(r.revMonth===undefined?null:r.revMonth), estPlan:r.estPlan||[], paymentMethod:r.paymentMethod||"", installmentCount:r.installmentCount||2,
-    startDate:r.startDate||null, endDate:r.endDate||null, eventDates:r.eventDates||(r.eventDate?[r.eventDate]:[]), lastEdit:r.lastEdit||null, notes:r.notes||"",
+    startDate:r.startDate||null, endDate:r.endDate||null, eventDates:(r.eventDates||(r.eventDate?[r.eventDate]:[])).map(e=>typeof e==='string'?{date:e,label:''}:e), lastEdit:r.lastEdit||null, notes:r.notes||"",
     taskRenames:r.taskRenames||{}, taskDeletes:r.taskDeletes||[], taskOrder:r.taskOrder||[],
     tasks:r.tasks||{}, subtasks:r.subtasks||{}, custom:r.custom||[]};
 }
@@ -948,8 +948,8 @@ function ganttHtml(p){
   const pct=(iso)=>{ const d=new Date(iso+"T00:00:00"); const c=d<rangeStart?rangeStart:(d>rangeEnd?rangeEnd:d); return (c-rangeStart)/totalMs*100; };
   const dayCount=(a,b)=>Math.round((new Date(b+"T00:00:00")-new Date(a+"T00:00:00"))/86400000)+1;
   const prForEvent=getRow(p.id);
-  const eventDotsHtml=(prForEvent.eventDates||[]).map(ed=>`<span class="ganttEventDot" style="left:${pct(ed)}%;" title="活動日：${shortDate(ed)}"></span>`).join('');
-  (prForEvent.eventDates||[]).forEach(ed=>{ overlayHtml += `<div class="ganttEventLine" style="left:${pct(ed)}%;"></div>`; });
+  const eventDotsHtml=(prForEvent.eventDates||[]).map(e=>`<span class="ganttEventDot" style="left:${pct(e.date)}%;" title="活動日：${shortDate(e.date)}${e.label?`　${e.label}`:''}"></span>`).join('');
+  (prForEvent.eventDates||[]).forEach(e=>{ overlayHtml += `<div class="ganttEventLine" style="left:${pct(e.date)}%;"></div>`; });
 
   // pre-compute each group's min/max span
   const groupSpan={};
@@ -1041,15 +1041,16 @@ function detailRow(p){
     <div class="basicgrid">
       <label>起始日<input type="date" id="startdate-${p.id}" value="${range.start}" onchange="setField('${p.id}','startDate',this.value)"></label>
       <label>截止日<input type="date" id="enddate-${p.id}" value="${range.end}" onchange="setField('${p.id}','endDate',this.value)"></label>
-      <div style="min-width:240px;">
+      <div style="min-width:280px;">
         <label title="可新增多個，會標在甘特圖上，方便看人力撞期">活動日
           <div style="display:flex;gap:6px;">
             <input type="date" id="newevent-${p.id}">
+            <input type="text" id="neweventlabel-${p.id}" placeholder="簡易名稱（選填，如：開幕）" style="width:130px;">
             <button class="mini" onclick="addEventDate('${p.id}')">＋</button>
           </div>
         </label>
         <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:4px;">
-          ${(r.eventDates||[]).length?r.eventDates.map((d,ei)=>`<span class="todochip">${shortDate(d)}<button class="mini danger" style="padding:0 4px;" onclick="removeEventDate('${p.id}',${ei})">✕</button></span>`).join(''):'<span class="small">尚未新增</span>'}
+          ${(r.eventDates||[]).length?r.eventDates.map((e,ei)=>`<span class="todochip">${shortDate(e.date)}${e.label?`　${esc(e.label)}`:''}<button class="mini danger" style="padding:0 4px;" onclick="removeEventDate('${p.id}',${ei})">✕</button></span>`).join(''):'<span class="small">尚未新增</span>'}
         </div>
       </div>
     </div>
@@ -1205,7 +1206,7 @@ function capacityOverviewHtml(){
       const cls = li.done?'ownbar-done' : li.overdue?'ownbar-overdue' : li.lag>=0.2?'ownbar-lag':'ownbar-normal';
       const left=pctOf(r.start), width=Math.max(2,pctOf(r.end)-pctOf(r.start));
       const evRow=getRow(p.id);
-      const evDots=(evRow.eventDates||[]).map(ed=>`<span class="ganttEventDot" style="left:${pctOf(ed)}%;" title="活動日：${shortDate(ed)}"></span>`).join('');
+      const evDots=(evRow.eventDates||[]).map(e=>`<span class="ganttEventDot" style="left:${pctOf(e.date)}%;" title="活動日：${shortDate(e.date)}${e.label?`　${e.label}`:''}"></span>`).join('');
       return `<div class="ganttrow" onclick="goToProject('${p.id}')" style="cursor:pointer;">
         <div class="ganttlabel" style="${LBL}overflow:hidden;white-space:nowrap;">　└ <span class="cat" style="font-size:.62rem;padding:1px 4px;">${p.cat}</span> ${getName(p)}</div>
         <div class="ganttbararea">${overlayHtml}<div class="ganttbar ${cls}" style="left:${left}%;width:${width}%;" title="${shortDate(r.start)}–${shortDate(r.end)}"></div>${evDots}</div>
@@ -1217,7 +1218,7 @@ function capacityOverviewHtml(){
       const cls = li.done?'ownbar-done' : li.overdue?'ownbar-overdue' : li.lag>=0.2?'ownbar-lag':'ownbar-normal';
       const left=pctOf(r.start), width=Math.max(2,pctOf(r.end)-pctOf(r.start));
       const rr=getRow(p.id);
-      const evDots=(rr.eventDates||[]).map(ed=>`<span class="ganttEventDotCollab" style="left:${pctOf(ed)}%;" title="活動日（協作）：${shortDate(ed)}"></span>`).join('');
+      const evDots=(rr.eventDates||[]).map(e=>`<span class="ganttEventDotCollab" style="left:${pctOf(e.date)}%;" title="活動日（協作）：${shortDate(e.date)}${e.label?`　${e.label}`:''}"></span>`).join('');
       return `<div class="ganttrow" onclick="goToProject('${p.id}')" style="cursor:pointer;">
         <div class="ganttlabel" style="${LBL}overflow:hidden;white-space:nowrap;" title="協作・負責:${rr.assignee||'未指派'}">　└ <span class="cat" style="font-size:.62rem;padding:1px 4px;">${p.cat}</span> ${getName(p)}</div>
         <div class="ganttbararea">${overlayHtml}<div class="ganttbar collabbar ${cls}" style="left:${left}%;width:${width}%;" title="協作・${shortDate(r.start)}–${shortDate(r.end)}"></div>${evDots}</div>
@@ -1678,11 +1679,13 @@ window.removeEstPlan=async function(pid,idx){
 };
 window.addEventDate=async function(pid){
   const input=document.getElementById("newevent-"+pid);
+  const labelInput=document.getElementById("neweventlabel-"+pid);
   const val=input?input.value:"";
+  const label=(labelInput?labelInput.value:"").trim();
   if(!val){ alert("請先選一個日期"); return; }
   const cur=getRow(pid);
   const eventDates=(cur.eventDates||[]).slice();
-  if(!eventDates.includes(val)){ eventDates.push(val); eventDates.sort(); }
+  if(!eventDates.some(e=>e.date===val)){ eventDates.push({date:val,label}); eventDates.sort((a,b)=>a.date.localeCompare(b.date)); }
   state[pid]=Object.assign({},cur,{eventDates}); touch(pid); render(); await persist();
 };
 window.removeEventDate=async function(pid,idx){
