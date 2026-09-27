@@ -566,6 +566,18 @@ function lagBadge(li){
   if(li.lag>=0.2) return `<span class="badge soon7">進度落後${Math.round(li.lag*100)}%</span>`;
   return `<span class="badge later">進度正常</span>`;
 }
+function taskCountBadge(p){
+  const li=lagInfo(p);
+  const tp=taskProgress(p);
+  const remaining=tp.total-tp.done;
+  const cls = li.done?'later' : li.overdue?'overdue' : li.lag>=0.2?'soon7':'later';
+  let label;
+  if(li.done) label='已完成';
+  else if(remaining<=0) label='任務已勾完，可結案';
+  else label=`還有${remaining}項任務待完成`;
+  if(li.overdue) label=`已逾期・${label}`;
+  return `<span class="badge ${cls}" onclick="event.stopPropagation();goToTaskList('${p.id}')" style="cursor:pointer;text-decoration:underline;text-decoration-style:dotted;" title="點一下直接看未完成的任務清單">${label}</span>`;
+}
 function paginatedBody(key, itemsHtml, emptyMsg){
   const total=itemsHtml.length;
   if(!total) return emptyMsg;
@@ -789,6 +801,17 @@ window.goBack=function(){
   render();
   document.getElementById("backbtn").innerHTML="";
   setTimeout(()=>window.scrollTo({top:bs.scrollY,behavior:"smooth"}),50);
+};
+window.goToTaskList=function(pid){
+  captureBackState();
+  view="project"; catFilter="全部"; statusFilter="全部"; searchTerm="";
+  const sb=document.getElementById("searchbox"); if(sb) sb.value="";
+  document.querySelectorAll(".tabs button").forEach(x=>x.classList.remove("active"));
+  document.querySelector('.tabs button[data-v="project"]').classList.add("active");
+  expanded.add(pid);
+  detailTab[pid]="tasks";
+  render();
+  setTimeout(()=>{ const el=document.getElementById("proj-"+pid); if(el) el.scrollIntoView({behavior:"smooth",block:"center"}); },50);
 };
 window.goToProject=function(pid){
   captureBackState();
@@ -1113,7 +1136,7 @@ function renderProjectView(){
       <td class="rev">${totalActual(p)?fmt(totalActual(p)):(getReceipts(p.id).length?fmt(0):'—')}${diffLabel(p)}${getReceipts(p.id).length>1?`<span class="small">共${getReceipts(p.id).length}期</span>`:''}</td>
       <td class="rev">${r.cost===null||r.cost===""?'—':fmt(Number(r.cost))}${costNote(p)}</td>
       <td class="rev"><b style="color:${marginOf(p)<0?'var(--warn)':'var(--ok)'}">${fmt(marginOf(p))}</b></td>
-      <td>${shortDate(range.start)}–${shortDate(range.end)}<br>${lagBadge(lagInfo(p))}</td>
+      <td>${shortDate(range.start)}–${shortDate(range.end)}<br>${taskCountBadge(p)}</td>
       <td><div class="progwrap"><div class="bar"><i style="width:${pct}%"></i></div><span class="progtxt">${tp.done}/${tp.total}</span></div></td>
       <td><select class="status-${r.status}" onchange="setField('${p.id}','status',this.value)">${opts}</select></td>
       <td><select style="${selStyle(r.assignee)}" onchange="setField('${p.id}','assignee',this.value)">${personOpts(r.assignee)}</select></td>
