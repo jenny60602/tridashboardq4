@@ -149,6 +149,9 @@ tr.rowopen td:first-child{box-shadow:inset 4px 0 0 var(--accent2);}
 .mini.danger{color:var(--warn);border-color:var(--warn);}
 .children{margin:5px 0 4px 22px;display:flex;flex-direction:column;gap:5px;}
 .subitem{display:flex;align-items:center;gap:6px;font-size:.78rem;flex-wrap:wrap;}
+.draghandle{cursor:grab;color:var(--sub);user-select:none;}
+.taskitem.dragover{outline:2px dashed var(--accent2);outline-offset:2px;background:rgba(181,101,29,.06);}
+.subitem.dragover-row{outline:2px solid var(--accent2);outline-offset:-2px;}
 .addsub{display:flex;gap:4px;margin:5px 0 2px 22px;}
 .addsub input{width:170px;}
 .addsub button,.addtask button{font-size:.7rem;padding:3px 9px;border-radius:5px;border:1px solid var(--accent);background:var(--accent);color:#fff;cursor:pointer;}
@@ -1038,19 +1041,18 @@ function taskItemHtml(p,idx){
   const ctrl=`<button class="mini" onclick="moveTopTask('${p.id}',${idx},-1)">▲</button><button class="mini" onclick="moveTopTask('${p.id}',${idx},1)">▼</button><button class="mini danger" onclick="deleteTopTask('${p.id}',${idx})">✕</button>`;
   const children=subs.map((s,si)=>{
     const isUrl=/^https?:\/\//.test((s.note||'').trim());
-    return `<div class="subitem">
+    return `<div class="subitem" draggable="true" ondragstart="handleSubtaskDragStart(event,'${p.id}','${esc(t)}',${si})" ondragover="event.preventDefault();event.stopPropagation();this.classList.add('dragover-row');" ondragleave="this.classList.remove('dragover-row');" ondrop="event.stopPropagation();this.classList.remove('dragover-row');handleSubtaskDropAt(event,'${p.id}','${esc(t)}',${si})">
+      <span class="draghandle" title="拖曳調整順序或移到其他母項目">⠿</span>
       <input type="checkbox" ${s.done?'checked':''} onchange="toggleSubtask('${p.id}',${idx},${si},this.checked)">
       <input type="text" class="subname" value="${esc(s.name)}" onchange="renameSubtask('${p.id}',${idx},${si},this.value)">
       <select style="${selStyle(s.assignee)}" onchange="setSubtaskAssignee('${p.id}',${idx},${si},this.value)">${personOptsWithVendor(s.assignee)}</select>
       <input type="text" class="mddate" placeholder="月/日" value="${shortDate(s.end)}" onchange="setSubtaskDeadline('${p.id}',${idx},${si},this.value)" title="截止日（例如9/15，跨年可打2027/1/15）">
       <input type="text" class="subnote" placeholder="備註或連結" value="${esc(s.note||'')}" onchange="setSubtaskNote('${p.id}',${idx},${si},this.value)">
       ${isUrl?`<a href="${esc(s.note)}" target="_blank" rel="noopener" class="mini" style="text-decoration:none;">🔗</a>`:''}
-      <button class="mini" onclick="moveSubtask('${p.id}',${idx},${si},-1)">▲</button>
-      <button class="mini" onclick="moveSubtask('${p.id}',${idx},${si},1)">▼</button>
       <button class="mini danger" onclick="deleteSubtask('${p.id}',${idx},${si})">✕</button>
     </div>`;
   }).join("");
-  return `<div class="taskitem ${custom?'custom':''}">
+  return `<div class="taskitem ${custom?'custom':''}" ondragover="event.preventDefault();this.classList.add('dragover');" ondragleave="this.classList.remove('dragover');" ondrop="this.classList.remove('dragover');handleSubtaskDrop(event,'${p.id}','${esc(t)}')">
     <div class="theader">${head}${ctrl}</div>
     ${children?`<div class="children">${children}</div>`:''}
     <div class="addsub"><input type="text" id="subin-${p.id}-${idx}" placeholder="拆成子項目，分工用…"><button onclick="addSubtask('${p.id}',${idx})">+</button></div>
@@ -1810,11 +1812,58 @@ window.deleteSubtask=async function(pid,idx,si){
   state[pid]=Object.assign({},cur,{subtasks}); touch(pid); render(); await persist();
   showUndoToast(`子項目「${subName}」`);
 };
-window.moveSubtask=async function(pid,idx,si,dir){
-  const p=getProject(pid); const t=taskList(p)[idx]; const cur=getRow(pid);
-  const subtasks=Object.assign({},cur.subtasks); const arr=materializedSubs(pid,t);
-  const ni=si+dir; if(ni<0||ni>=arr.length) return;
-  const tmp=arr[si]; arr[si]=arr[ni]; arr[ni]=tmp; subtasks[t]=arr;
+let dragSubtask=null;
+window.handleSubtaskDragStart=function(e,pid,fromTask,si){
+  dragSubtask={pid,fromTask,si};
+  e.dataTransfer.effectAllowed="move";
+  try{ e.dataTransfer.setData("text/plain", JSON.stringify(dragSubtask)); }catch(err){}
+};
+window.handleSubtaskDropAt=async function(e,pid,toTask,toIndex){
+  e.preventDefault();
+  let d=dragSubtask;
+  if(!d){
+    try{ d=JSON.parse(e.dataTransfer.getData("text/plain")); }catch(err){ return; }
+  }
+  dragSubtask=null;
+  if(!d || d.pid!==pid) return;
+  const p=getProject(pid); const cur=getRow(pid);
+  const subtasks=Object.assign({},cur.subtasks);
+  if(d.fromTask===toTask){
+    const arr=materializedSubs(pid,toTask).slice();
+    if(d.si<0||d.si>=arr.length) return;
+    const [moved]=arr.splice(d.si,1);
+    let insertAt=toIndex;
+    if(d.si<toIndex) insertAt=toIndex-1;
+    arr.splice(insertAt,0,moved);
+    subtasks[toTask]=arr;
+  } else {
+    const fromArr=materializedSubs(pid,d.fromTask).slice();
+    if(d.si<0||d.si>=fromArr.length) return;
+    const [moved]=fromArr.splice(d.si,1);
+    subtasks[d.fromTask]=fromArr;
+    const toArr=materializedSubs(pid,toTask).slice();
+    toArr.splice(toIndex,0,moved);
+    subtasks[toTask]=toArr;
+  }
+  state[pid]=Object.assign({},cur,{subtasks}); touch(pid); render(); await persist();
+};
+window.handleSubtaskDrop=async function(e,pid,toTask){
+  e.preventDefault();
+  let d=dragSubtask;
+  if(!d){
+    try{ d=JSON.parse(e.dataTransfer.getData("text/plain")); }catch(err){ return; }
+  }
+  dragSubtask=null;
+  if(!d || d.pid!==pid || d.fromTask===toTask) return;
+  const p=getProject(pid); const cur=getRow(pid);
+  const subtasks=Object.assign({},cur.subtasks);
+  const fromArr=materializedSubs(pid,d.fromTask).slice();
+  if(d.si<0||d.si>=fromArr.length) return;
+  const [moved]=fromArr.splice(d.si,1);
+  subtasks[d.fromTask]=fromArr;
+  const toArr=materializedSubs(pid,toTask).slice();
+  toArr.push(moved);
+  subtasks[toTask]=toArr;
   state[pid]=Object.assign({},cur,{subtasks}); touch(pid); render(); await persist();
 };
 window.renameSubtask=async function(pid,idx,si,val){
