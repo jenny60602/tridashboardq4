@@ -124,6 +124,9 @@ tr.rowopen td:first-child{box-shadow:inset 4px 0 0 var(--accent2);}
 .ganttbar-done{opacity:.35;}
 .ganttToday{position:absolute;top:0;bottom:0;width:2px;background:var(--warn);z-index:2;}
 .ganttEventDot{position:absolute;top:50%;left:0;transform:translate(-50%,-50%);width:10px;height:10px;border-radius:50%;background:#2c5f7c;border:2px solid #fff;z-index:3;box-shadow:0 0 0 1px rgba(0,0,0,.18);}
+.ganttEventLabel{position:absolute;top:50%;transform:translateY(-50%);font-size:.66rem;line-height:1.35;padding:0 4px;border-radius:3px;background:rgba(255,255,255,.93);color:#2c5f7c;font-weight:600;white-space:nowrap;z-index:4;box-shadow:0 0 0 1px rgba(0,0,0,.10);}
+.ganttEventLabel.collab{color:#7a5a99;}
+.ganttEventLabel.lower{transform:none;}
 .ganttEventDotCollab{position:absolute;top:50%;left:0;transform:translate(-50%,-50%);width:10px;height:10px;border-radius:50%;background:#9b7cb6;border:2px solid #fff;z-index:3;box-shadow:0 0 0 1px rgba(0,0,0,.18);}
 .ganttEventLine{position:absolute;top:0;bottom:0;width:2px;background:#2c5f7c;z-index:1;opacity:.55;}
 .notesbox{width:100%;min-height:70px;padding:8px;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--ink);font-size:.8rem;font-family:inherit;resize:vertical;}
@@ -355,6 +358,56 @@ function mdToISO(md,p){
     return `${sy}-${pad(m)}-${pad(d)}`;
   }
   return `${REF_YEAR}-${pad(m)}-${pad(d)}`;
+}
+// ===== 甘特圖活動日：圓點＋直接顯示文字 =====
+// 相鄰的活動日（例如市集 Day1~3 連續三天）合併成一個標籤；標籤放在圓點右邊，會撞到就換到下一行，不截斷文字。
+function textPx(t){ let w=0; for(const ch of String(t)) w += /[⺀-￿]/.test(ch)?11:6.5; return w+10; }
+function eventClusterText(c){
+  const d1=c[0].date, d2=c[c.length-1].date;
+  let dt=shortDate(d1);
+  if(d2!==d1){ const same=d1.slice(0,7)===d2.slice(0,7); dt += '–' + (same ? String(Number(d2.slice(8))) : shortDate(d2)); }
+  const labels=[...new Set(c.map(e=>(e.label||'').trim()).filter(Boolean))];
+  if(!labels.length) return dt;
+  let lab=labels.join('・');
+  if(labels.length>1){
+    let pre=labels[0]; labels.forEach(l=>{ while(pre && !l.startsWith(pre)) pre=pre.slice(0,-1); });
+    const rest=labels.map(l=>l.slice(pre.length));
+    if(pre.length>=2 && rest.every(r=>r)) lab=pre+rest.join('/');
+  }
+  return dt+' '+lab;
+}
+function measuredWidth(sel,fallback){ try{ const el=document.querySelector(sel); if(el&&el.offsetWidth>50) return el.offsetWidth; }catch(e){} return fallback; }
+function eventMarksHtml(events,pctFn,opts){
+  const o=opts||{}; const W=o.widthPx||600; const collab=!!o.collab;
+  const dotCls=collab?'ganttEventDotCollab':'ganttEventDot';
+  const evs=(events||[]).filter(e=>e&&e.date).map(e=>({date:e.date,label:e.label||'',pct:pctFn(e.date)})).sort((a,b)=>a.date.localeCompare(b.date));
+  if(!evs.length) return {html:'',extraPx:0};
+  const dots=evs.map(e=>`<span class="${dotCls}" style="left:${e.pct}%;" title="活動日${collab?'（協作）':''}：${shortDate(e.date)}${e.label?`　${esc(e.label)}`:''}"></span>`).join('');
+  const clusters=[];
+  evs.forEach(e=>{ const last=clusters[clusters.length-1]; const px=e.pct/100*W;
+    if(last && px-last[last.length-1].pct/100*W<16) last.push(e); else clusters.push([e]); });
+  const dotSpans=clusters.map(c=>[c[0].pct/100*W-7, c[c.length-1].pct/100*W+7]);
+  const lanes=[]; // lanes[k] = 已佔用的區間
+  const overlaps=(a,b)=>a[0]<b[1]+4 && b[0]<a[1]+4;
+  let maxLane=0; const labelsHtml=[];
+  clusters.forEach((c,ci)=>{
+    const text=eventClusterText(c); const w=textPx(text);
+    const x0=dotSpans[ci][0], x1=dotSpans[ci][1];
+    let right=[x1+2, x1+2+w], anchorLeft=true;
+    if(right[1]>W){ right=[x0-2-w, x0-2]; anchorLeft=false; }
+    let lane=0;
+    for(;;lane++){
+      const occ=lanes[lane]||[];
+      const blockers = lane===0 ? occ.concat(dotSpans.filter((_,j)=>j!==ci)) : occ;
+      if(!blockers.some(b=>overlaps(b,right))) break;
+    }
+    (lanes[lane]=lanes[lane]||[]).push(right);
+    maxLane=Math.max(maxLane,lane);
+    const pos = anchorLeft ? `left:calc(${c[c.length-1].pct}% + 9px);` : `left:calc(${c[0].pct}% - 9px);transform:translate(-100%,${lane===0?'-50%':'0'});`;
+    const top = lane===0 ? '' : `top:${16+2+(lane-1)*15}px;`;
+    labelsHtml.push(`<span class="ganttEventLabel${collab?' collab':''}${lane>0?' lower':''}" style="${pos}${top}">${esc(text)}</span>`);
+  });
+  return {html:dots+labelsHtml.join(''), extraPx:maxLane*15};
 }
 function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;'); }
 function relTime(ts){
@@ -1177,7 +1230,8 @@ function ganttHtml(p){
   const pct=(iso)=>{ const d=new Date(iso+"T00:00:00"); const c=d<rangeStart?rangeStart:(d>rangeEnd?rangeEnd:d); return (c-rangeStart)/totalMs*100; };
   const dayCount=(a,b)=>Math.round((new Date(b+"T00:00:00")-new Date(a+"T00:00:00"))/86400000)+1;
   const prForEvent=getRow(p.id);
-  const eventDotsHtml=(prForEvent.eventDates||[]).map(e=>`<span class="ganttEventDot" style="left:${pct(e.date)}%;" title="活動日：${shortDate(e.date)}${e.label?`　${e.label}`:''}"></span>`).join('');
+  const evMarks=eventMarksHtml(prForEvent.eventDates,pct,{widthPx:measuredWidth('#view .ganttbararea',Math.max(500,Math.round(totalDays*8))-258)});
+  const eventDotsHtml=evMarks.html;
   (prForEvent.eventDates||[]).forEach(e=>{ overlayHtml += `<div class="ganttEventLine" style="left:${pct(e.date)}%;"></div>`; });
 
   // pre-compute each group's min/max span
@@ -1226,9 +1280,9 @@ function ganttHtml(p){
     <div class="ganttlabel"></div>
     <div class="ganttbararea">${weekLabels.map(w=>`<span class="ganttweeklabel" style="left:${w.pct}%;">${w.label}</span>`).join('')}</div>
   </div>`;
-  const eventRowHtml=eventDotsHtml?`<div class="ganttrow" style="min-height:16px;">
+  const eventRowHtml=eventDotsHtml?`<div class="ganttrow" style="min-height:16px;${evMarks.extraPx?'align-items:flex-start;':''}">
     <div class="ganttlabel small">活動日</div>
-    <div class="ganttbararea">${eventDotsHtml}</div>
+    <div class="ganttbararea" style="${evMarks.extraPx?`margin-bottom:${evMarks.extraPx}px;`:''}">${eventDotsHtml}</div>
   </div>`:'';
   const minWidthPx=Math.max(500, Math.round(totalDays*8));
   const body=`<div class="small" style="margin-bottom:2px;">起訖：${shortDate(proj.start)}–${shortDate(proj.end)}</div>
@@ -1430,6 +1484,8 @@ function capacityOverviewHtml(){
   }
   const overlayHtml=gridLines.map(pc=>`<div class="ganttgrid" style="left:${pc}%;"></div>`).join('') + (todayPct!==null?`<div class="ganttToday" style="left:${todayPct}%;"></div>`:'');
   const LBL="width:200px;";
+  const capMinWidthPx=Math.max(560, Math.round(totalDays*8));
+  const capW=measuredWidth('#priority .ganttbararea', capMinWidthPx-208);
 
   const rowsHtml=ordered.map((g,gi)=>{
     const totalActive=g.activeNow.length+g.activeCollab.length;
@@ -1447,10 +1503,10 @@ function capacityOverviewHtml(){
       const cls = li.done?'ownbar-done' : li.overdue?'ownbar-overdue' : li.lag>=0.2?'ownbar-lag':'ownbar-normal';
       const left=pctOf(r.start), width=Math.max(2,pctOf(r.end)-pctOf(r.start));
       const evRow=getRow(p.id);
-      const evDots=(evRow.eventDates||[]).map(e=>`<span class="ganttEventDot" style="left:${pctOf(e.date)}%;" title="活動日：${shortDate(e.date)}${e.label?`　${e.label}`:''}"></span>`).join('');
-      return `<div class="ganttrow" onclick="goToProject('${p.id}')" style="cursor:pointer;">
+      const evM=eventMarksHtml(evRow.eventDates,pctOf,{widthPx:capW});
+      return `<div class="ganttrow" onclick="goToProject('${p.id}')" style="cursor:pointer;${evM.extraPx?'align-items:flex-start;':''}">
         <div class="ganttlabel" style="${LBL}overflow:hidden;white-space:nowrap;">　└ <span class="cat" style="font-size:.62rem;padding:1px 4px;">${p.cat}</span> ${getName(p)}</div>
-        <div class="ganttbararea">${overlayHtml}<div class="ganttbar ${cls}" style="left:${left}%;width:${width}%;" title="${shortDate(r.start)}–${shortDate(r.end)}"></div>${evDots}</div>
+        <div class="ganttbararea" style="${evM.extraPx?`margin-bottom:${evM.extraPx}px;`:''}">${overlayHtml}<div class="ganttbar ${cls}" style="left:${left}%;width:${width}%;" title="${shortDate(r.start)}–${shortDate(r.end)}"></div>${evM.html}</div>
       </div>`;
     }).join('');
     const collabRows=g.collab.slice().sort((a,b)=>getRange(a).start.localeCompare(getRange(b).start)).map(p=>{
@@ -1459,10 +1515,10 @@ function capacityOverviewHtml(){
       const cls = li.done?'ownbar-done' : li.overdue?'ownbar-overdue' : li.lag>=0.2?'ownbar-lag':'ownbar-normal';
       const left=pctOf(r.start), width=Math.max(2,pctOf(r.end)-pctOf(r.start));
       const rr=getRow(p.id);
-      const evDots=(rr.eventDates||[]).map(e=>`<span class="ganttEventDotCollab" style="left:${pctOf(e.date)}%;" title="活動日（協作）：${shortDate(e.date)}${e.label?`　${e.label}`:''}"></span>`).join('');
-      return `<div class="ganttrow" onclick="goToProject('${p.id}')" style="cursor:pointer;">
+      const evM=eventMarksHtml(rr.eventDates,pctOf,{widthPx:capW,collab:true});
+      return `<div class="ganttrow" onclick="goToProject('${p.id}')" style="cursor:pointer;${evM.extraPx?'align-items:flex-start;':''}">
         <div class="ganttlabel" style="${LBL}overflow:hidden;white-space:nowrap;" title="協作・負責:${rr.assignee||'未指派'}">　└ <span class="cat" style="font-size:.62rem;padding:1px 4px;">${p.cat}</span> ${getName(p)}</div>
-        <div class="ganttbararea">${overlayHtml}<div class="ganttbar collabbar ${cls}" style="left:${left}%;width:${width}%;" title="協作・${shortDate(r.start)}–${shortDate(r.end)}"></div>${evDots}</div>
+        <div class="ganttbararea" style="${evM.extraPx?`margin-bottom:${evM.extraPx}px;`:''}">${overlayHtml}<div class="ganttbar collabbar ${cls}" style="left:${left}%;width:${width}%;" title="協作・${shortDate(r.start)}–${shortDate(r.end)}"></div>${evM.html}</div>
       </div>`;
     }).join('');
     return header+ownRows+collabRows;
