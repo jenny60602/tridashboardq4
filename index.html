@@ -204,6 +204,7 @@ tr.rowopen td:first-child{box-shadow:inset 4px 0 0 var(--accent2);}
   </div>
   <div id="restorebanner"></div>
   <div id="undotoast"></div>
+  <div id="synctoast" style="position:fixed;left:14px;bottom:14px;z-index:60;"></div>
   <div id="backbtn" style="position:fixed;top:14px;right:14px;z-index:49;"></div>
   <div id="priority"></div>
   <div id="filterbar" class="filterbar">
@@ -216,7 +217,7 @@ tr.rowopen td:first-child{box-shadow:inset 4px 0 0 var(--accent2);}
   <div id="addform" style="margin-bottom:12px;"></div>
   <div id="view"></div>
   <div class="hint" id="synchint">正在連線 Google Sheet…</div>
-  <button class="mini" onclick="manualRefresh()" style="margin-top:6px;">🔄 重新整理資料</button>
+  <button class="mini" onclick="manualRefresh()" style="margin-top:6px;">🔄 立即同步</button>
 </main>
 <script>
 const PROJECTS=[
@@ -364,8 +365,9 @@ function relTime(ts){
   const d=Math.floor(h/24); return d+"天前";
 }
 
-function getRow(id){
-  const r=state[id]||{};
+function getRow(id){ return rowDefaults(state[id]); }
+function rowDefaults(r0){
+  const r=r0||{};
   return {status:r.status||"未開始", assignee:r.assignee||"",
     estOverride:(r.estOverride===undefined?null:r.estOverride), actual:(r.actual===undefined?null:r.actual),
     cost:(r.cost===undefined?null:r.cost), driveLink:r.driveLink||"", nameOverride:(r.nameOverride===undefined?null:r.nameOverride),
@@ -1675,6 +1677,153 @@ function setHint(msg,isWarn){
 }
 function sheetConfigured(){ return SHEET_API_URL && !SHEET_API_URL.includes("PASTE_"); }
 
+// ================= 自動同步（輪詢 + 三方合併）=================
+// 概念：lastSynced = 上次跟 Google Sheet 對齊時的版本（合併基準）。
+// 存檔時先抓雲端最新版，只把「我這台改過的欄位」疊上去再寫回，避免把同事剛存的東西蓋掉。
+// 每 15 秒（分頁在前景時）自動抓一次雲端版本，合併後重繪；使用者正在打字時延後重繪。
+const POLL_MS=15000;
+let lastSynced={};
+let saveChain=Promise.resolve(), savingCount=0, pollBusy=false;
+let pendingRemoteRender=false, dragActive=false, lastTypingAt=0, lastSyncAt=null;
+
+function clone(o){ return o===undefined?undefined:JSON.parse(JSON.stringify(o)); }
+function stableStr(v){
+  if(v===undefined) return 'undefined';
+  if(v===null||typeof v!=='object') return JSON.stringify(v);
+  if(Array.isArray(v)) return '['+v.map(stableStr).join(',')+']';
+  return '{'+Object.keys(v).filter(k=>v[k]!==undefined).sort().map(k=>JSON.stringify(k)+':'+stableStr(v[k])).join(',')+'}';
+}
+function same(a,b){ return stableStr(a)===stableStr(b); }
+function isObj(v){ return v!==null && typeof v==='object' && !Array.isArray(v); }
+function idArr(a){ return Array.isArray(a) && a.every(x=>isObj(x)&&x.id!=null); }
+// b=基準、m=我這台、t=雲端。誰有改就用誰的；兩邊都改同一格時預設以「我這台」為準（tie='theirs' 則以雲端為準）。
+function merge3(b,m,t,tie){
+  if(same(m,b)) return clone(t);
+  if(same(t,b)) return clone(m);
+  if(same(m,t)) return clone(m);
+  if(isObj(m)&&isObj(t)){
+    const bb=isObj(b)?b:{}; const out={};
+    new Set([...Object.keys(bb),...Object.keys(m),...Object.keys(t)]).forEach(k=>{
+      const v=merge3(bb[k],m[k],t[k],tie); if(v!==undefined) out[k]=v;
+    });
+    return out;
+  }
+  if(Array.isArray(m)&&Array.isArray(t)){
+    const bb=Array.isArray(b)?b:[];
+    if(idArr(m)&&idArr(t)&&idArr(bb)){ // 例如 _customProjects：依 id 合併，兩人同時新增都會保留
+      const bm=new Map(bb.map(x=>[x.id,x])), mm=new Map(m.map(x=>[x.id,x])), tm=new Map(t.map(x=>[x.id,x]));
+      const order=[...t.map(x=>x.id), ...m.map(x=>x.id).filter(id=>!tm.has(id))];
+      const out=[]; order.forEach(id=>{ const v=merge3(bm.get(id),mm.get(id),tm.get(id),tie); if(v!==undefined) out.push(v); });
+      return out;
+    }
+    if(m.length===t.length && t.length===bb.length){ // 例如同一母項目下，兩人各勾不同的子項目
+      return m.map((x,i)=> same(x,bb[i]) ? clone(t[i]) : (tie==='theirs'&&!same(t[i],bb[i]) ? clone(t[i]) : clone(x)));
+    }
+    return clone(tie==='theirs'?t:m);
+  }
+  return clone(tie==='theirs'?t:m);
+}
+
+// 合併前先把每個專案補齊預設值（跟 getRow 一樣），避免「null vs 沒填」被誤判成有修改
+function normState(st){
+  const out={};
+  Object.keys(st||{}).forEach(k=>{
+    const v=st[k];
+    out[k]=(!k.startsWith('_') && isObj(v)) ? Object.assign({},v,rowDefaults(v)) : v;
+  });
+  return out;
+}
+function mergeState(b,m,t,tie){
+  const nb=normState(b), nm=normState(m), nt=normState(t);
+  // 某一邊還沒有這個專案的資料（例如第一次有人編輯）→ 當成空白預設列（專案列不會被刪除，所以這樣是安全的）
+  const rowKeys=new Set();
+  [nb,nm,nt].forEach(x=>Object.keys(x).forEach(k=>{ if(!k.startsWith('_') && isObj(x[k])) rowKeys.add(k); }));
+  rowKeys.forEach(k=>[nb,nm,nt].forEach(x=>{ if(!(k in x)) x[k]=rowDefaults({}); }));
+  return merge3(nb,nm,nt,tie);
+}
+
+async function fetchRemote(){
+  const res=await fetch(SHEET_API_URL,{method:"GET",cache:"no-store"});
+  const data=await res.json();
+  return (data&&typeof data==='object'&&!Array.isArray(data))?data:{};
+}
+
+// ---- 使用者正在操作時不要重繪（避免打到一半的字被洗掉） ----
+document.addEventListener('dragstart',()=>{ dragActive=true; },true);
+document.addEventListener('dragend',()=>{ dragActive=false; },true);
+document.addEventListener('drop',()=>{ setTimeout(()=>{ dragActive=false; },0); },true);
+document.addEventListener('input',()=>{ lastTypingAt=Date.now(); },true);
+document.addEventListener('keydown',()=>{ lastTypingAt=Date.now(); },true);
+function isUserBusy(){
+  if(dragActive) return true;
+  const a=document.activeElement;
+  if(!a||a===document.body||a.id==='searchbox'||a.id==='whoami-select') return false;
+  const tag=a.tagName;
+  if(tag==='TEXTAREA'||a.isContentEditable) return true;
+  if(tag==='INPUT'){
+    const ty=(a.type||'').toLowerCase();
+    if(['checkbox','radio','button','submit','color','range'].includes(ty)) return false;
+    return a.value!==a.defaultValue || (Date.now()-lastTypingAt<8000);
+  }
+  return false;
+}
+function renderPreservingScroll(){
+  const sel='.ganttscroll,.monthgridscroll,.todoparentgrid,.wrap';
+  const before=[...document.querySelectorAll(sel)].map(e=>[e.scrollLeft,e.scrollTop]);
+  const y=window.scrollY;
+  render();
+  const after=[...document.querySelectorAll(sel)];
+  if(after.length===before.length) after.forEach((e,i)=>{ e.scrollLeft=before[i][0]; e.scrollTop=before[i][1]; });
+  window.scrollTo(0,y);
+}
+function requestRemoteRender(){
+  if(isUserBusy()){ pendingRemoteRender=true; return; }
+  pendingRemoteRender=false; renderPreservingScroll();
+}
+document.addEventListener('focusout',()=>setTimeout(()=>{ if(pendingRemoteRender && !isUserBusy()) requestRemoteRender(); },400));
+
+// ---- 提示 ----
+function setSyncStatus(kind){
+  if(kind==='ok'){ lastSyncAt=new Date(); }
+  const t=lastSyncAt?` 最後同步 ${pad(lastSyncAt.getHours())}:${pad(lastSyncAt.getMinutes())}:${pad(lastSyncAt.getSeconds())}`:'';
+  if(kind==='saving') setHint("● 儲存中…"+t);
+  else if(kind==='fail') setHint("⚠ 暫時連不到 Google Sheet，修改已先存在這台瀏覽器，連上後會自動補傳。"+t,true);
+  else setHint("● 自動同步中：同事的修改約 15 秒內會自動出現，不用重新整理。"+t);
+}
+function changedProjectsSummary(prev,next){
+  const keys=new Set([...Object.keys(prev||{}),...Object.keys(next||{})]);
+  const items=[];
+  keys.forEach(k=>{
+    if(k.startsWith('_')) return;
+    if(same(prev[k],next[k])) return;
+    const by=(next[k]&&next[k].lastEdit&&next[k].lastEdit.by)||'';
+    if(by && whoAmI && by===whoAmI) return;
+    const p=getProject(k) || ((next._customProjects||[]).find(c=>c.id===k));
+    items.push({name:p?getName(p):'一個專案', by});
+  });
+  return items;
+}
+let syncToastTimer=null;
+function showSyncToast(items){
+  if(!items.length) return;
+  const box=document.getElementById("synctoast"); if(!box) return;
+  const first=items[0];
+  const who=first.by?first.by+' ':'同事';
+  const msg = items.length===1 ? `🔄 ${who}更新了「${esc(first.name)}」` : `🔄 已同步其他人的 ${items.length} 個專案更新（${esc(first.name)} 等）`;
+  box.innerHTML=`<div style="background:var(--accent);color:#fff;padding:8px 14px;border-radius:8px;font-size:.8rem;box-shadow:0 2px 8px rgba(0,0,0,.18);">${msg}</div>`;
+  clearTimeout(syncToastTimer);
+  syncToastTimer=setTimeout(()=>{ box.innerHTML=''; },5000);
+}
+function applyMerged(next){
+  const prev=state;
+  state=next;
+  if(!same(prev,next)){
+    showSyncToast(changedProjectsSummary(prev,next));
+    requestRemoteRender();
+  }
+}
+
+// ---- 讀取 ----
 async function loadFromSheet(){
   if(!sheetConfigured()){
     setHint("尚未設定 Google Sheet 網址，目前只存在你這台瀏覽器（單機模式）。",true);
@@ -1683,15 +1832,15 @@ async function loadFromSheet(){
     return;
   }
   try{
-    const res=await fetch(SHEET_API_URL,{method:"GET"});
-    const data=await res.json();
-    if(data && Object.keys(data).length>0){
-      state=data;
+    const data=await fetchRemote();
+    if(Object.keys(data).length>0){
+      state=data; lastSynced=clone(data);
     } else {
+      lastSynced={};
       const backup=localBackupLoad();
       if(backup && Object.keys(backup).length>0) showRestoreBanner(backup);
     }
-    setHint("已連接 Google Sheet：重新整理或按「重新整理資料」可看到其他人的更新。");
+    setSyncStatus('ok');
     render();
   }catch(e){
     console.error(e);
@@ -1700,17 +1849,65 @@ async function loadFromSheet(){
     render();
   }
 }
-window.manualRefresh=function(){ loadFromSheet(); };
-
-async function persist(){
-  localBackupSave();
-  if(!sheetConfigured()){ setHint("尚未設定 Google Sheet 網址，這次修改只存在你這台瀏覽器。",true); return; }
+async function pollOnce(force){
+  if(!sheetConfigured()||pollBusy||savingCount>0) return;
+  if(document.hidden && !force) return;
+  pollBusy=true;
   try{
-    await fetch(SHEET_API_URL,{method:"POST",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify(state)});
-    setHint("已連接 Google Sheet：重新整理或按「重新整理資料」可看到其他人的更新。");
+    const remote=await fetchRemote();
+    if(savingCount>0) return; // 存檔中途開始了，存檔流程自己會合併
+    const merged=mergeState(lastSynced,state,remote);
+    lastSynced=clone(remote);
+    applyMerged(merged);
+    setSyncStatus('ok');
+    if(!same(state,lastSynced)) persist(); // 之前存失敗的修改，自動補傳
+  }catch(e){ console.error(e); setSyncStatus('fail'); }
+  finally{ pollBusy=false; }
+}
+window.manualRefresh=async function(){ await saveChain; await pollOnce(true); };
+setInterval(()=>{ pollOnce(false); if(pendingRemoteRender) requestRemoteRender(); },POLL_MS);
+document.addEventListener('visibilitychange',()=>{ if(!document.hidden) pollOnce(false); });
+
+// ---- 寫入（排隊執行，一次一筆）----
+function persist(){
+  localBackupSave();
+  if(!sheetConfigured()){ setHint("尚未設定 Google Sheet 網址，這次修改只存在你這台瀏覽器。",true); return Promise.resolve(); }
+  savingCount++;
+  const p=saveChain.then(doPersist).finally(()=>{ savingCount--; });
+  saveChain=p.catch(()=>{});
+  return saveChain;
+}
+async function postState(obj){
+  const res=await fetch(SHEET_API_URL,{method:"POST",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify(obj)});
+  if(!res.ok) throw new Error('POST '+res.status);
+}
+async function doPersist(){
+  if(same(state,lastSynced)) return;
+  setSyncStatus('saving');
+  try{
+    let remote;
+    try{ remote=await fetchRemote(); }catch(e){ remote=lastSynced; }
+    const pre=clone(lastSynced);
+    const mine=clone(state);
+    let merged=mergeState(pre,mine,remote);
+    await postState(merged);
+    lastSynced=clone(merged);
+    // 驗證：如果同事幾乎同一秒也在存檔，我的修改可能被他的版本蓋掉 → 重新讀一次，被蓋掉就補寫回去
+    for(let i=0;i<3;i++){
+      await new Promise(r=>setTimeout(r,900+Math.random()*900));
+      let r2; try{ r2=await fetchRemote(); }catch(e){ break; }
+      const fixed=mergeState(pre,mine,r2,'theirs'); // 只補回「被還原成舊值」的欄位；同事之後又改的就尊重同事
+      merged=fixed; lastSynced=clone(fixed);
+      if(same(fixed,r2)) break;
+      await postState(fixed);
+    }
+    // 等待網路的這段時間，使用者可能又改了東西：把那些改動疊在合併結果上
+    applyMerged(mergeState(mine,state,merged));
+    localBackupSave();
+    setSyncStatus('ok');
   }catch(e){
     console.error(e);
-    setHint("⚠ 這次修改可能沒有同步到 Google Sheet（已存一份在你這台瀏覽器）。請檢查網路後按「重新整理資料」重試。",true);
+    setSyncStatus('fail');
   }
 }
 
