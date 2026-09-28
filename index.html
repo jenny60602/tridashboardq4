@@ -1867,23 +1867,36 @@ function mergeState(b,m,t,tie){
 
 let apiChecked=false;
 async function ensureNewBackend(){
-  if(apiChecked) return;
+  // 每一次 POST 之前都確認（GET ?ping 對舊後端是無害的；POST 對舊後端等於覆寫資料）
   const r=await fetch(SHEET_API_URL+'?ping=1',{cache:'no-store'}); const j=await r.json();
   if(!j || j.api!==2){
     oldBackend=true;
     setHint('⚠ 後端 Apps Script 還是舊版，為了保護資料，這個頁面暫停讀寫。請先部署新版 Apps Script。',true);
     throw new Error('old backend');
   }
-  apiChecked=true;
+  apiChecked=true; oldBackend=false;
+}
+function rowCount(st){ return Object.keys(st||{}).filter(k=>k[0]!=='_'&&st[k]&&typeof st[k]==='object'&&!Array.isArray(st[k])).length; }
+function looksWiped(remote){
+  const before=rowCount(lastSynced), now=rowCount(remote);
+  if(before>=10 && now<before*0.5) return true;
+  if((lastSynced._customProjects||[]).length>=3 && !(remote._customProjects||[]).length) return true;
+  return false;
 }
 async function fetchRemote(){
   await ensureNewBackend();
   const res=await fetch(SHEET_API_URL,{method:"POST",cache:"no-store",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify({action:'read',code:loadCode()})});
   const data=await res.json();
-  if(data && data.state!==undefined){ applyIdentity(data.me||null, data.error||null); const st=data.state; return (st&&typeof st==='object'&&!Array.isArray(st))?st:{}; }
-  // 舊版後端（還沒換新的 Apps Script）
-  applyIdentity(null,null);
-  return (data&&typeof data==='object'&&!Array.isArray(data))?data:{};
+  if(!data || data.ok!==true || !data.state || typeof data.state!=='object' || Array.isArray(data.state)){
+    // 回應不是新版格式（後端被換回舊版、或出錯）→ 絕不當成資料使用
+    apiChecked=false; oldBackend=true; setHint('');
+    throw new Error('bad read response');
+  }
+  oldBackend=false;
+  applyIdentity(data.me||null, data.error||null);
+  const st=data.state;
+  if(st.action!==undefined || st.code!==undefined) { apiChecked=false; oldBackend=true; setHint(''); throw new Error('corrupted state'); }
+  return st;
 }
 
 // ---- 使用者正在操作時不要重繪（避免打到一半的字被洗掉） ----
@@ -1994,6 +2007,7 @@ async function pollOnce(force){
   try{
     const remote=await fetchRemote();
     if(savingCount>0) return; // 存檔中途開始了，存檔流程自己會合併
+    if(looksWiped(remote)){ setHint('⚠ 雲端資料看起來不完整（專案數量突然大減），為了保護資料已暫停同步，請聯絡 Jenny。',true); return; }
     const merged=mergeState(lastSynced,state,remote);
     lastSynced=clone(remote);
     applyMerged(merged);
@@ -2016,6 +2030,7 @@ function persist(){
   return saveChain;
 }
 async function postState(obj){
+  apiChecked=false;
   await ensureNewBackend();
   const res=await fetch(SHEET_API_URL,{method:"POST",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify({action:'write',code:loadCode(),data:obj})});
   if(!res.ok) throw new Error('POST '+res.status);
@@ -2025,7 +2040,8 @@ async function doPersist(){
   setSyncStatus('saving');
   try{
     let remote;
-    try{ remote=await fetchRemote(); }catch(e){ remote=lastSynced; }
+    try{ remote=await fetchRemote(); }catch(e){ throw e; }
+    if(looksWiped(remote)) throw new Error('remote looks wiped');
     const pre=clone(lastSynced);
     const mine=clone(state);
     let merged=mergeState(pre,mine,remote);
@@ -2035,6 +2051,7 @@ async function doPersist(){
     for(let i=0;i<3;i++){
       await new Promise(r=>setTimeout(r,900+Math.random()*900));
       let r2; try{ r2=await fetchRemote(); }catch(e){ break; }
+      if(looksWiped(r2)) break;
       const fixed=mergeState(pre,mine,r2,'theirs'); // 只補回「被還原成舊值」的欄位；同事之後又改的就尊重同事
       merged=fixed; lastSynced=clone(fixed);
       if(same(fixed,r2)) break;
