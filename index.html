@@ -215,6 +215,8 @@ tr.rowopen td:first-child{box-shadow:inset 4px 0 0 var(--accent2);}
     <div class="filterdivider"></div>
     <span class="filterlabel">狀態</span>
     <div id="statusfilters" class="filters statusfilters"></div>
+    <div class="filterdivider"></div>
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:nowrap;"><span class="filterlabel">負責人</span><div id="ownerfilters" class="filters" style="align-items:center;flex-wrap:nowrap;"></div></div>
     <input id="searchbox" type="text" placeholder="🔍 搜尋專案名稱…">
   </div>
   <div id="addform" style="margin-bottom:12px;"></div>
@@ -311,6 +313,7 @@ const URG_LABEL={overdue:"已逾期",soon7:"7天內到期",soon30:"30天內",lat
 
 const SHEET_API_URL="https://script.google.com/macros/s/AKfycbymRzIunZy7hUkAzy0UTsHi-22mVACE1HlZtsGCI2H3_FekAgnbdcQ_XsOwFVcve4h2gQ/exec";
 let state={};
+let ownerFilter="全部";
 let view="project", catFilter="全部", statusFilter="全部", searchTerm="", expanded=new Set(), expandedPerson=new Set(), showAddForm=false, detailTab={}, todoExpandedSet=new Set(), ownedCollabExpandedSet=new Set(), ganttGroupExpanded={}, lastDeleteSnapshot=null, capacityExpanded=new Set(), lastCapacityOrder=[], backState=null;
 function showUndoToast(label){
   const box=document.getElementById("undotoast");
@@ -491,6 +494,7 @@ function visibleProjects(){
   let s=sortedAll();
   if(catFilter!=="全部") s=s.filter(p=>p.cat===catFilter);
   if(statusFilter!=="全部") s=s.filter(p=>getRow(p.id).status===statusFilter);
+  if(ownerFilter!=="全部") s=s.filter(p=>getRow(p.id).assignee===ownerFilter);
   if(searchTerm) s=s.filter(p=>getName(p).toLowerCase().includes(searchTerm.toLowerCase()));
   return s;
 }
@@ -989,7 +993,7 @@ function renderStats(){
   const q4Margin=mt.q4Total-q4Cost, q1Margin=mt.q1Total-q1Cost;
   let tDone=0,tAll=0; ALLP.forEach(p=>{const t=taskProgress(p); tDone+=t.done; tAll+=t.total;});
   const pct=tAll?Math.round(tDone/tAll*100):0;
-  const noTaskCount=ALLP.filter(p=>getRow(p.id).status!=="已完成" && taskProgress(p).done===0).length;
+  const noTaskCount=noTaskScope(ALLP.filter(p=>getRow(p.id).status!=="已完成" && taskProgress(p).done===0)).length;
   let actualSum=0,actualCount=0,costSum=0,costCount=0;
   ALLP.forEach(p=>{const r=getRow(p.id);
     { const list=getReceipts(p.id); if(list.length){ actualSum+=list.reduce((s,x)=>s+Number(x.amount||0),0); actualCount++; } }
@@ -1000,7 +1004,7 @@ function renderStats(){
       <div class="statgrouplabel">${isFinAll()?"財務":(anyFin()?"總覽（金額只計算你負責的專案）":"總覽")}</div>
       <div class="stats">
         <div class="stat clickable" onclick="gotoStatus('全部')"><b>${ALLP.length}</b><span>專案總數</span></div>
-        <div class="stat"><b>${pct}%</b><span>全公司任務完成率</span>${noTaskCount?`<span class="small" style="color:var(--accent2);cursor:pointer;text-decoration:underline;text-decoration-style:dotted;" onclick="gotoNoTaskList()">${noTaskCount}個專案還沒拆過任務清單</span>`:''}</div>
+        <div class="stat"><b>${pct}%</b><span>全公司任務完成率</span>${noTaskCount?`<span class="small" style="color:var(--accent2);cursor:pointer;text-decoration:underline;text-decoration-style:dotted;" onclick="gotoNoTaskList()">${noTaskScopeMine()?`你負責的 ${noTaskCount} 個專案還沒拆過任務清單`:`${noTaskCount}個專案還沒拆過任務清單`}</span>`:''}</div>
         ${anyFin()?`        <div class="stat"><b>${fmt(mt.q4Total)}</b><span>2026Q4 認列營收（未稅，估+實收）</span><span class="small">核心 ${fmt(mt.q4Core)}／營業外 ${fmt(mt.q4NonOp)}</span></div>
         <div class="stat"><b style="color:${q4Margin<0?'var(--warn)':'var(--ink)'}">${mt.q4Total?Math.round(q4Margin/mt.q4Total*100)+'%':'—'}</b><span>2026Q4 毛利率估算</span><span class="small">毛利 ${fmt(q4Margin)}</span></div>
         <div class="stat"><b>${fmt(mt.q1Total)}</b><span>2027Q1 認列營收（未稅，估+實收）</span><span class="small">核心 ${fmt(mt.q1Core)}／營業外 ${fmt(mt.q1NonOp)}</span></div>
@@ -1020,7 +1024,24 @@ function renderFilters(){
   document.getElementById("statusfilters").innerHTML=statuses.map(s=>
     `<button class="${statusFilter===s?'active':''}" onclick="setStatusFilter('${s}')">${s}${s==="全部"?"":" ("+ALLP.filter(p=>getRow(p.id).status===s).length+")"}</button>`
   ).join("");
+  const me=myName();
+  const owners=[...new Set(ALLP.map(p=>getRow(p.id).assignee).filter(Boolean))];
+  const cnt=n=>ALLP.filter(p=>getRow(p.id).assignee===n).length;
+  const order=[...TEAM_STAFF,...TEAM_PARTNER];
+  owners.sort((a,b)=>{ const ia=order.indexOf(a), ib=order.indexOf(b); return (ia<0?99:ia)-(ib<0?99:ib) || a.localeCompare(b); });
+  const others=owners.filter(n=>n!==me);
+  document.getElementById("ownerfilters").innerHTML=
+    `<button class="${ownerFilter==='全部'?'active':''}" onclick="setOwnerFilter('全部')">全部</button>`+
+    (me&&cnt(me)?`<button class="${ownerFilter===me?'active':''}" onclick="setOwnerFilter('${esc(me)}')">★ 我負責的 (${cnt(me)})</button>`:'')+
+    `<select onchange="setOwnerFilter(this.value)" style="border-radius:16px;padding:4px 8px;${ownerFilter!=='全部'&&ownerFilter!==me?'border-color:var(--accent2);':''}">
+      <option value="全部" ${ownerFilter==='全部'||ownerFilter===me?'selected':''}>其他負責人…</option>
+      ${others.map(n=>`<option value="${esc(n)}" ${ownerFilter===n?'selected':''}>${esc(n)} (${cnt(n)})</option>`).join('')}
+    </select>`;
 }
+function noTaskScopeMine(){ return !!ME && ME.level!=='admin'; }
+function noTaskScope(list){ return noTaskScopeMine() ? list.filter(p=>getRow(p.id).assignee===ME.name) : list; }
+function myName(){ return ME?ME.name:(whoAmI||''); }
+window.setOwnerFilter=function(n){ ownerFilter=n; renderFilters(); renderProjectView(); };
 window.setFilter=function(c){ catFilter=c; renderFilters(); renderProjectView(); };
 window.setStatusFilter=function(s){ statusFilter=s; renderFilters(); renderProjectView(); };
 window.gotoStatus=function(s){
@@ -1064,7 +1085,7 @@ window.gotoNoTaskList=function(){
 };
 window.goToTaskList=function(pid){
   captureBackState();
-  view="project"; catFilter="全部"; statusFilter="全部"; searchTerm="";
+  view="project"; catFilter="全部"; statusFilter="全部"; ownerFilter="全部"; searchTerm="";
   const sb=document.getElementById("searchbox"); if(sb) sb.value="";
   document.querySelectorAll(".tabs button").forEach(x=>x.classList.remove("active"));
   document.querySelector('.tabs button[data-v="project"]').classList.add("active");
@@ -1075,7 +1096,7 @@ window.goToTaskList=function(pid){
 };
 window.goToProject=function(pid){
   captureBackState();
-  view="project"; catFilter="全部"; statusFilter="全部"; searchTerm="";
+  view="project"; catFilter="全部"; statusFilter="全部"; ownerFilter="全部"; searchTerm="";
   const sb=document.getElementById("searchbox"); if(sb) sb.value="";
   document.querySelectorAll(".tabs button").forEach(x=>x.classList.remove("active"));
   document.querySelector('.tabs button[data-v="project"]').classList.add("active");
@@ -1678,8 +1699,8 @@ function renderPersonView(){
   const unHtml=un.length ? `<div class="priority" style="margin-top:10px;"><h3>尚未指派負責人（${un.length}）</h3>
       ${un.map(p=>`<div class="row"><span>${getName(p)}（${p.cat}）</span><select style="width:150px;" ${canEditAssignee()?'':'disabled title="只有管理者可以指派負責人"'} onchange="setField('${p.id}','assignee',this.value)">${personOpts('')}</select></div>`).join('')}
     </div>` : `<div class="priority ok" style="margin-top:10px;"><h3>✓ 所有專案都已指派負責人</h3></div>`;
-  const noTasks=ALLP.filter(p=>getRow(p.id).status!=="已完成" && taskProgress(p).done===0);
-  const noTasksHtml=noTasks.length ? `<div class="priority" style="margin-top:10px;"><h3>尚未拆分任務清單（${noTasks.length}）</h3>
+  const noTasks=noTaskScope(ALLP.filter(p=>getRow(p.id).status!=="已完成" && taskProgress(p).done===0));
+  const noTasksHtml=noTasks.length ? `<div class="priority" style="margin-top:10px;"><h3>${noTaskScopeMine()?"你負責、":""}尚未拆分任務清單（${noTasks.length}）</h3>
       ${noTasks.map(p=>projRowHtml(p)).join('')}
     </div>` : `<div class="priority ok" style="margin-top:10px;"><h3>✓ 所有進行中的專案都已經有任務進度</h3></div>`;
   document.getElementById("view").innerHTML=legend+staffCards+partnerCards+vendorCards+unHtml+noTasksHtml;
@@ -1774,7 +1795,7 @@ function renderLogin(){
     box.innerHTML=`你是：<select id="whoami-select">${whoAmIOpts(whoAmI)}</select>
       <span style="margin-left:10px;">個人密碼 <input id="logincode" type="password" autocomplete="current-password" style="width:120px;" onkeydown="if(event.key==='Enter')login()"></span>
       <button class="mini" onclick="login()">登入</button>
-      ${loginError==='bad_code'?'<span style="color:var(--warn);margin-left:6px;">密碼不正確</span>':'<span class="small" style="margin-left:6px;">登入後會自動帶入你的名字，並顯示你有權限看的數字</span>'}`;
+      ${loginError==='bad_code'?'<span style="color:var(--warn);margin-left:6px;">密碼不正確</span>':''}`;
     const sel=document.getElementById('whoami-select');
     sel.value=whoAmI;
     sel.addEventListener('change',e=>{ whoAmI=e.target.value; saveWhoAmI(whoAmI); });
