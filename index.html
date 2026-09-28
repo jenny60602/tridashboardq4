@@ -963,11 +963,98 @@ function monthlyChartBody(){
   return `<div class="small" style="margin-bottom:6px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
       <span>2026Q4 合計：${fmt(q4Total)}　｜　2027Q1 合計：${fmt(q1Total)}</span>
       <button class="mini" onclick="toggleAllMonths()">${monthTableOpen?'收合明細':'展開明細'}</button>
+      <button class="mini" onclick="exportMonthlyExcel()" title="下載你目前看得到的按月認列資料">⬇ 下載 Excel</button>
     </div>
     <div class="mtable-row" style="align-items:flex-end;margin-bottom:10px;"><div></div>${chartHtml}<div></div></div>
     ${detailHtml}
     <div class="small" style="margin-top:6px;">淺色＝預估；深色＝已在「實際收款」登錄發票，取代預估（不重複累加）。2027年1-3月為Q1（虛線右側）。點長條或按鈕看各類別／專案貢獻金額。</div>`;
 }
+// ================= 按月認列：下載 Excel =================
+// 只匯出目前登入的人看得到的專案（FINP()），跟畫面一致。
+const XLSX_URL='https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+function loadXlsx(){
+  if(window.XLSX) return Promise.resolve(window.XLSX);
+  return new Promise((res,rej)=>{ const sc=document.createElement('script'); sc.src=XLSX_URL; sc.onload=()=>res(window.XLSX); sc.onerror=()=>rej(new Error('無法載入 Excel 元件')); document.head.appendChild(sc); });
+}
+function monthlyExportData(){
+  const cats=[], data={}, projData={}, detail=[];
+  CHART_MONTHS.forEach(m=>{
+    monthContributions(m).forEach(x=>{
+      const cat=x.p.cat;
+      if(!data[cat]){ data[cat]={}; cats.push(cat); projData[cat]={}; }
+      data[cat][m]=(data[cat][m]||0)+x.amount;
+      if(!projData[cat][x.p.id]) projData[cat][x.p.id]={p:x.p, monthly:{}};
+      projData[cat][x.p.id].monthly[m]=(projData[cat][x.p.id].monthly[m]||0)+x.amount;
+      detail.push({m, p:x.p, amount:x.amount, confirmed:x.confirmed});
+    });
+  });
+  const rowTotal=cat=>CHART_MONTHS.reduce((s,m)=>s+(data[cat][m]||0),0);
+  cats.sort((a,b)=>rowTotal(b)-rowTotal(a));
+  return {cats,data,projData,detail,rowTotal};
+}
+window.exportMonthlyExcel=async function(){
+  let X; try{ X=await loadXlsx(); }catch(e){ alert('下載元件載入失敗，請確認網路後再試一次。'); return; }
+  const {cats,data,projData,detail,rowTotal}=monthlyExportData();
+  const who=myName()||'未登入';
+  const scope=isFinAll()?'全公司':'你負責的專案';
+  const now=new Date(); const stamp=`${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
+  const mLabels=CHART_MONTHS.map(monthLabel);
+  const NUM='#,##0';
+  // --- 工作表1：按月認列（跟畫面上的表格一樣：類別 → 專案） ---
+  const aoa=[
+    ['三小市集 按月認列營收（未稅，估+實收）'],
+    [`下載者：${who}　範圍：${scope}　下載時間：${stamp}`],
+    ['說明：已登錄實際收款的月份用實收金額，其餘為預估；2027/1–3 為 2027Q1。'],
+    [],
+    ['類別','專案','負責人',...mLabels,'合計'],
+  ];
+  const numRows=[];
+  cats.forEach(cat=>{
+    numRows.push(aoa.length);
+    aoa.push([cat,'（類別小計）','',...CHART_MONTHS.map(m=>data[cat][m]||0),rowTotal(cat)]);
+    Object.values(projData[cat]).sort((a,b)=>CHART_MONTHS.reduce((s,m)=>s+(b.monthly[m]||0),0)-CHART_MONTHS.reduce((s,m)=>s+(a.monthly[m]||0),0)).forEach(pd=>{
+      numRows.push(aoa.length);
+      aoa.push(['',getName(pd.p),getRow(pd.p.id).assignee||'',...CHART_MONTHS.map(m=>pd.monthly[m]||0),CHART_MONTHS.reduce((s,m)=>s+(pd.monthly[m]||0),0)]);
+    });
+  });
+  const sumBy=(filter)=>CHART_MONTHS.map(m=>cats.filter(filter).reduce((s,cat)=>s+(data[cat][m]||0),0));
+  const core=sumBy(cat=>cat!=="政府"), nonop=sumBy(cat=>cat==="政府"), all=sumBy(()=>true);
+  const tot=a=>a.reduce((s,v)=>s+v,0);
+  aoa.push([]);
+  numRows.push(aoa.length); aoa.push(['核心營收小計','','',...core,tot(core)]);
+  numRows.push(aoa.length); aoa.push(['營業外收入小計','','',...nonop,tot(nonop)]);
+  numRows.push(aoa.length); aoa.push(['合計','','',...all,tot(all)]);
+  const q4=CHART_MONTHS.reduce((s,m,i)=>s+(m>=9?all[i]:0),0), q1=CHART_MONTHS.reduce((s,m,i)=>s+(m<=3?all[i]:0),0);
+  aoa.push([]);
+  numRows.push(aoa.length); aoa.push(['2026Q4 合計','','',q4]);
+  numRows.push(aoa.length); aoa.push(['2027Q1 合計','','',q1]);
+  const ws1=X.utils.aoa_to_sheet(aoa);
+  numRows.forEach(r=>{ for(let c=3;c<3+CHART_MONTHS.length+1;c++){ const ref=X.utils.encode_cell({r,c}); if(ws1[ref]&&typeof ws1[ref].v==='number') ws1[ref].z=NUM; } });
+  ws1['!cols']=[{wch:14},{wch:30},{wch:10},...CHART_MONTHS.map(()=>({wch:12})),{wch:14}];
+  ws1['!merges']=[{s:{r:0,c:0},e:{r:0,c:6}},{s:{r:1,c:0},e:{r:1,c:10}},{s:{r:2,c:0},e:{r:2,c:10}}];
+  // --- 工作表2：認列明細（一列一筆，方便樞紐分析） ---
+  const det=[['月份','類別','專案','負責人','金額','來源']];
+  detail.sort((a,b)=>CHART_MONTHS.indexOf(a.m)-CHART_MONTHS.indexOf(b.m)||a.p.cat.localeCompare(b.p.cat)).forEach(d=>{
+    det.push([monthLabel(d.m),d.p.cat,getName(d.p),getRow(d.p.id).assignee||'',d.amount,d.confirmed?'實際收款':'預估']);
+  });
+  const ws2=X.utils.aoa_to_sheet(det);
+  for(let r=1;r<det.length;r++){ const ref=X.utils.encode_cell({r,c:4}); if(ws2[ref]) ws2[ref].z=NUM; }
+  ws2['!cols']=[{wch:9},{wch:10},{wch:30},{wch:10},{wch:14},{wch:10}];
+  // --- 工作表3：專案財務總表 ---
+  const pj=[['類別','專案','負責人','狀態','預估營收','實際收款','累積成本','專案毛利','付款方式']];
+  FINP().slice().sort((a,b)=>a.cat.localeCompare(b.cat)||getName(a).localeCompare(getName(b))).forEach(p=>{
+    const r=getRow(p.id);
+    pj.push([p.cat,getName(p),r.assignee||'',r.status,Number(getEstRev(p)||0),totalActual(p),(r.cost===null||r.cost==='')?'':Number(r.cost),marginOf(p),r.paymentMethod||'']);
+  });
+  const ws3=X.utils.aoa_to_sheet(pj);
+  for(let r=1;r<pj.length;r++) for(const c of [4,5,6,7]){ const ref=X.utils.encode_cell({r,c}); if(ws3[ref]&&typeof ws3[ref].v==='number') ws3[ref].z=NUM; }
+  ws3['!cols']=[{wch:10},{wch:30},{wch:10},{wch:8},{wch:14},{wch:14},{wch:14},{wch:14},{wch:10}];
+  const wb=X.utils.book_new();
+  X.utils.book_append_sheet(wb,ws1,'按月認列');
+  X.utils.book_append_sheet(wb,ws2,'認列明細');
+  X.utils.book_append_sheet(wb,ws3,'專案財務總表');
+  X.writeFile(wb,`三小市集_按月認列_${who}_${stamp.slice(0,10)}.xlsx`);
+};
 function quarterCost(){
   let q4Cost=0, q1Cost=0;
   FINP().forEach(p=>{
