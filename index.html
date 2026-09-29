@@ -1917,16 +1917,18 @@ let lastSynced={};
 let saveChain=Promise.resolve(), savingCount=0, pollBusy=false;
 let pendingRemoteRender=false, dragActive=false, lastTypingAt=0, lastSyncAt=null;
 
+// ===== 合併核心（網頁與 Apps Script 共用同一份，修改時兩邊要一起更新）=====
 function clone(o){ return o===undefined?undefined:JSON.parse(JSON.stringify(o)); }
 function stableStr(v){
   if(v===undefined) return 'undefined';
   if(v===null||typeof v!=='object') return JSON.stringify(v);
   if(Array.isArray(v)) return '['+v.map(stableStr).join(',')+']';
-  return '{'+Object.keys(v).filter(k=>v[k]!==undefined).sort().map(k=>JSON.stringify(k)+':'+stableStr(v[k])).join(',')+'}';
+  return '{'+Object.keys(v).filter(function(k){return v[k]!==undefined;}).sort().map(function(k){return JSON.stringify(k)+':'+stableStr(v[k]);}).join(',')+'}';
 }
 function same(a,b){ return stableStr(a)===stableStr(b); }
 function isObj(v){ return v!==null && typeof v==='object' && !Array.isArray(v); }
-function idArr(a){ return Array.isArray(a) && a.every(x=>isObj(x)&&x.id!=null); }
+function idArr(a){ return Array.isArray(a) && a.every(function(x){return isObj(x)&&x.id!=null;}); }
+function primArr(a){ return Array.isArray(a) && a.every(function(x){return x===null||typeof x!=='object';}); }
 // b=基準、m=我這台、t=雲端。誰有改就用誰的；兩邊都改同一格時預設以「我這台」為準（tie='theirs' 則以雲端為準）。
 function merge3(b,m,t,tie){
   if(same(m,b)) return clone(t);
@@ -1934,55 +1936,83 @@ function merge3(b,m,t,tie){
   if(same(m,t)) return clone(m);
   if(isObj(m)&&isObj(t)){
     const bb=isObj(b)?b:{}; const out={};
-    new Set([...Object.keys(bb),...Object.keys(m),...Object.keys(t)]).forEach(k=>{
-      const v=merge3(bb[k],m[k],t[k],tie); if(v!==undefined) out[k]=v;
-    });
+    const keys={}; [bb,m,t].forEach(function(o){ Object.keys(o).forEach(function(k){ keys[k]=1; }); });
+    Object.keys(keys).forEach(function(k){ const v=merge3(bb[k],m[k],t[k],tie); if(v!==undefined) out[k]=v; });
     return out;
   }
   if(Array.isArray(m)&&Array.isArray(t)){
     const bb=Array.isArray(b)?b:[];
-    if(idArr(m)&&idArr(t)&&idArr(bb)){ // 例如 _customProjects：依 id 合併，兩人同時新增都會保留
-      const bm=new Map(bb.map(x=>[x.id,x])), mm=new Map(m.map(x=>[x.id,x])), tm=new Map(t.map(x=>[x.id,x]));
-      const order=[...t.map(x=>x.id), ...m.map(x=>x.id).filter(id=>!tm.has(id))];
-      const out=[]; order.forEach(id=>{ const v=merge3(bm.get(id),mm.get(id),tm.get(id),tie); if(v!==undefined) out.push(v); });
+    // 有 id 的清單（子項目、自訂專案）：逐項合併，兩人同時新增／各改各的都會保留
+    if(idArr(m)&&idArr(t)&&idArr(bb)){
+      const bm={}, mm={}, tm={};
+      bb.forEach(function(x){ bm[x.id]=x; }); m.forEach(function(x){ mm[x.id]=x; }); t.forEach(function(x){ tm[x.id]=x; });
+      const order=m.map(function(x){return x.id;});
+      t.forEach(function(x){ if(!(x.id in mm)) order.push(x.id); });
+      const out=[]; const seen={};
+      order.forEach(function(id){ if(seen[id]) return; seen[id]=1; const v=merge3(bm[id],mm[id],tm[id],tie); if(v!==undefined) out.push(v); });
       return out;
     }
-    if(m.length===t.length && t.length===bb.length){ // 例如同一母項目下，兩人各勾不同的子項目
-      return m.map((x,i)=> same(x,bb[i]) ? clone(t[i]) : (tie==='theirs'&&!same(t[i],bb[i]) ? clone(t[i]) : clone(x)));
+    // 文字清單（任務排序、自訂任務名稱…）：新增的都留，刪除的都刪
+    if(primArr(m)&&primArr(t)&&primArr(bb)){
+      const tDel=bb.filter(function(x){ return t.indexOf(x)<0; });
+      const out=m.filter(function(x){ return tDel.indexOf(x)<0; });
+      t.forEach(function(x){ if(bb.indexOf(x)<0 && out.indexOf(x)<0) out.push(x); });
+      return out;
+    }
+    if(m.length===t.length && t.length===bb.length){
+      return m.map(function(x,i){ return same(x,bb[i]) ? clone(t[i]) : (tie==='theirs'&&!same(t[i],bb[i]) ? clone(t[i]) : clone(x)); });
     }
     return clone(tie==='theirs'?t:m);
   }
   return clone(tie==='theirs'?t:m);
 }
-
-// 合併前先把每個專案補齊預設值（跟 getRow 一樣），避免「null vs 沒填」被誤判成有修改
+// 子項目固定編號：沒有編號的舊資料，用「專案｜母項目｜名稱｜第幾個同名」算出固定編號（每台電腦算出來都一樣）
+function hashStr(s){ let h=5381; for(let i=0;i<s.length;i++){ h=((h*33)^s.charCodeAt(i))>>>0; } return h.toString(36); }
+function ensureSubIds(pid,row){
+  const subs=row && row.subtasks; if(!isObj(subs)) return false;
+  let changed=false;
+  Object.keys(subs).forEach(function(parent){
+    const arr=subs[parent]; if(!Array.isArray(arr)) return;
+    const cnt={}; const used={};
+    arr.forEach(function(s){ if(isObj(s)&&s.id) used[s.id]=1; });
+    arr.forEach(function(s){
+      if(!isObj(s)) return;
+      const nm=String(s.name||''); cnt[nm]=(cnt[nm]||0)+1;
+      if(!s.id){ let id='s'+hashStr(pid+'|'+parent+'|'+nm+'|'+cnt[nm]); while(used[id]) id+='x'; s.id=id; used[id]=1; changed=true; }
+    });
+  });
+  return changed;
+}
+// 合併前先把每個專案補齊預設值、補上子項目編號，避免「null vs 沒填」或沒編號被誤判
 function normState(st){
-  const out={};
-  Object.keys(st||{}).forEach(k=>{
-    const v=st[k];
-    out[k]=(!k.startsWith('_') && isObj(v)) ? Object.assign({},v,rowDefaults(v)) : v;
+  const src=clone(st||{}); const out={};
+  Object.keys(src).forEach(function(k){
+    const v=src[k];
+    if(k.charAt(0)!=='_' && isObj(v)){ const r=Object.assign({},v,rowDefaults(v)); ensureSubIds(k,r); out[k]=r; }
+    else out[k]=v;
   });
   return out;
 }
 function mergeState(b,m,t,tie){
   const nb=normState(b), nm=normState(m), nt=normState(t);
-  // 某一邊還沒有這個專案的資料（例如第一次有人編輯）→ 當成空白預設列（專案列不會被刪除，所以這樣是安全的）
-  const rowKeys=new Set();
-  [nb,nm,nt].forEach(x=>Object.keys(x).forEach(k=>{ if(!k.startsWith('_') && isObj(x[k])) rowKeys.add(k); }));
-  rowKeys.forEach(k=>[nb,nm,nt].forEach(x=>{ if(!(k in x)) x[k]=rowDefaults({}); }));
+  // 某一邊還沒有這個專案的資料 → 當成空白預設列（專案列不會被刪除）
+  const rowKeys={};
+  [nb,nm,nt].forEach(function(x){ Object.keys(x).forEach(function(k){ if(k.charAt(0)!=='_' && isObj(x[k])) rowKeys[k]=1; }); });
+  Object.keys(rowKeys).forEach(function(k){ [nb,nm,nt].forEach(function(x){ if(!(k in x)) x[k]=rowDefaults({}); }); });
   return merge3(nb,nm,nt,tie);
 }
+// ===== 合併核心結束 =====
 
-let apiChecked=false;
+let apiChecked=false, apiVersion=0;
 async function ensureNewBackend(){
   // 每一次 POST 之前都確認（GET ?ping 對舊後端是無害的；POST 對舊後端等於覆寫資料）
   const r=await fetch(SHEET_API_URL+'?ping=1',{cache:'no-store'}); const j=await r.json();
-  if(!j || j.api!==2){
+  if(!j || !(j.api>=2)){
     oldBackend=true;
     setHint('⚠ 後端 Apps Script 還是舊版，為了保護資料，這個頁面暫停讀寫。請先部署新版 Apps Script。',true);
     throw new Error('old backend');
   }
-  apiChecked=true; oldBackend=false;
+  apiChecked=true; oldBackend=false; apiVersion=j.api;
 }
 function rowCount(st){ return Object.keys(st||{}).filter(k=>k[0]!=='_'&&st[k]&&typeof st[k]==='object'&&!Array.isArray(st[k])).length; }
 function looksWiped(remote){
@@ -2147,6 +2177,20 @@ async function doPersist(){
   if(same(state,lastSynced)) return;
   setSyncStatus('saving');
   try{
+    await ensureNewBackend();
+    if(apiVersion>=3){
+      // 新版：把「我的基準」和「我的版本」一起送到 Google，由 Google 在鎖定狀態下跟最新資料合併，不會有時間差
+      const pre=clone(lastSynced), mine=clone(state);
+      const res=await fetch(SHEET_API_URL,{method:"POST",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify({action:'write',code:loadCode(),base:pre,data:mine})});
+      const j=await res.json();
+      if(!j || j.ok!==true || !j.state || typeof j.state!=='object') throw new Error('write failed: '+(j&&j.error));
+      if(looksWiped(j.state)) throw new Error('remote looks wiped');
+      lastSynced=clone(j.state);
+      applyMerged(mergeState(mine,state,j.state));
+      localBackupSave();
+      setSyncStatus('ok');
+      return;
+    }
     let remote;
     try{ remote=await fetchRemote(); }catch(e){ throw e; }
     if(looksWiped(remote)) throw new Error('remote looks wiped');
