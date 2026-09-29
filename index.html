@@ -431,7 +431,8 @@ function rowDefaults(r0){
     startDate:r.startDate||null, endDate:r.endDate||null, eventDates:(r.eventDates||(r.eventDate?[r.eventDate]:[])).map(e=>typeof e==='string'?{date:e,label:''}:e), lastEdit:r.lastEdit||null, notes:r.notes||"",
     taskRenames:r.taskRenames||{}, taskDeletes:r.taskDeletes||[], taskOrder:r.taskOrder||[],
     tasks:r.tasks||{}, subtasks:r.subtasks||{}, custom:r.custom||[], receipts:r.receipts||[],
-    audienceOptions:(r.audienceOptions&&r.audienceOptions.length)?r.audienceOptions:["攤商","消費者","客戶","內部"]};
+    audienceOptions:(r.audienceOptions&&r.audienceOptions.length)?r.audienceOptions:["攤商","消費者","客戶","內部"],
+    catOverride:r.catOverride||null, deleted:!!r.deleted};
 }
 function isStaff(n){return TEAM_STAFF.includes(n);}
 function isVendor(n){ return !!n && !TEAM.includes(n); }
@@ -487,7 +488,40 @@ function refreshAll(){
   const fin=state._fin||{};
   const builtins=PROJECTS.map(p=>Object.assign({},p,{rev:fin[p.id]?fin[p.id].rev:null, plan:fin[p.id]?fin[p.id].plan:null}));
   const customs=(state._customProjects||[]).map(c=>({id:c.id,cat:c.cat,name:c.name,rev:(c.rev===undefined?null:c.rev)}));
-  ALLP=builtins.concat(customs);
+  const all=builtins.concat(customs).map(p=>{ const r=state[p.id]||{}; return r.catOverride?Object.assign({},p,{cat:r.catOverride,origCat:p.cat}):p; });
+  DELETEDP=all.filter(p=>(state[p.id]||{}).deleted);
+  ALLP=all.filter(p=>!(state[p.id]||{}).deleted);
+}
+let DELETEDP=[], showDeleted=false;
+function isAdmin(){ return finLevel()==='admin'; }
+window.setProjectCat=async function(pid,val){
+  const p=ALLP.find(x=>x.id===pid); if(!p) return;
+  let cat=val;
+  if(val==='__new__'){ const v=prompt('新類別名稱：'); if(!v||!v.trim()){ render(); return; } cat=v.trim(); }
+  const orig=p.origCat||p.cat;
+  const cur=getRow(pid); state[pid]=Object.assign({},cur,{catOverride:(cat===orig?null:cat)}); touch(pid);
+  if(catFilter!=="全部" && catFilter!==cat) catFilter="全部";
+  render(); await persist();
+};
+window.deleteProject=async function(pid){
+  const p=ALLP.find(x=>x.id===pid); if(!p) return;
+  if(!confirm(`確定要刪除「${getName(p)}」嗎？\n\n刪除後大家都看不到這個專案。之後可以在頁面最下方「已刪除的專案」還原。`)) return;
+  const cur=getRow(pid); state[pid]=Object.assign({},cur,{deleted:true,deletedAt:Date.now(),deletedBy:myName()||''}); touch(pid);
+  expanded.delete(pid);
+  render(); await persist();
+};
+window.restoreProject=async function(pid){
+  const cur=getRow(pid); const nx=Object.assign({},cur,{deleted:false}); delete nx.deletedAt; delete nx.deletedBy;
+  state[pid]=nx; touch(pid); render(); await persist();
+};
+window.toggleShowDeleted=function(){ showDeleted=!showDeleted; renderProjectView(); };
+function deletedListHtml(){
+  if(!isAdmin() || !DELETEDP.length) return '';
+  const rows=DELETEDP.map(p=>{ const r=state[p.id]||{}; return `<div class="prow" style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
+      <span><span class="cat">${esc(p.cat)}</span> ${esc(getName(p))} <span class="small">・${r.deletedBy?esc(r.deletedBy)+' ':''}${r.deletedAt?relTime(r.deletedAt)+'刪除':''}</span></span>
+      <button class="mini" onclick="restoreProject('${p.id}')">↩ 還原</button></div>`; }).join('');
+  return `<div style="margin-top:14px;"><button class="mini" onclick="toggleShowDeleted()">${showDeleted?'▾':'▸'} 已刪除的專案（${DELETEDP.length}）</button>
+    ${showDeleted?`<div class="priority plain" style="margin-top:6px;">${rows}</div>`:''}</div>`;
 }
 function sortedAll(){ return ALLP.slice().sort((a,b)=>new Date(getRange(a).end)-new Date(getRange(b).end) || getEstRev(b)-getEstRev(a)); }
 function visibleProjects(){
@@ -1424,6 +1458,8 @@ function detailRow(p){
   const basicPane=`
     <div class="basicgrid">
       <label style="max-width:420px;">專案名稱<input type="text" value="${esc(getName(p))}" onchange="saveName('${p.id}',this.value)"></label>
+      ${isAdmin()?`<label>類別<select onchange="setProjectCat('${p.id}',this.value)">${[...new Set([...allCats(),p.cat])].map(c=>`<option value="${esc(c)}" ${c===p.cat?'selected':''}>${esc(c)}</option>`).join('')}<option value="__new__">＋ 新增類別…</option></select></label>
+      <label>&nbsp;<button class="mini danger" onclick="deleteProject('${p.id}')" style="white-space:nowrap;">🗑 刪除專案</button></label>`:''}
     </div>
     ${finOK(p)?`<div class="small" style="font-weight:600;margin:12px 0 4px;color:var(--accent2);">金額</div>
     <div class="basicgrid">
@@ -1531,7 +1567,7 @@ function renderProjectView(){
   }).join("");
   document.getElementById("view").innerHTML=`<div class="wrap"><table>
     <thead><tr><th>類別</th><th>專案名稱</th>${showFinCols?`<th>預估營收<span style="text-transform:none;font-weight:400;">（未稅）</span></th><th>實際收款</th><th>累積成本</th><th>專案毛利</th>`:''}<th>執行期間/急迫</th><th>任務進度</th><th>狀態</th><th>負責人</th></tr></thead>
-    <tbody>${rows}</tbody></table></div>`;
+    <tbody>${rows}</tbody></table></div>${deletedListHtml()}`;
 }
 
 function personInvolved(t){
@@ -2082,9 +2118,11 @@ function setSyncStatus(kind){
 function changedProjectsSummary(prev,next){
   const keys=new Set([...Object.keys(prev||{}),...Object.keys(next||{})]);
   const items=[];
+  const np=normState(prev||{}), nn=normState(next||{});
   keys.forEach(k=>{
     if(k.startsWith('_')) return;
-    if(same(prev[k],next[k])) return;
+    // 只算真正有人改的內容（系統自動補上的預設欄位、子項目編號不算）
+    if(same(np[k]||normState({[k]:{}})[k], nn[k]||normState({[k]:{}})[k])) return;
     const by=(next[k]&&next[k].lastEdit&&next[k].lastEdit.by)||'';
     if(by && whoAmI && by===whoAmI) return;
     const p=getProject(k) || ((next._customProjects||[]).find(c=>c.id===k));
