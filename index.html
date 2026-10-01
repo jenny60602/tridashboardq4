@@ -189,8 +189,23 @@ tr.rowopen td:first-child{box-shadow:inset 4px 0 0 var(--accent2);}
 .chartcol{display:flex;flex-direction:column;align-items:center;flex:1;}
 .chartstack{width:100%;display:flex;flex-direction:column-reverse;border-radius:4px 4px 0 0;overflow:hidden;}
 .chartbar{width:100%;}
-.chartbar.confirmed{background:var(--accent);}
-.chartbar.estimated{background:var(--line);}
+.chartbar.confirmed,.chartbar.paid{background:var(--accent);}
+.chartbar.issued{background:#8fb28f;}
+.chartbar.estimated,.chartbar.est{background:var(--line);}
+.chartbar.expected{background:#cfe0cf;}
+.lg{display:inline-block;width:10px;height:10px;border-radius:2px;margin:0 3px -1px 6px;}
+.lg.paid{background:var(--accent);} .lg.issued{background:#8fb28f;} .lg.est{background:var(--line);} .lg.expected{background:#cfe0cf;}
+.secthead{display:flex;align-items:baseline;gap:10px;font-weight:700;color:var(--accent2);margin:16px 0 6px;padding-bottom:4px;border-bottom:1px solid var(--line);font-size:.85rem;}
+.secthead .small{font-weight:400;color:var(--sub);}
+.calcbox{padding:5px 8px;border:1px dashed var(--line);border-radius:6px;font-weight:600;min-width:90px;}
+.slottable{border-collapse:collapse;width:100%;max-width:980px;font-size:.78rem;}
+.slottable th{text-align:left;font-weight:600;color:var(--sub);padding:4px 6px;border-bottom:1px solid var(--line);white-space:nowrap;}
+.slottable td{padding:4px 6px;border-bottom:1px dashed var(--line);vertical-align:middle;}
+.slottable td:first-child{white-space:nowrap;font-weight:600;}
+.slottable input[type=text],.slottable input[type=number]{width:100%;min-width:90px;}
+.slottable tr.paidrow td{background:rgba(46,125,50,.07);}
+.paidcell{display:flex;align-items:center;gap:6px;white-space:nowrap;}
+.paidtag{color:#fff;background:var(--ok);padding:2px 8px;border-radius:10px;font-size:.75rem;}
 </style>
 </head>
 <body>
@@ -432,7 +447,8 @@ function rowDefaults(r0){
     taskRenames:r.taskRenames||{}, taskDeletes:r.taskDeletes||[], taskOrder:r.taskOrder||[],
     tasks:r.tasks||{}, subtasks:r.subtasks||{}, custom:r.custom||[], receipts:r.receipts||[],
     audienceOptions:(r.audienceOptions&&r.audienceOptions.length)?r.audienceOptions:["攤商","消費者","客戶","內部"],
-    catOverride:r.catOverride||null, deleted:!!r.deleted};
+    catOverride:r.catOverride||null, deleted:!!r.deleted,
+    invoices:r.invoices||[], costLink:r.costLink||"", relatedParty:!!r.relatedParty};
 }
 function isStaff(n){return TEAM_STAFF.includes(n);}
 function isVendor(n){ return !!n && !TEAM.includes(n); }
@@ -447,6 +463,10 @@ function collaboratorsOf(p){
   return [...set];
 }
 function isNonOp(p){ return p.cat==="政府"; }
+function isRelated(p){ return !!(state[p.id]&&state[p.id].relatedParty); }
+// 營收分組：關係人交易（財務勾選）優先，其次營業外（政府），其餘為核心營收
+function revGroup(p){ return isRelated(p)?'rel':(isNonOp(p)?'nonop':'core'); }
+const REV_GROUPS=[['core','核心營收小計'],['rel','關係人交易小計'],['nonop','營業外收入小計']];
 function selStyle(n){ if(!n) return ''; if(isVendor(n)) return 'background:#f3e6c4;'; return isStaff(n)?'background:#dfe9df;':'background:#f4e3c9;'; }
 const AUDIENCE_COLORS={"攤商":"#f3e6c4","消費者":"#d6e6f0","客戶":"#e6dcf0","內部":"#dfe9df"};
 const AUDIENCE_LETTER={"攤商":"攤","消費者":"消","客戶":"客","內部":"內"};
@@ -664,16 +684,78 @@ function getReceipts(id){
   if(r.actual!==null && r.actual!=='') return [{amount:Number(r.actual), month:r.invoiceMonth||null}];
   return [];
 }
-function totalActual(p){ return getReceipts(p.id).reduce((s,x)=>s+Number(x.amount||0),0); }
-function diffLabel(p){
-  const list=getReceipts(p.id);
-  if(!list.length) return `<span class="diff wait">尚未登錄</span>`;
-  const total=totalActual(p);
-  const diff=total-getEstRev(p);
-  if(diff<0) return `<span class="diff short">短收 ${fmt(-diff)}</span>`;
-  if(diff>0) return `<span class="diff over">超收 ${fmt(diff)}</span>`;
-  return `<span class="diff over">✓ 相符</span>`;
+// ===== 收款方式 → 期數；認列預估、發票開立都依期數出現對應格數 =====
+function slotCount(r){
+  if(r.paymentMethod==='一次付清') return 1;
+  if(r.paymentMethod==='訂金+尾款') return 2;
+  if(r.paymentMethod==='自訂分期') return Math.max(1,Math.min(24,Number(r.installmentCount)||2));
+  // 還沒選收款方式：沿用已經填過的格數
+  return Math.max(1,(r.estPlan||[]).length,(r.invoices||[]).length);
 }
+function slotName(r,i){
+  const n=slotCount(r);
+  if(r.paymentMethod==='訂金+尾款') return i===0?'訂金':'尾款';
+  if(n===1) return '全額';
+  return `第 ${i+1} 期`;
+}
+const EMPTY_INV={date:'',no:'',amount:null,dueDate:'',paid:false,paidDate:''};
+function legacyInvoices(p){ // 舊的「實際收款」資料 → 視為已開發票（月份沿用）
+  return getReceipts(p.id).map(rc=>Object.assign({},EMPTY_INV,{amount:Number(rc.amount||0)||null, month:rc.month||null}));
+}
+function rawInvoices(p){ const r=getRow(p.id); return (r.invoices&&r.invoices.length)? r.invoices : legacyInvoices(p); }
+function getInvSlots(p){ const r=getRow(p.id), n=slotCount(r), src=rawInvoices(p); return Array.from({length:n},(_,i)=>Object.assign({},EMPTY_INV,src[i]||{})); }
+function getEstSlots(p){ const r=getRow(p.id), n=slotCount(r), src=r.estPlan||[]; return Array.from({length:n},(_,i)=>Object.assign({month:null,amount:null},src[i]||{})); }
+function isIssued(v){ return !!v && Number(v.amount||0)>0 && !!(v.date||v.month); }
+function totalActual(p){ return getInvSlots(p).filter(isIssued).reduce((s,x)=>s+Number(x.amount||0),0); }   // 已開發票
+function totalPaid(p){ return getInvSlots(p).filter(v=>isIssued(v)&&v.paid).reduce((s,x)=>s+Number(x.amount||0),0); } // 已收款
+function canMarkPaid(){ return isFinAll(); }
+function chartMonthOf(iso){
+  if(!iso) return null; const y=Number(iso.slice(0,4)), m=Number(iso.slice(5,7));
+  if(y===REF_YEAR && m>=9) return m; if(y===REF_YEAR+1 && m<=3) return m; return null;
+}
+function diffLabel(p){
+  const issued=totalActual(p);
+  if(!issued) return `<span class="diff wait">尚未開發票</span>`;
+  const diff=issued-(getEstRev(p)||0);
+  if(diff<0) return `<span class="diff short">未開 ${fmt(-diff)}</span>`;
+  if(diff>0) return `<span class="diff over">超開 ${fmt(diff)}</span>`;
+  return `<span class="diff over">✓ 全數開立</span>`;
+}
+// 每個專案的按月金額：mode='rev' 營收認列（預估 → 已開發票 → 已收款），mode='cash' 現金收款（已收款／預計收款）
+function projectEntries(p, mode){
+  const r=getRow(p.id), n=slotCount(r);
+  const hasInv=!!(r.invoices&&r.invoices.length);
+  const inv=getInvSlots(p);
+  const fm=r.revMonth || Number(getRange(p).end.split('-')[1]);
+  const invMonth=v=> v.date ? chartMonthOf(v.date) : ((v.month && CHART_MONTHS.includes(v.month)) ? v.month : (CHART_MONTHS.includes(fm)?fm:null));
+  const out=[];
+  if(mode==='cash'){
+    inv.forEach(v=>{ if(!isIssued(v)) return; const a=Number(v.amount);
+      if(v.paid){ const m=chartMonthOf(v.paidDate)||invMonth(v); if(m) out.push({m,amount:a,kind:'paid'}); }
+      else if(v.dueDate){ const m=chartMonthOf(v.dueDate); if(m) out.push({m,amount:a,kind:'expected'}); }
+    });
+    return out;
+  }
+  let issuedSum=0; const usedSlot=new Set(), usedMonth=new Set();
+  inv.forEach((v,i)=>{ if(!isIssued(v)) return; const a=Number(v.amount), m=invMonth(v); issuedSum+=a; usedSlot.add(i); if(m){ usedMonth.add(m); out.push({m,amount:a,kind:v.paid?'paid':'issued'}); } });
+  const est=getEstSlots(p);
+  const estFilled=est.some(e=>Number(e.amount)>0 && e.month);
+  if(estFilled){
+    est.forEach((e,i)=>{ if(!(Number(e.amount)>0 && e.month)) return; if(hasInv ? usedSlot.has(i) : usedMonth.has(e.month)) return; if(CHART_MONTHS.includes(e.month)) out.push({m:e.month,amount:Number(e.amount),kind:'est'}); });
+  } else if(!hasInv){
+    // 舊資料：沿用原本的估算方式（原始月份規劃或截止日）
+    const plan=r.revMonth?null:planScaled(p);
+    if(plan){ [9,10,11,12].forEach((m,i)=>{ if(plan[i] && !usedMonth.has(m)) out.push({m,amount:plan[i],kind:'est'}); }); }
+    else if(!usedMonth.has(fm) && CHART_MONTHS.includes(fm) && getEstRev(p)) out.push({m:fm,amount:getEstRev(p),kind:'est'});
+  } else {
+    const remaining=Math.max(0,(getEstRev(p)||0)-issuedSum);
+    if(remaining>0 && CHART_MONTHS.includes(fm)) out.push({m:fm,amount:remaining,kind:'est'});
+  }
+  return out;
+}
+let finMode='rev';
+window.setFinMode=function(m){ finMode=m; renderPriority(); };
+const KIND_LABEL={est:'預估',issued:'已開發票',paid:'已收款',expected:'預計收款'};
 
 function touch(pid){ const cur=state[pid]||{}; state[pid]=Object.assign({},cur,{lastEdit:{by:whoAmI||'',at:Date.now()}}); }
 
@@ -828,7 +910,7 @@ function renderPriority(){
     {key:'pay', label:`待收款 (${payGroup.length})`, body:payBody},
   ];
   const projectTabs= anyFin() ? [
-    {key:'month', label: isFinAll()?`月營收分布`:`月營收分布（我負責的專案）`, body:monthlyChartBody()},
+    {key:'month', label: isFinAll()?`專案財務預估表`:`專案財務預估表（我負責的專案）`, body:monthlyChartBody()},
   ] : [];
   if(view!=="person" && !projectTabs.length){ box.innerHTML=''; return; }
   const tabs = view==="person" ? personTabs : projectTabs;
@@ -840,82 +922,24 @@ function renderPriority(){
 const CHART_MONTHS=[9,10,11,12,1,2,3];
 function monthLabel(m){ return m<=3? `2027/${m}` : `${m}月`; }
 function monthOptsQ(sel){ let s='<option value="">未填</option>'; CHART_MONTHS.forEach(m=>{ s+=`<option value="${m}" ${sel===m?'selected':''}>${monthLabel(m)}</option>`; }); return s; }
-function monthContributions(m){
-  const list=[];
-  FINP().forEach(p=>{
-    const pr=getRow(p.id);
-    const receipts=getReceipts(p.id);
-    const fm=pr.revMonth || Number(getRange(p).end.split('-')[1]);
-    const confirmedMonths=new Set();
-    let confirmedAmt=0;
-    receipts.forEach(rc=>{
-      const amt=Number(rc.amount||0);
-      const mm=(rc.month && CHART_MONTHS.includes(rc.month)) ? rc.month : fm;
-      confirmedMonths.add(mm);
-      if(mm===m) confirmedAmt+=amt;
-    });
-    if(confirmedAmt>0) list.push({p, amount:confirmedAmt, confirmed:true});
-    if(!confirmedMonths.has(m)){
-      if(pr.estPlan && pr.estPlan.length){
-        const e=pr.estPlan.find(x=>x.month===m);
-        if(e && Number(e.amount)) list.push({p, amount:Number(e.amount), confirmed:false});
-      } else if(!pr.revMonth){
-        const plan=planScaled(p);
-        if(plan){
-          const idx=[9,10,11,12].indexOf(m);
-          if(idx>=0 && plan[idx]) list.push({p, amount:plan[idx], confirmed:false});
-        } else if(fm===m && getEstRev(p)) list.push({p, amount:getEstRev(p), confirmed:false});
-      } else if(fm===m && getEstRev(p)){
-        list.push({p, amount:getEstRev(p), confirmed:false});
-      }
-    }
-  });
+function monthContributions(m, mode){
+  const md=mode||finMode; const list=[];
+  FINP().forEach(p=>projectEntries(p,md).forEach(e=>{ if(e.m===m) list.push({p, amount:e.amount, kind:e.kind, confirmed:(e.kind==='paid'||e.kind==='issued')}); }));
   return list.sort((a,b)=>b.amount-a.amount);
 }
 let monthTableOpen=false, monthCatTableExpanded=new Set();
 window.toggleAllMonths=function(){ monthTableOpen=!monthTableOpen; renderPriority(); };
 window.toggleMonthCatTable=function(cat){ monthCatTableExpanded.has(cat)?monthCatTableExpanded.delete(cat):monthCatTableExpanded.add(cat); renderPriority(); };
-function monthlyTotals(){
-  const confirmed={}, estimated={}; CHART_MONTHS.forEach(m=>{confirmed[m]=0;estimated[m]=0;});
-  const coreByM={}, nonOpByM={}; CHART_MONTHS.forEach(m=>{coreByM[m]=0;nonOpByM[m]=0;});
-  FINP().forEach(p=>{
-    const pr=getRow(p.id);
-    const nonOp=isNonOp(p);
-    const receipts=getReceipts(p.id);
-    const fm=pr.revMonth || Number(getRange(p).end.split('-')[1]);
-    const confirmedMonths=new Set();
-    receipts.forEach(rc=>{
-      const amt=Number(rc.amount||0);
-      const m=(rc.month && confirmed[rc.month]!==undefined) ? rc.month : fm;
-      if(confirmed[m]===undefined) return;
-      confirmed[m]+=amt;
-      confirmedMonths.add(m);
-      if(nonOp) nonOpByM[m]+=amt; else coreByM[m]+=amt;
-    });
-    const plan=(pr.estPlan&&pr.estPlan.length) ? null : (pr.revMonth ? null : planScaled(p));
-    if(pr.estPlan && pr.estPlan.length){
-      pr.estPlan.forEach(e=>{
-        if(estimated[e.month]===undefined) return;
-        if(!confirmedMonths.has(e.month)){ estimated[e.month]+=Number(e.amount||0); if(nonOp) nonOpByM[e.month]+=Number(e.amount||0); else coreByM[e.month]+=Number(e.amount||0); }
-      });
-    } else if(plan){
-      [9,10,11,12].forEach((m,i)=>{
-        if(!confirmedMonths.has(m)){ estimated[m]+=plan[i]; if(nonOp) nonOpByM[m]+=plan[i]; else coreByM[m]+=plan[i]; }
-      });
-    } else if(!confirmedMonths.has(fm) && estimated[fm]!==undefined){
-      estimated[fm]+=getEstRev(p); if(nonOp) nonOpByM[fm]+=getEstRev(p); else coreByM[fm]+=getEstRev(p);
-    }
-  });
-  const totals={}; CHART_MONTHS.forEach(m=>totals[m]=confirmed[m]+estimated[m]);
-  const q4Total=[9,10,11,12].reduce((s,m)=>s+totals[m],0);
-  const q1Total=[1,2,3].reduce((s,m)=>s+totals[m],0);
-  const q4Confirmed=[9,10,11,12].reduce((s,m)=>s+confirmed[m],0);
-  const q1Confirmed=[1,2,3].reduce((s,m)=>s+confirmed[m],0);
-  const q4Core=[9,10,11,12].reduce((s,m)=>s+coreByM[m],0);
-  const q4NonOp=[9,10,11,12].reduce((s,m)=>s+nonOpByM[m],0);
-  const q1Core=[1,2,3].reduce((s,m)=>s+coreByM[m],0);
-  const q1NonOp=[1,2,3].reduce((s,m)=>s+nonOpByM[m],0);
-  return {confirmed, estimated, totals, q4Total, q1Total, q4Confirmed, q1Confirmed, q4Core, q4NonOp, q1Core, q1NonOp};
+function monthlyTotals(mode){
+  const md=mode||'rev';
+  const z=()=>{ const o={}; CHART_MONTHS.forEach(m=>o[m]=0); return o; };
+  const byKind={est:z(),issued:z(),paid:z(),expected:z()}, coreByM=z(), nonOpByM=z(), relByM=z();
+  FINP().forEach(p=>{ const g=revGroup(p); projectEntries(p,md).forEach(e=>{ byKind[e.kind][e.m]+=e.amount; (g==='rel'?relByM:g==='nonop'?nonOpByM:coreByM)[e.m]+=e.amount; }); });
+  const confirmed=z(), estimated=z(), totals=z();
+  CHART_MONTHS.forEach(m=>{ confirmed[m]=byKind.paid[m]+byKind.issued[m]; estimated[m]=byKind.est[m]+byKind.expected[m]; totals[m]=confirmed[m]+estimated[m]; });
+  const sum=(o,ms)=>ms.reduce((s2,m)=>s2+o[m],0), Q4=[9,10,11,12], Q1=[1,2,3];
+  return {byKind, confirmed, estimated, totals, q4Total:sum(totals,Q4), q1Total:sum(totals,Q1), q4Confirmed:sum(confirmed,Q4), q1Confirmed:sum(confirmed,Q1),
+    q4Core:sum(coreByM,Q4), q4NonOp:sum(nonOpByM,Q4), q1Core:sum(coreByM,Q1), q1NonOp:sum(nonOpByM,Q1), q4Rel:sum(relByM,Q4), q1Rel:sum(relByM,Q1), q4Paid:sum(byKind.paid,Q4), q1Paid:sum(byKind.paid,Q1)};
 }
 function monthCategoryTableHtml(){
   const cats=[]; const data={}; const projData={};
@@ -959,49 +983,52 @@ function monthCategoryTableHtml(){
     return headerLine+projLines;
   }).join('');
   const totalCells=CHART_MONTHS.map((m,mi)=>monthCell(`<b>${fmt(colTotal(m))}</b>`,mi)).join('');
-  const coreCats=cats.filter(c=>c!=="政府"), nonOpCats=cats.filter(c=>c==="政府");
-  const coreSum=m=>coreCats.reduce((s,c)=>s+(data[c][m]||0),0);
-  const nonOpSum=m=>nonOpCats.reduce((s,c)=>s+(data[c][m]||0),0);
-  const coreTotal=CHART_MONTHS.reduce((s,m)=>s+coreSum(m),0);
-  const nonOpTotal=CHART_MONTHS.reduce((s,m)=>s+nonOpSum(m),0);
-  const coreCells=CHART_MONTHS.map((m,mi)=>monthCell(fmt(coreSum(m)),mi)).join('');
-  const nonOpCells=CHART_MONTHS.map((m,mi)=>monthCell(fmt(nonOpSum(m)),mi)).join('');
-  const subtotalRows=`<div class="mtable-row" style="padding:4px 0;border-top:1px solid var(--line);color:var(--sub);">
-      <div>核心營收小計</div>${coreCells}<div style="text-align:right;">${fmt(coreTotal)}</div>
-    </div>
-    <div class="mtable-row" style="padding:4px 0;color:var(--sub);">
-      <div>營業外收入小計</div>${nonOpCells}<div style="text-align:right;">${fmt(nonOpTotal)}</div>
+  const allProj=[]; cats.forEach(c=>Object.values(projData[c]).forEach(pd=>allProj.push(pd)));
+  const grpSum=(g,m)=>allProj.filter(pd=>revGroup(pd.p)===g).reduce((s2,pd)=>s2+(pd.monthly[m]||0),0);
+  const subtotalRows=REV_GROUPS.map(([g,label],gi)=>{
+    const cells=CHART_MONTHS.map((m,mi)=>monthCell(fmt(grpSum(g,m)),mi)).join('');
+    const tot=CHART_MONTHS.reduce((s2,m)=>s2+grpSum(g,m),0);
+    return `<div class="mtable-row" style="padding:4px 0;${gi===0?'border-top:1px solid var(--line);':''}color:var(--sub);">
+      <div>${label}</div>${cells}<div style="text-align:right;">${fmt(tot)}</div>
     </div>`;
+  }).join('');
   const totalRow=`<div class="mtable-row" style="padding:4px 0;">
     <div style="font-weight:600;">合計</div>${totalCells}<div style="text-align:right;font-weight:600;">${fmt(grandTotal)}</div>
   </div>`;
   return `<div style="overflow-x:auto;margin-top:8px;font-size:.78rem;">${headerRow}${bodyRows}${subtotalRows}${totalRow}</div>`;
 }
 function monthlyChartBody(){
-  const {confirmed, estimated, totals, q4Total, q1Total}=monthlyTotals();
+  const mt=monthlyTotals(finMode); const {byKind, totals, q4Total, q1Total}=mt;
   const max=Math.max(...Object.values(totals),1);
+  const segs = finMode==='cash' ? [['paid','paid'],['expected','expected']] : [['paid','paid'],['issued','issued'],['est','est']];
   const chartHtml=CHART_MONTHS.map((m,mi)=>{
-    const totalH=Math.max(4,Math.round(totals[m]/max*70));
-    const confH=totals[m]?Math.round(confirmed[m]/totals[m]*totalH):0;
-    const estH=totalH-confH;
-    return `<div style="cursor:pointer;display:flex;flex-direction:column;align-items:center;${mi===4?'border-left:1px dashed var(--line);padding-left:8px;':''}" onclick="toggleAllMonths()">
-          <div class="chartstack">
-            <div class="chartbar estimated" style="height:${estH}px;"></div>
-            <div class="chartbar confirmed" style="height:${confH}px;"></div>
-          </div>
+    const totalH=totals[m]?Math.max(4,Math.round(totals[m]/max*70)):4;
+    const parts=segs.map(([k,cls])=>({cls, h: totals[m]? Math.round(byKind[k][m]/totals[m]*totalH) : 0}));
+    return `<div style="cursor:pointer;display:flex;flex-direction:column;align-items:center;${mi===4?'border-left:1px dashed var(--line);padding-left:8px;':''}" onclick="toggleAllMonths()" title="${segs.map(([k])=>KIND_LABEL[k]+' '+fmt(byKind[k][m])).join('\n')}">
+          <div class="chartstack">${parts.map(x=>`<div class="chartbar ${x.cls}" style="height:${x.h}px;"></div>`).join('')}${totals[m]?'':'<div class="chartbar est" style="height:4px;"></div>'}</div>
           <div class="small" style="margin-top:4px;">${monthLabel(m)}</div>
           <div class="small">${fmt(totals[m])}</div>
         </div>`;
   }).join('');
   const detailHtml=monthTableOpen? monthCategoryTableHtml() : '';
-  return `<div class="small" style="margin-bottom:6px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-      <span>2026Q4 合計：${fmt(q4Total)}　｜　2027Q1 合計：${fmt(q1Total)}</span>
+  const legend = finMode==='cash'
+    ? `<span class="lg paid"></span>已收款（依實際收款日）　<span class="lg expected"></span>預計收款（已開發票、依預計收款日）`
+    : `<span class="lg paid"></span>已收款　<span class="lg issued"></span>已開發票、未收款　<span class="lg est"></span>預估（尚未開發票）`;
+  const paidQ4=[9,10,11,12].reduce((s2,m)=>s2+byKind.paid[m],0), paidQ1=[1,2,3].reduce((s2,m)=>s2+byKind.paid[m],0);
+  return `<h3 style="margin:0 0 6px;font-size:1rem;">📊 專案財務預估表${isFinAll()?'':'<span class="small" style="font-weight:400;">（我負責的專案）</span>'}</h3>
+    <div class="dtabs" style="margin-bottom:6px;">
+      <button class="dtab ${finMode==='rev'?'active':''}" onclick="setFinMode('rev')">營收認列</button>
+      <button class="dtab ${finMode==='cash'?'active':''}" onclick="setFinMode('cash')">現金收款</button>
+    </div>
+    <div class="small" style="margin-bottom:6px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+      <span>${finMode==='cash'?'現金流入':'認列'}｜2026Q4：${fmt(q4Total)}（已收 ${fmt(paidQ4)}）　2027Q1：${fmt(q1Total)}（已收 ${fmt(paidQ1)}）</span>
       <button class="mini" onclick="toggleAllMonths()">${monthTableOpen?'收合明細':'展開明細'}</button>
-      <button class="mini" onclick="exportMonthlyExcel()" title="下載你目前看得到的按月認列資料">⬇ 下載 Excel</button>
+      <button class="mini" onclick="exportMonthlyExcel()" title="下載你目前看得到的資料（營收認列與現金收款）">⬇ 下載 Excel</button>
     </div>
     <div class="mtable-row" style="align-items:flex-end;margin-bottom:10px;"><div></div>${chartHtml}<div></div></div>
     ${detailHtml}
-    <div class="small" style="margin-top:6px;">淺色＝預估；深色＝已在「實際收款」登錄發票，取代預估（不重複累加）。2027年1-3月為Q1（虛線右側）。點長條或按鈕看各類別／專案貢獻金額。</div>`;
+    <div class="small" style="margin-top:6px;">${legend}</div>
+    <div class="small" style="margin-top:2px;">${finMode==='cash'?'只計算已開發票的款項：收到款（財務勾選「已收款」）算在實際收款月份；還沒收到的算在預計收款月份。':'每一期：開了發票就改用發票金額與開立月份；財務勾選「已收款」後變深綠色；還沒開發票的用「認列預估」。'}2027年1-3月為Q1（虛線右側）。點長條或按鈕看各類別／專案明細。</div>`;
 }
 // ================= 按月認列：下載 Excel =================
 // 只匯出目前登入的人看得到的專案（FINP()），跟畫面一致。
@@ -1010,101 +1037,95 @@ function loadXlsx(){
   if(window.XLSX) return Promise.resolve(window.XLSX);
   return new Promise((res,rej)=>{ const sc=document.createElement('script'); sc.src=XLSX_URL; sc.onload=()=>res(window.XLSX); sc.onerror=()=>rej(new Error('無法載入 Excel 元件')); document.head.appendChild(sc); });
 }
-function monthlyExportData(){
+function monthlyExportData(mode){
   const cats=[], data={}, projData={}, detail=[];
   CHART_MONTHS.forEach(m=>{
-    monthContributions(m).forEach(x=>{
+    monthContributions(m,mode).forEach(x=>{
       const cat=x.p.cat;
       if(!data[cat]){ data[cat]={}; cats.push(cat); projData[cat]={}; }
       data[cat][m]=(data[cat][m]||0)+x.amount;
       if(!projData[cat][x.p.id]) projData[cat][x.p.id]={p:x.p, monthly:{}};
       projData[cat][x.p.id].monthly[m]=(projData[cat][x.p.id].monthly[m]||0)+x.amount;
-      detail.push({m, p:x.p, amount:x.amount, confirmed:x.confirmed});
+      detail.push({m, p:x.p, amount:x.amount, kind:x.kind});
     });
   });
-  const rowTotal=cat=>CHART_MONTHS.reduce((s,m)=>s+(data[cat][m]||0),0);
+  const rowTotal=cat=>CHART_MONTHS.reduce((s2,m)=>s2+(data[cat][m]||0),0);
   cats.sort((a,b)=>rowTotal(b)-rowTotal(a));
   return {cats,data,projData,detail,rowTotal};
 }
 window.exportMonthlyExcel=async function(){
   let X; try{ X=await loadXlsx(); }catch(e){ alert('下載元件載入失敗，請確認網路後再試一次。'); return; }
-  const {cats,data,projData,detail,rowTotal}=monthlyExportData();
   const who=myName()||'未登入';
   const scope=isFinAll()?'全公司':'你負責的專案';
   const now=new Date(); const stamp=`${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
-  const mLabels=CHART_MONTHS.map(monthLabel);
-  const NUM='#,##0';
-  // --- 工作表1：按月認列（跟畫面上的表格一樣：類別 → 專案） ---
-  const aoa=[
-    ['三小市集 按月認列營收（未稅，估+實收）'],
-    [`下載者：${who}　範圍：${scope}　下載時間：${stamp}`],
-    ['說明：已登錄實際收款的月份用實收金額，其餘為預估；2027/1–3 為 2027Q1。'],
-    [],
-    ['類別','專案','負責人',...mLabels,'合計'],
-  ];
-  const numRows=[];
-  cats.forEach(cat=>{
-    numRows.push(aoa.length);
-    aoa.push([cat,'（類別小計）','',...CHART_MONTHS.map(m=>data[cat][m]||0),rowTotal(cat)]);
-    Object.values(projData[cat]).sort((a,b)=>CHART_MONTHS.reduce((s,m)=>s+(b.monthly[m]||0),0)-CHART_MONTHS.reduce((s,m)=>s+(a.monthly[m]||0),0)).forEach(pd=>{
-      numRows.push(aoa.length);
-      aoa.push(['',getName(pd.p),getRow(pd.p.id).assignee||'',...CHART_MONTHS.map(m=>pd.monthly[m]||0),CHART_MONTHS.reduce((s,m)=>s+(pd.monthly[m]||0),0)]);
+  const mLabels=CHART_MONTHS.map(monthLabel), NUM='#,##0';
+  const fmtCells=(ws,rows,cols)=>{ rows.forEach(r=>cols.forEach(c=>{ const ref=X.utils.encode_cell({r,c}); if(ws[ref]&&typeof ws[ref].v==='number') ws[ref].z=NUM; })); };
+  const monthSheet=(mode,title,note)=>{
+    const {cats,data,projData,rowTotal}=monthlyExportData(mode);
+    const aoa=[[title],[`下載者：${who}　範圍：${scope}　下載時間：${stamp}`],[note],[],['類別','專案','負責人',...mLabels,'合計']];
+    const numRows=[];
+    cats.forEach(cat=>{
+      numRows.push(aoa.length); aoa.push([cat,'（類別小計）','',...CHART_MONTHS.map(m=>data[cat][m]||0),rowTotal(cat)]);
+      const tot=pd=>CHART_MONTHS.reduce((s2,m)=>s2+(pd.monthly[m]||0),0);
+      Object.values(projData[cat]).sort((a,b)=>tot(b)-tot(a)).forEach(pd=>{ numRows.push(aoa.length); aoa.push(['',getName(pd.p),getRow(pd.p.id).assignee||'',...CHART_MONTHS.map(m=>pd.monthly[m]||0),tot(pd)]); });
+    });
+    const sumBy=f=>CHART_MONTHS.map(m=>cats.filter(f).reduce((s2,cat)=>s2+(data[cat][m]||0),0)), t=a=>a.reduce((s2,v)=>s2+v,0);
+    const all=sumBy(()=>true);
+    const grpBy=g=>CHART_MONTHS.map(m=>cats.reduce((s2,cat)=>s2+Object.values(projData[cat]).filter(pd=>revGroup(pd.p)===g).reduce((s3,pd)=>s3+(pd.monthly[m]||0),0),0));
+    aoa.push([]);
+    REV_GROUPS.forEach(([g,label])=>{ const arr=grpBy(g); numRows.push(aoa.length); aoa.push([label,'','',...arr,t(arr)]); });
+    numRows.push(aoa.length); aoa.push(['合計','','',...all,t(all)]);
+    aoa.push([]);
+    numRows.push(aoa.length); aoa.push(['2026Q4 合計','','',CHART_MONTHS.reduce((s2,m,i)=>s2+(m>=9?all[i]:0),0)]);
+    numRows.push(aoa.length); aoa.push(['2027Q1 合計','','',CHART_MONTHS.reduce((s2,m,i)=>s2+(m<=3?all[i]:0),0)]);
+    const ws=X.utils.aoa_to_sheet(aoa); fmtCells(ws,numRows,Array.from({length:CHART_MONTHS.length+1},(_,i)=>3+i));
+    ws['!cols']=[{wch:14},{wch:30},{wch:10},...CHART_MONTHS.map(()=>({wch:12})),{wch:14}];
+    ws['!merges']=[{s:{r:0,c:0},e:{r:0,c:6}},{s:{r:1,c:0},e:{r:1,c:10}},{s:{r:2,c:0},e:{r:2,c:10}}];
+    return ws;
+  };
+  const ws1=monthSheet('rev','三小市集 營收認列（未稅，預估＋已開發票）','說明：每一期開了發票就用發票金額與開立月份，其餘用認列預估；2027/1–3 為 2027Q1。');
+  const ws1b=monthSheet('cash','三小市集 現金收款（已收款＋預計收款）','說明：已收款依實際收款日，未收款依預計收款日；只計算已開發票的款項。');
+  // --- 認列明細 ---
+  const det=[['類型','月份','類別','專案','負責人','金額','狀態']];
+  [['rev','營收認列'],['cash','現金收款']].forEach(([md,lab])=>{
+    monthlyExportData(md).detail.sort((a,b)=>CHART_MONTHS.indexOf(a.m)-CHART_MONTHS.indexOf(b.m)||a.p.cat.localeCompare(b.p.cat)).forEach(d=>{
+      det.push([lab,monthLabel(d.m),d.p.cat,getName(d.p),getRow(d.p.id).assignee||'',d.amount,KIND_LABEL[d.kind]||'']);
     });
   });
-  const sumBy=(filter)=>CHART_MONTHS.map(m=>cats.filter(filter).reduce((s,cat)=>s+(data[cat][m]||0),0));
-  const core=sumBy(cat=>cat!=="政府"), nonop=sumBy(cat=>cat==="政府"), all=sumBy(()=>true);
-  const tot=a=>a.reduce((s,v)=>s+v,0);
-  aoa.push([]);
-  numRows.push(aoa.length); aoa.push(['核心營收小計','','',...core,tot(core)]);
-  numRows.push(aoa.length); aoa.push(['營業外收入小計','','',...nonop,tot(nonop)]);
-  numRows.push(aoa.length); aoa.push(['合計','','',...all,tot(all)]);
-  const q4=CHART_MONTHS.reduce((s,m,i)=>s+(m>=9?all[i]:0),0), q1=CHART_MONTHS.reduce((s,m,i)=>s+(m<=3?all[i]:0),0);
-  aoa.push([]);
-  numRows.push(aoa.length); aoa.push(['2026Q4 合計','','',q4]);
-  numRows.push(aoa.length); aoa.push(['2027Q1 合計','','',q1]);
-  const ws1=X.utils.aoa_to_sheet(aoa);
-  numRows.forEach(r=>{ for(let c=3;c<3+CHART_MONTHS.length+1;c++){ const ref=X.utils.encode_cell({r,c}); if(ws1[ref]&&typeof ws1[ref].v==='number') ws1[ref].z=NUM; } });
-  ws1['!cols']=[{wch:14},{wch:30},{wch:10},...CHART_MONTHS.map(()=>({wch:12})),{wch:14}];
-  ws1['!merges']=[{s:{r:0,c:0},e:{r:0,c:6}},{s:{r:1,c:0},e:{r:1,c:10}},{s:{r:2,c:0},e:{r:2,c:10}}];
-  // --- 工作表2：認列明細（一列一筆，方便樞紐分析） ---
-  const det=[['月份','類別','專案','負責人','金額','來源']];
-  detail.sort((a,b)=>CHART_MONTHS.indexOf(a.m)-CHART_MONTHS.indexOf(b.m)||a.p.cat.localeCompare(b.p.cat)).forEach(d=>{
-    det.push([monthLabel(d.m),d.p.cat,getName(d.p),getRow(d.p.id).assignee||'',d.amount,d.confirmed?'實際收款':'預估']);
-  });
-  const ws2=X.utils.aoa_to_sheet(det);
-  for(let r=1;r<det.length;r++){ const ref=X.utils.encode_cell({r,c:4}); if(ws2[ref]) ws2[ref].z=NUM; }
-  ws2['!cols']=[{wch:9},{wch:10},{wch:30},{wch:10},{wch:14},{wch:10}];
-  // --- 工作表3：專案財務總表 ---
-  const pj=[['類別','專案','負責人','狀態','預估營收','實際收款','累積成本','專案毛利','付款方式']];
+  const ws2=X.utils.aoa_to_sheet(det); fmtCells(ws2,Array.from({length:det.length},(_,i)=>i),[5]);
+  ws2['!cols']=[{wch:10},{wch:9},{wch:10},{wch:30},{wch:10},{wch:14},{wch:10}];
+  // --- 發票明細 ---
+  const inv=[['類別','專案','負責人','期別','實際開立發票日','發票號碼','發票金額','預計收款日','已收款','實際收款日']];
   FINP().slice().sort((a,b)=>a.cat.localeCompare(b.cat)||getName(a).localeCompare(getName(b))).forEach(p=>{
     const r=getRow(p.id);
-    pj.push([p.cat,getName(p),r.assignee||'',r.status,Number(getEstRev(p)||0),totalActual(p),(r.cost===null||r.cost==='')?'':Number(r.cost),marginOf(p),r.paymentMethod||'']);
+    getInvSlots(p).forEach((v,i)=>{ if(!isIssued(v) && !v.dueDate && !v.no) return;
+      inv.push([p.cat,getName(p),r.assignee||'',slotName(r,i),v.date||(v.month?monthLabel(v.month):''),v.no||'',Number(v.amount||0)||'',v.dueDate||'',v.paid?'已收款':'未收款',v.paidDate||'']); });
   });
-  const ws3=X.utils.aoa_to_sheet(pj);
-  for(let r=1;r<pj.length;r++) for(const c of [4,5,6,7]){ const ref=X.utils.encode_cell({r,c}); if(ws3[ref]&&typeof ws3[ref].v==='number') ws3[ref].z=NUM; }
-  ws3['!cols']=[{wch:10},{wch:30},{wch:10},{wch:8},{wch:14},{wch:14},{wch:14},{wch:14},{wch:10}];
+  const ws3=X.utils.aoa_to_sheet(inv); fmtCells(ws3,Array.from({length:inv.length},(_,i)=>i),[6]);
+  ws3['!cols']=[{wch:10},{wch:30},{wch:10},{wch:8},{wch:14},{wch:14},{wch:12},{wch:12},{wch:8},{wch:12}];
+  // --- 專案財務總表 ---
+  const pj=[['類別','專案','負責人','狀態','預估收入','預估成本','預估毛利','收款方式','發票張數','已開發票','已收款','未收款','專案表網址','營收分組']];
+  FINP().slice().sort((a,b)=>a.cat.localeCompare(b.cat)||getName(a).localeCompare(getName(b))).forEach(p=>{
+    const r=getRow(p.id);
+    pj.push([p.cat,getName(p),r.assignee||'',r.status,Number(getEstRev(p)||0),(r.cost===null||r.cost==='')?'':Number(r.cost),marginOf(p),r.paymentMethod||'',slotCount(r),totalActual(p),totalPaid(p),totalActual(p)-totalPaid(p),r.costLink||'',{core:'核心營收',rel:'關係人交易',nonop:'營業外收入'}[revGroup(p)]]);
+  });
+  const ws4=X.utils.aoa_to_sheet(pj); fmtCells(ws4,Array.from({length:pj.length},(_,i)=>i),[4,5,6,9,10,11]);
+  ws4['!cols']=[{wch:10},{wch:30},{wch:10},{wch:8},{wch:13},{wch:13},{wch:13},{wch:12},{wch:8},{wch:13},{wch:13},{wch:13},{wch:40},{wch:12}];
   const wb=X.utils.book_new();
-  X.utils.book_append_sheet(wb,ws1,'按月認列');
+  X.utils.book_append_sheet(wb,ws1,'營收認列');
+  X.utils.book_append_sheet(wb,ws1b,'現金收款');
   X.utils.book_append_sheet(wb,ws2,'認列明細');
-  X.utils.book_append_sheet(wb,ws3,'專案財務總表');
-  X.writeFile(wb,`三小市集_按月認列_${who}_${stamp.slice(0,10)}.xlsx`);
+  X.utils.book_append_sheet(wb,ws3,'發票明細');
+  X.utils.book_append_sheet(wb,ws4,'專案財務總表');
+  X.writeFile(wb,`三小市集_營收與收款_${who}_${stamp.slice(0,10)}.xlsx`);
 };
 function quarterCost(){
   let q4Cost=0, q1Cost=0;
   FINP().forEach(p=>{
-    const pr=getRow(p.id);
-    const cost=(pr.cost===null||pr.cost==="")?0:Number(pr.cost);
-    if(!cost) return;
-    if(pr.estPlan && pr.estPlan.length){
-      const totalPlanned=pr.estPlan.reduce((s,e)=>s+Number(e.amount||0),0)||1;
-      const q4Amt=pr.estPlan.filter(e=>e.month>=9).reduce((s,e)=>s+Number(e.amount||0),0);
-      const q1Amt=pr.estPlan.filter(e=>e.month<=3).reduce((s,e)=>s+Number(e.amount||0),0);
-      q4Cost += cost*(q4Amt/totalPlanned);
-      q1Cost += cost*(q1Amt/totalPlanned);
-    } else {
-      const fm=pr.revMonth || Number(getRange(p).end.split('-')[1]);
-      if(fm>=9) q4Cost+=cost; else if(fm<=3) q1Cost+=cost;
-    }
+    const pr=getRow(p.id); const cost=(pr.cost===null||pr.cost==="")?0:Number(pr.cost); if(!cost) return;
+    const es=projectEntries(p,'rev'); const tot=es.reduce((s2,e)=>s2+e.amount,0);
+    if(tot>0){ q4Cost+=cost*es.filter(e=>e.m>=9).reduce((s2,e)=>s2+e.amount,0)/tot; q1Cost+=cost*es.filter(e=>e.m<=3).reduce((s2,e)=>s2+e.amount,0)/tot; }
+    else { const fm=pr.revMonth || Number(getRange(p).end.split('-')[1]); if(fm>=9) q4Cost+=cost; else if(fm<=3) q1Cost+=cost; }
   });
   return {q4Cost, q1Cost};
 }
@@ -1126,9 +1147,9 @@ function renderStats(){
       <div class="stats">
         <div class="stat clickable" onclick="gotoStatus('全部')"><b>${ALLP.length}</b><span>專案總數</span></div>
         <div class="stat"><b>${pct}%</b><span>全公司任務完成率</span>${noTaskCount?`<span class="small" style="color:var(--accent2);cursor:pointer;text-decoration:underline;text-decoration-style:dotted;" onclick="gotoNoTaskList()">${noTaskScopeMine()?`你負責的 ${noTaskCount} 個專案還沒拆過任務清單`:`${noTaskCount}個專案還沒拆過任務清單`}</span>`:''}</div>
-        ${anyFin()?`        <div class="stat"><b>${fmt(mt.q4Total)}</b><span>2026Q4 認列營收（未稅，估+實收）</span><span class="small">核心 ${fmt(mt.q4Core)}／營業外 ${fmt(mt.q4NonOp)}</span></div>
+        ${anyFin()?`        <div class="stat"><b>${fmt(mt.q4Total)}</b><span>2026Q4 認列營收（未稅，預估＋已開發票）</span><span class="small">核心 ${fmt(mt.q4Core)}／關係人 ${fmt(mt.q4Rel)}／營業外 ${fmt(mt.q4NonOp)}</span></div>
         <div class="stat"><b style="color:${q4Margin<0?'var(--warn)':'var(--ink)'}">${mt.q4Total?Math.round(q4Margin/mt.q4Total*100)+'%':'—'}</b><span>2026Q4 毛利率估算</span><span class="small">毛利 ${fmt(q4Margin)}</span></div>
-        <div class="stat"><b>${fmt(mt.q1Total)}</b><span>2027Q1 認列營收（未稅，估+實收）</span><span class="small">核心 ${fmt(mt.q1Core)}／營業外 ${fmt(mt.q1NonOp)}</span></div>
+        <div class="stat"><b>${fmt(mt.q1Total)}</b><span>2027Q1 認列營收（未稅，預估＋已開發票）</span><span class="small">核心 ${fmt(mt.q1Core)}／關係人 ${fmt(mt.q1Rel)}／營業外 ${fmt(mt.q1NonOp)}</span></div>
         <div class="stat"><b style="color:${q1Margin<0?'var(--warn)':'var(--ink)'}">${mt.q1Total?Math.round(q1Margin/mt.q1Total*100)+'%':'—'}</b><span>2027Q1 毛利率估算</span><span class="small">毛利 ${fmt(q1Margin)}</span></div>`:''}
       </div>
     </div>`;
@@ -1452,24 +1473,21 @@ function detailRow(p){
   const items=taskList(p).map((t,idx)=>taskItemHtml(p,idx)).join("");
   const tab=getDetailTab(p.id);
   const tabBtn=(key,label)=>`<button class="dtab ${tab===key?'active':''}" onclick="setDetailTab('${p.id}','${key}')">${label}</button>`;
-  const paymentOpts=["","一次付清","訂金+尾款","自訂分期"].map(o=>`<option ${r.paymentMethod===o?'selected':''}>${o||'（未設定）'}</option>`).join('');
+  const paymentOpts=[["","（未設定）"],["一次付清","a. 一次付清"],["訂金+尾款","b. 訂金＋尾款"],["自訂分期","c. 自訂期數"]].map(([v,l])=>`<option value="${v}" ${r.paymentMethod===v?'selected':''}>${l}</option>`).join('');
 
   const estPlanTotal=(r.estPlan||[]).reduce((s,e)=>s+Number(e.amount||0),0);
+  const slotsN=slotCount(r);
+  const sec=(t,note)=>`<div class="secthead"><span>${t}</span>${note?`<span class="small">${note}</span>`:''}</div>`;
+  const estSlots=getEstSlots(p), invSlots=getInvSlots(p);
+  const estSum=estSlots.reduce((s2,e)=>s2+Number(e.amount||0),0);
+  const mg=marginOf(p), rv=getEstRev(p)||0;
   const basicPane=`
     <div class="basicgrid">
       <label style="max-width:420px;">專案名稱<input type="text" value="${esc(getName(p))}" onchange="saveName('${p.id}',this.value)"></label>
       ${isAdmin()?`<label>類別<select onchange="setProjectCat('${p.id}',this.value)">${[...new Set([...allCats(),p.cat])].map(c=>`<option value="${esc(c)}" ${c===p.cat?'selected':''}>${esc(c)}</option>`).join('')}<option value="__new__">＋ 新增類別…</option></select></label>
       <label>&nbsp;<button class="mini danger" onclick="deleteProject('${p.id}')" style="white-space:nowrap;">🗑 刪除專案</button></label>`:''}
     </div>
-    ${finOK(p)?`<div class="small" style="font-weight:600;margin:12px 0 4px;color:var(--accent2);">金額</div>
-    <div class="basicgrid">
-      <label>預估營收<input type="number" value="${getEstRev(p)}" onchange="saveRev('${p.id}',this.value)"></label>
-      <label>累積成本（財務填）<input type="number" value="${r.cost===null?'':r.cost}" onchange="setField('${p.id}','cost',this.value===''?null:Number(this.value))"></label>
-      <label>付款方式<select onchange="setField('${p.id}','paymentMethod',this.value)">${paymentOpts}</select></label>
-      ${r.paymentMethod==='自訂分期'?`<label>期數<input type="number" min="1" value="${r.installmentCount}" onchange="setField('${p.id}','installmentCount',Number(this.value)||2)" style="width:60px;"></label>`:''}
-      ${r.paymentMethod?`<label>對應到甘特圖<button class="mini" onclick="syncPaymentSubtasks('${p.id}')" style="white-space:nowrap;">＋ 產生付款子項目</button></label>`:''}
-    </div>`:`<div class="small" style="margin:12px 0 4px;color:var(--sub);">🔒 金額只有這個專案的負責人和財務看得到</div>`}
-    <div class="small" style="font-weight:600;margin:12px 0 4px;color:var(--accent2);">時程</div>
+    ${sec('專案時程','專案人員填寫')}
     <div class="basicgrid">
       <label>起始日<input type="date" id="startdate-${p.id}" value="${range.start}" onchange="setField('${p.id}','startDate',this.value)"></label>
       <label>截止日<input type="date" id="enddate-${p.id}" value="${range.end}" onchange="setField('${p.id}','endDate',this.value)"></label>
@@ -1486,28 +1504,57 @@ function detailRow(p){
         </div>
       </div>
     </div>
-    <div class="small" style="font-weight:600;margin:12px 0 4px;color:var(--accent2);">雲端資料夾</div>
-    <div class="basicgrid">
-      <label style="max-width:520px;">
+    <div class="basicgrid" style="margin-top:8px;">
+      <label style="max-width:520px;">雲端資料夾
         <div style="display:flex;gap:6px;">
-          <input type="url" placeholder="貼上 Google Drive 連結" value="${r.driveLink}" onchange="setField('${p.id}','driveLink',this.value)" style="flex:1;">
-          ${r.driveLink?`<a href="${r.driveLink}" target="_blank" rel="noopener" class="mini" style="text-decoration:none;white-space:nowrap;">📁 開啟</a>`:''}
+          <input type="url" placeholder="貼上 Google Drive 連結" value="${esc(r.driveLink)}" onchange="setField('${p.id}','driveLink',this.value)" style="flex:1;">
+          ${r.driveLink?`<a href="${esc(r.driveLink)}" target="_blank" rel="noopener" class="mini" style="text-decoration:none;white-space:nowrap;">📁 開啟</a>`:''}
         </div>
       </label>
     </div>
-    <h4>協作成員（自動統計：任務指派名單中，除負責人外出現過的人）</h4>
+    <div class="small" style="margin-top:8px;">協作成員（自動統計：任務指派名單中，除負責人外出現過的人）</div>
     <div class="collab">${collabHtml}</div>
-    ${finOK(p)?`<h4>預估認列月份（可拆多期，像實際收款一樣；直接影響月營收分布圖）</h4>
-    <div class="small">${(r.estPlan||[]).length?(r.estPlan||[]).map((e,ei)=>`<span class="todochip">${monthLabel(e.month)}：${fmt(e.amount)}<button class="mini danger" style="padding:0 4px;" onclick="removeEstPlan('${p.id}',${ei})">✕</button></span>`).join(' '):'尚未拆分（目前依原始月份規劃或截止日自動估算）'}</div>
-    <div style="display:flex;gap:6px;margin-top:6px;align-items:center;">
-      <input type="number" placeholder="這期金額" id="estamt-${p.id}" style="width:120px;">
-      <select id="estmon-${p.id}">${CHART_MONTHS.map(m=>`<option value="${m}">${monthLabel(m)}</option>`).join('')}</select>
-      <button onclick="addEstPlan('${p.id}')">＋ 新增一期</button>
+    ${finOK(p)?`
+    ${sec('款項預估','專案人員填寫')}
+    <div class="basicgrid">
+      <label>預估收入<input type="number" value="${getEstRev(p)??''}" onchange="saveRev('${p.id}',this.value)"></label>
+      <label>預估成本<input type="number" value="${r.cost===null?'':r.cost}" onchange="setField('${p.id}','cost',this.value===''?null:Number(this.value))"></label>
+      <label style="min-width:260px;">專案表網址（成本明細）
+        <div style="display:flex;gap:6px;">
+          <input type="url" id="costlink-${p.id}" placeholder="貼上專案表連結" value="${esc(r.costLink||'')}" onchange="setField('${p.id}','costLink',this.value.trim())" style="flex:1;">
+          ${r.costLink?`<a href="${esc(r.costLink)}" target="_blank" rel="noopener" class="mini" style="text-decoration:none;white-space:nowrap;">📄 開啟</a>`:''}
+        </div>
+      </label>
+      <label>關係人交易<span class="paidcell" style="min-height:32px;"><input type="checkbox" ${r.relatedParty?'checked':''} ${canMarkPaid()?'':'disabled title="由財務勾選"'} onchange="setRelated('${p.id}',this.checked)"> ${r.relatedParty?'<b class="paidtag">關係人交易</b>':`<span class="small">${canMarkPaid()?'集團關係人打勾':'由財務勾選'}</span>`}</span></label>
+      <label>預估毛利（自動計算）<div class="calcbox" style="color:${mg<0?'var(--warn)':'var(--ok)'};">${fmt(mg)}${rv?`<span class="small">（${Math.round(mg/rv*100)}%）</span>`:''}</div></label>
     </div>
-    ${(r.estPlan||[]).length?`<div class="small" style="margin-top:4px;${Math.abs(estPlanTotal-getEstRev(p))>1?'color:var(--warn);':''}">已拆分合計：${fmt(estPlanTotal)}／預估營收 ${fmt(getEstRev(p))}${Math.abs(estPlanTotal-getEstRev(p))>1?'（兩者對不起來，請確認）':''}</div>`:''}
-    <h4>實際收款（發票金額，可分期登錄）</h4>
-    ${receiptsHtml(p)}`:''}`;
-
+    <div class="basicgrid" style="margin-top:6px;">
+      <label>收款方式<select onchange="setField('${p.id}','paymentMethod',this.value)">${paymentOpts}</select></label>
+      ${r.paymentMethod==='自訂分期'?`<label>期數<input type="number" min="1" max="24" value="${r.installmentCount}" onchange="setField('${p.id}','installmentCount',Math.max(1,Math.min(24,Number(this.value)||2)))" style="width:70px;"></label>`:''}
+      <label>發票張數<div class="calcbox">${slotsN} 張</div></label>
+      ${r.paymentMethod?`<label>對應到甘特圖<button class="mini" onclick="syncPaymentSubtasks('${p.id}')" style="white-space:nowrap;">＋ 產生付款子項目</button></label>`:''}
+    </div>
+    ${sec('認列預估','專案人員填寫・會出現在月營收表，快速看到未來營收')}
+    <table class="slottable"><thead><tr><th>期別</th><th>預估認列月份</th><th>預估認列金額</th><th></th></tr></thead><tbody>
+      ${estSlots.map((e,i)=>`<tr><td>${slotName(r,i)}</td>
+        <td><select id="estm-${p.id}-${i}" onchange="setEstSlot('${p.id}',${i},'month',this.value===''?null:Number(this.value))">${monthOptsQ(e.month)}</select></td>
+        <td><input type="number" id="esta-${p.id}-${i}" value="${e.amount??''}" placeholder="金額" onchange="setEstSlot('${p.id}',${i},'amount',this.value===''?null:Number(this.value))"></td>
+        <td class="small">${invSlots[i]&&invSlots[i].amount&&invSlots[i].date?'已開發票，改用發票金額':''}</td></tr>`).join('')}
+    </tbody></table>
+    <div class="small" style="margin-top:4px;${estSum&&Math.abs(estSum-rv)>1?'color:var(--warn);':''}">預估認列合計：${fmt(estSum)}／預估收入 ${fmt(rv)}${estSum&&Math.abs(estSum-rv)>1?'（兩者對不起來，請確認）':''}${!estSum?'（尚未填寫時，依截止日自動估算）':''}</div>
+    ${sec('發票開立','發票資料專案人員可填・「已收款」由財務勾選')}
+    <table class="slottable"><thead><tr><th>期別</th><th>實際開立發票日</th><th>發票號碼</th><th>發票金額</th><th>預計收款日</th><th>實際收款</th></tr></thead><tbody>
+      ${invSlots.map((v,i)=>`<tr class="${v.paid?'paidrow':''}"><td>${slotName(r,i)}</td>
+        <td><input type="date" id="invd-${p.id}-${i}" value="${v.date||''}" onchange="setInvField('${p.id}',${i},'date',this.value)"></td>
+        <td><input type="text" id="invn-${p.id}-${i}" value="${esc(v.no||'')}" placeholder="例：AB12345678" onchange="setInvField('${p.id}',${i},'no',this.value.trim())"></td>
+        <td><input type="number" id="inva-${p.id}-${i}" value="${v.amount??''}" placeholder="金額" onchange="setInvField('${p.id}',${i},'amount',this.value===''?null:Number(this.value))"></td>
+        <td><input type="date" id="invdue-${p.id}-${i}" value="${v.dueDate||''}" onchange="setInvField('${p.id}',${i},'dueDate',this.value)"></td>
+        <td><label class="paidcell"><input type="checkbox" ${v.paid?'checked':''} ${canMarkPaid()?'':'disabled title="由財務勾選"'} onchange="setInvPaid('${p.id}',${i},this.checked)">
+          ${v.paid?`<b class="paidtag">已收款</b>`:`<span class="small">${canMarkPaid()?'收到款後打勾':'由財務勾選'}</span>`}</label>
+          ${v.paid?(canMarkPaid()?`<input type="date" id="invpd-${p.id}-${i}" value="${v.paidDate||''}" onchange="setInvField('${p.id}',${i},'paidDate',this.value)" title="實際收款日">`:`<div class="small">${v.paidDate?shortDate(v.paidDate):''}</div>`):''}</td></tr>`).join('')}
+    </tbody></table>
+    <div class="small" style="margin:6px 0 12px;">已開發票 ${fmt(totalActual(p))}・已收款 <b style="color:var(--ok);">${fmt(totalPaid(p))}</b>／預估收入 ${fmt(rv)}</div>
+    `:`<div class="small" style="margin:12px 0 4px;color:var(--sub);">🔒 款項、認列與發票資料只有這個專案的負責人和財務看得到</div>`}`;
   const taskPane=`
     <div style="margin-bottom:10px;"><button class="mini" onclick="applyMarketTemplate('${p.id}')">🏪 套用市集工作模組</button></div>
     <div class="small" style="margin-bottom:10px;">
@@ -1553,8 +1600,8 @@ function renderProjectView(){
     let html=`<tr id="proj-${p.id}" class="${open?'rowopen':''}">
       <td><span class="cat">${p.cat}</span></td>
       <td class="name" onclick="toggleExpand('${p.id}')"><span class="arrow">${open?'▾':'▸'}</span>${getName(p)}${driveIcon}${collaboratorsOf(p).length?`<div class="small">+${collaboratorsOf(p).length} 協作</div>`:""}${lastEditNote}</td>
-      ${!showFinCols?'':(finOK(p)?`<td class="rev">${fmt(getEstRev(p))}${isNonOp(p)?'<br><span class="small">營收外收入</span>':''}</td>
-      <td class="rev">${totalActual(p)?fmt(totalActual(p)):(getReceipts(p.id).length?fmt(0):'—')}${diffLabel(p)}${getReceipts(p.id).length>1?`<span class="small">共${getReceipts(p.id).length}期</span>`:''}</td>
+      ${!showFinCols?'':(finOK(p)?`<td class="rev">${fmt(getEstRev(p))}${isRelated(p)?'<br><span class="small">關係人交易</span>':(isNonOp(p)?'<br><span class="small">營業外收入</span>':'')}</td>
+      <td class="rev">${totalActual(p)?fmt(totalActual(p)):'—'}${diffLabel(p)}${totalPaid(p)?`<span class="small" style="color:var(--ok);font-weight:600;">已收 ${fmt(totalPaid(p))}</span>`:''}${slotCount(r)>1?`<span class="small">${getInvSlots(p).filter(isIssued).length}/${slotCount(r)} 張已開</span>`:''}</td>
       <td class="rev">${r.cost===null||r.cost===""?'—':fmt(Number(r.cost))}${costNote(p)}</td>
       <td class="rev"><b style="color:${marginOf(p)<0?'var(--warn)':'var(--ok)'}">${fmt(marginOf(p))}</b></td>`:`<td class="rev small" colspan="4" style="text-align:center;color:var(--sub);">🔒 僅負責人與財務可見</td>`)}
       <td>${shortDate(range.start)}–${shortDate(range.end)}<br>${taskCountBadge(p)}</td>
@@ -1566,7 +1613,7 @@ function renderProjectView(){
     return html;
   }).join("");
   document.getElementById("view").innerHTML=`<div class="wrap"><table>
-    <thead><tr><th>類別</th><th>專案名稱</th>${showFinCols?`<th>預估營收<span style="text-transform:none;font-weight:400;">（未稅）</span></th><th>實際收款</th><th>累積成本</th><th>專案毛利</th>`:''}<th>執行期間/急迫</th><th>任務進度</th><th>狀態</th><th>負責人</th></tr></thead>
+    <thead><tr><th>類別</th><th>專案名稱</th>${showFinCols?`<th>預估營收<span style="text-transform:none;font-weight:400;">（未稅）</span></th><th>開票／收款</th><th>預估成本</th><th>專案毛利</th>`:''}<th>執行期間/急迫</th><th>任務進度</th><th>狀態</th><th>負責人</th></tr></thead>
     <tbody>${rows}</tbody></table></div>${deletedListHtml()}`;
 }
 
@@ -2263,6 +2310,41 @@ function isValidISODate(v){
   const y=Number(v.slice(0,4));
   return y>=2000 && y<=2100;
 }
+
+// ===== 認列預估／發票開立 =====
+let slotRenderTimer=null;
+function slotRender(isDate){ if(isDate){ clearTimeout(slotRenderTimer); slotRenderTimer=setTimeout(()=>render(),700); } else render(); }
+window.setEstSlot=async function(pid,i,field,val){
+  const p=getProject(pid); if(!p) return;
+  const cur=getRow(pid); const arr=getEstSlots(p).map(x=>Object.assign({},x));
+  arr[i]=Object.assign({},arr[i],{[field]:val});
+  state[pid]=Object.assign({},cur,{estPlan:arr}); touch(pid); render(); await persist();
+};
+window.setInvField=async function(pid,i,field,val){
+  const p=getProject(pid); if(!p) return;
+  if(['date','dueDate','paidDate'].includes(field) && val && !isValidISODate(val)) return;
+  if(field==='paidDate' && !canMarkPaid()) return;
+  const cur=getRow(pid); const arr=getInvSlots(p).map(x=>{ const o=Object.assign({},x); delete o.month; return o; });
+  // 舊資料（只有月份、沒有日期）第一次編輯時，保留它原本的月份
+  getInvSlots(p).forEach((x,k)=>{ if(x.month && !x.date) arr[k].month=x.month; });
+  arr[i]=Object.assign({},arr[i],{[field]:val});
+  if(field==='date' && val) delete arr[i].month;
+  state[pid]=Object.assign({},cur,{invoices:arr}); touch(pid);
+  slotRender(['date','dueDate','paidDate'].includes(field)); await persist();
+};
+window.setRelated=async function(pid,checked){
+  if(!canMarkPaid()){ render(); return; }
+  const cur=getRow(pid); state[pid]=Object.assign({},cur,{relatedParty:!!checked}); touch(pid); render(); await persist();
+};
+window.setInvPaid=async function(pid,i,checked){
+  if(!canMarkPaid()){ render(); return; }
+  const p=getProject(pid); if(!p) return;
+  const v=getInvSlots(p)[i];
+  if(checked && !isIssued(v)){ alert('請先填寫這一期的「實際開立發票日」和「發票金額」，再勾選已收款。'); render(); return; }
+  const cur=getRow(pid); const arr=getInvSlots(p).map(x=>Object.assign({},x));
+  arr[i]=Object.assign({},arr[i],{paid:!!checked, paidDate: checked ? (arr[i].paidDate||todayISO()) : ''});
+  state[pid]=Object.assign({},cur,{invoices:arr}); touch(pid); render(); await persist();
+};
 let dateRenderTimer=null;
 window.setField=async function(id,field,val){
   if((field==="startDate"||field==="endDate") && !isValidISODate(val)) return;
