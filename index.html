@@ -332,7 +332,7 @@ let ownerFilter="全部";
 let view="project", catFilter="全部", statusFilter="全部", searchTerm="", expanded=new Set(), expandedPerson=new Set(), showAddForm=false, detailTab={}, todoExpandedSet=new Set(), ownedCollabExpandedSet=new Set(), ganttGroupExpanded={}, lastDeleteSnapshot=null, capacityExpanded=new Set(), lastCapacityOrder=[], backState=null;
 function showUndoToast(label){
   const box=document.getElementById("undotoast");
-  box.innerHTML=`<span>已刪除：${label}</span><span style="display:flex;gap:6px;"><button onclick="undoLastDelete()" style="padding:4px 12px;border-radius:6px;border:1px solid var(--accent2);background:var(--accent2);color:#fff;cursor:pointer;font-size:.78rem;">復原</button><button class="mini" onclick="document.getElementById('undotoast').innerHTML=''">✕</button></span>`;
+  box.innerHTML=`<span>已刪除：${esc(label)}</span><span style="display:flex;gap:6px;"><button onclick="undoLastDelete()" style="padding:4px 12px;border-radius:6px;border:1px solid var(--accent2);background:var(--accent2);color:#fff;cursor:pointer;font-size:.78rem;">復原</button><button class="mini" onclick="document.getElementById('undotoast').innerHTML=''">✕</button></span>`;
 }
 window.undoLastDelete=async function(){
   if(!lastDeleteSnapshot) return;
@@ -351,7 +351,7 @@ function pad(n){return n<10?"0"+n:""+n;}
 function lastDay(y,m){return new Date(y,m,0).getDate();}
 function todayISO(){const d=new Date();return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;}
 function addDaysISO(iso,n){const d=new Date(iso+"T00:00:00");d.setDate(d.getDate()+n);return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;}
-function shortDate(iso){ if(!iso) return ""; const [y,m,d]=iso.split("-"); return (Number(y)!==REF_YEAR?y+"/":"")+`${Number(m)}/${Number(d)}`; }
+function shortDate(iso){ if(!iso || !/^\d{4}-\d{1,2}-\d{1,2}/.test(String(iso))) return ""; const [y,m,d]=iso.split("-"); return (Number(y)!==REF_YEAR?y+"/":"")+`${Number(m)}/${Number(d)}`; }
 function mdToISO(md,p){
   if(!md) return '';
   const parts=md.replace(/[^0-9\/]/g,'').split('/');
@@ -427,7 +427,29 @@ function eventMarksHtml(events,pctFn,opts){
   });
   return {html:dots+labelsHtml.join(''), extraPx:maxLane*15};
 }
-function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;'); }
+// ===== 輸出安全 =====
+// escHtml：放進 innerHTML 文字或屬性值（屬性一律用雙引號）。
+// jsArg：放進 inline onclick/onchange 的字串參數（先 JSON 成 JS 字串，再做 HTML 屬性跳脫）。
+// safeHttpsUrl：放進 href 的連結，只接受 https://，其餘一律變成空字串。
+function escHtml(value){
+  return String(value==null?'':value)
+    .replaceAll('&','&amp;')
+    .replaceAll('<','&lt;')
+    .replaceAll('>','&gt;')
+    .replaceAll('"','&quot;')
+    .replaceAll("'",'&#39;');
+}
+const esc=escHtml;
+function jsArg(value){ return escHtml(JSON.stringify(String(value==null?'':value))); }
+function safeHttpsUrl(value){
+  try{
+    const url=new URL(String(value||'').trim());
+    return url.protocol==='https:' ? url.href : '';
+  }catch(e){
+    return '';
+  }
+}
+const SAFE_ID=/^[A-Za-z0-9_-]{1,64}$/;
 function relTime(ts){
   if(!ts) return "";
   const diff=Math.max(0,Date.now()-ts); const m=Math.floor(diff/60000);
@@ -480,7 +502,7 @@ function audienceColorFor(a){
 function audienceBadge(a){
   if(!a) return '';
   const letter = AUDIENCE_LETTER[a] || a.slice(0,1);
-  return `<span style="display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;border-radius:3px;background:${audienceColorFor(a)};font-size:.62rem;flex-shrink:0;" title="${a}">${letter}</span>`;
+  return `<span style="display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;border-radius:3px;background:${audienceColorFor(a)};font-size:.62rem;flex-shrink:0;" title="${esc(a)}">${esc(letter)}</span>`;
 }
 function audienceStyle(a){ return a ? `background:${audienceColorFor(a)};` : ''; }
 function getEstRev(p){ const r=getRow(p.id); return r.estOverride!==null ? r.estOverride : p.rev; }
@@ -507,7 +529,8 @@ function getRange(p){
 function refreshAll(){
   const fin=state._fin||{};
   const builtins=PROJECTS.map(p=>Object.assign({},p,{rev:fin[p.id]?fin[p.id].rev:null, plan:fin[p.id]?fin[p.id].plan:null}));
-  const customs=(state._customProjects||[]).map(c=>({id:c.id,cat:c.cat,name:c.name,rev:(c.rev===undefined?null:c.rev)}));
+  // 自訂專案的 id 會被放進 HTML id／onclick，格式不對的一律略過
+  const customs=(state._customProjects||[]).filter(c=>c&&SAFE_ID.test(String(c.id))).map(c=>({id:String(c.id),cat:String(c.cat||'其他'),name:String(c.name||''),rev:(c.rev===undefined?null:c.rev)}));
   const all=builtins.concat(customs).map(p=>{ const r=state[p.id]||{}; return r.catOverride?Object.assign({},p,{cat:r.catOverride,origCat:p.cat}):p; });
   DELETEDP=all.filter(p=>(state[p.id]||{}).deleted);
   ALLP=all.filter(p=>!(state[p.id]||{}).deleted);
@@ -539,7 +562,7 @@ function deletedListHtml(){
   if(!isAdmin() || !DELETEDP.length) return '';
   const rows=DELETEDP.map(p=>{ const r=state[p.id]||{}; return `<div class="prow" style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
       <span><span class="cat">${esc(p.cat)}</span> ${esc(getName(p))} <span class="small">・${r.deletedBy?esc(r.deletedBy)+' ':''}${r.deletedAt?relTime(r.deletedAt)+'刪除':''}</span></span>
-      <button class="mini" onclick="restoreProject('${p.id}')">↩ 還原</button></div>`; }).join('');
+      <button class="mini" onclick="restoreProject(${jsArg(p.id)})">↩ 還原</button></div>`; }).join('');
   return `<div style="margin-top:14px;"><button class="mini" onclick="toggleShowDeleted()">${showDeleted?'▾':'▸'} 已刪除的專案（${DELETEDP.length}）</button>
     ${showDeleted?`<div class="priority plain" style="margin-top:6px;">${rows}</div>`:''}</div>`;
 }
@@ -652,7 +675,7 @@ function personOptsWithVendor(sel){
   const so=TEAM_STAFF.map(x=>`<option ${sel===x?'selected':''}>${x}</option>`).join('');
   const po=TEAM_PARTNER.map(x=>`<option ${sel===x?'selected':''}>${x}</option>`).join('');
   const vendors=vendorNames();
-  const vo=vendors.map(v=>`<option ${sel===v?'selected':''}>${v}</option>`).join('');
+  const vo=vendors.map(v=>`<option ${sel===v?'selected':''}>${esc(v)}</option>`).join('');
   return `<option value="">未指派</option><optgroup label="三小文創">${so}</optgroup><optgroup label="合作夥伴">${po}</optgroup>`
     + (vo?`<optgroup label="委外單位">${vo}</optgroup>`:'')
     + `<option value="__vendor__">＋ 新增委外單位…</option>`;
@@ -772,9 +795,9 @@ function paginatedBody(key,itemsHtml,emptyMsg){
   let btn='';
   if(limit<total){
     const nextLabel = level===0?`顯示10個（共${total}項）`:`顯示全部（共${total}項）`;
-    btn=`<button class="mini" style="margin-top:8px;" onclick="advancePriorityExpand('${key}')">${nextLabel}</button>`;
+    btn=`<button class="mini" style="margin-top:8px;" onclick="advancePriorityExpand(${jsArg(key)})">${nextLabel}</button>`;
   } else if(level>0){
-    btn=`<button class="mini" style="margin-top:8px;" onclick="resetPriorityExpand('${key}')">只顯示前5項</button>`;
+    btn=`<button class="mini" style="margin-top:8px;" onclick="resetPriorityExpand(${jsArg(key)})">只顯示前5項</button>`;
   }
   return shown+btn;
 }
@@ -811,7 +834,7 @@ function taskCountBadge(p){
   else if(remaining<=0) label='任務已勾完，可結案';
   else label=`還有${remaining}項任務待完成`;
   if(li.overdue) label=`已逾期・${label}`;
-  return `<span class="badge ${cls}" onclick="event.stopPropagation();goToTaskList('${p.id}')" style="cursor:pointer;text-decoration:underline;text-decoration-style:dotted;" title="點一下直接看未完成的任務清單">${label}</span>`;
+  return `<span class="badge ${cls}" onclick="event.stopPropagation();goToTaskList(${jsArg(p.id)})" style="cursor:pointer;text-decoration:underline;text-decoration-style:dotted;" title="點一下直接看未完成的任務清單">${label}</span>`;
 }
 function paginatedBody(key, itemsHtml, emptyMsg){
   const total=itemsHtml.length;
@@ -822,9 +845,9 @@ function paginatedBody(key, itemsHtml, emptyMsg){
   let btn='';
   if(limit<total){
     const nextLabel = level===0 ? `顯示10個（共${total}項）` : `顯示全部（共${total}項）`;
-    btn=`<button class="mini" style="margin-top:8px;" onclick="advancePriorityExpand('${key}')">${nextLabel}</button>`;
+    btn=`<button class="mini" style="margin-top:8px;" onclick="advancePriorityExpand(${jsArg(key)})">${nextLabel}</button>`;
   } else if(level>0){
-    btn=`<button class="mini" style="margin-top:8px;" onclick="resetPriorityExpand('${key}')">只顯示前5項</button>`;
+    btn=`<button class="mini" style="margin-top:8px;" onclick="resetPriorityExpand(${jsArg(key)})">只顯示前5項</button>`;
   }
   return shown+btn;
 }
@@ -873,9 +896,9 @@ function renderPriority(){
   });
   taskUrgent.sort((a,b)=>a.days-b.days);
   const taskItemsHtml=taskUrgent.map(x=>{
-    const ctx=(x.prev||x.next)?`<div class="small" style="margin-top:2px;">${x.prev?`上一步：${x.prev}`:''}${x.prev&&x.next?'　':''}${x.next?`下一步：${x.next}`:''}</div>`:'';
-    return `<div class="prow" onclick="goToProject('${x.p.id}')" style="cursor:pointer;">
-      <div class="prow-top"><span class="pname">${getName(x.p)} － ${x.label}</span>${assigneeTag(x.assignee)}<span class="badge ${x.days<0?'overdue':'soon7'}">${x.days<0?'已逾期':'7天內到期'}（${shortDate(x.end)}）</span></div>
+    const ctx=(x.prev||x.next)?`<div class="small" style="margin-top:2px;">${x.prev?`上一步：${esc(x.prev)}`:''}${x.prev&&x.next?'　':''}${x.next?`下一步：${esc(x.next)}`:''}</div>`:'';
+    return `<div class="prow" onclick="goToProject(${jsArg(x.p.id)})" style="cursor:pointer;">
+      <div class="prow-top"><span class="pname">${esc(getName(x.p))} － ${esc(x.label)}</span>${assigneeTag(x.assignee)}<span class="badge ${x.days<0?'overdue':'soon7'}">${x.days<0?'已逾期':'7天內到期'}（${shortDate(x.end)}）</span></div>
       ${ctx}
     </div>`;
   });
@@ -892,13 +915,13 @@ function renderPriority(){
     });
   });
   unassignedTasks.sort((a,b)=>{ if(a.end&&b.end) return a.end.localeCompare(b.end); if(a.end) return -1; if(b.end) return 1; return 0; });
-  const unassignedItemsHtml=unassignedTasks.map(x=>`<div class="prow" onclick="goToProject('${x.p.id}')" style="cursor:pointer;"><div class="prow-top"><span class="pname">${getName(x.p)} － ${x.label}</span><span class="small" style="color:var(--warn);">尚未指派${x.end?`・迄 ${shortDate(x.end)}`:''}</span></div></div>`);
+  const unassignedItemsHtml=unassignedTasks.map(x=>`<div class="prow" onclick="goToProject(${jsArg(x.p.id)})" style="cursor:pointer;"><div class="prow-top"><span class="pname">${esc(getName(x.p))} － ${esc(x.label)}</span><span class="small" style="color:var(--warn);">尚未指派${x.end?`・迄 ${shortDate(x.end)}`:''}</span></div></div>`);
   const stagnantBody=paginatedBody('unassigned', unassignedItemsHtml, `<div class="small">✓ 目前沒有尚未指派的任務項目</div>`);
 
   // 成本壓力
   const overCost=FINP().filter(p=>{ const r=getRow(p.id); return r.cost!==null && r.cost!=="" && Number(r.cost)/getEstRev(p)>=0.6; })
     .sort((a,b)=>(Number(getRow(b.id).cost)/getEstRev(b))-(Number(getRow(a.id).cost)/getEstRev(a)));
-  const costItemsHtml=overCost.map(p=>{const r=getRow(p.id); const ratio=Math.round(Number(r.cost)/getEstRev(p)*100); const isOver=ratio>=100;return `<div class="prow" onclick="goToProject('${p.id}')" style="cursor:pointer;"><div class="prow-top"><span class="pname">${getName(p)}</span><span class="cat">${p.cat}</span>${assigneeTag(r.assignee)}<span class="small" style="color:${isOver?'var(--warn)':'var(--accent2)'};font-weight:600;">${isOver?'已超支':'成本壓力'} ${ratio}%</span></div></div>`;});
+  const costItemsHtml=overCost.map(p=>{const r=getRow(p.id); const ratio=Math.round(Number(r.cost)/getEstRev(p)*100); const isOver=ratio>=100;return `<div class="prow" onclick="goToProject(${jsArg(p.id)})" style="cursor:pointer;"><div class="prow-top"><span class="pname">${esc(getName(p))}</span><span class="cat">${esc(p.cat)}</span>${assigneeTag(r.assignee)}<span class="small" style="color:${isOver?'var(--warn)':'var(--accent2)'};font-weight:600;">${isOver?'已超支':'成本壓力'} ${ratio}%</span></div></div>`;});
   const costBody=paginatedBody('cost', costItemsHtml, `<div class="small">✓ 沒有成本壓力超過60%的專案</div>`);
 
   const personTabs=[
@@ -914,7 +937,7 @@ function renderPriority(){
   ] : [];
   if(view!=="person" && !projectTabs.length){ box.innerHTML=''; return; }
   const tabs = view==="person" ? personTabs : projectTabs;
-  const tabBtns = tabs.length>1 ? `<div class="dtabs" style="margin-bottom:2px;">${tabs.map(tb=>`<button class="dtab ${priorityTab===tb.key?'active':''}" onclick="setPriorityTab('${tb.key}')">${tb.label}</button>`).join('')}</div>` : '';
+  const tabBtns = tabs.length>1 ? `<div class="dtabs" style="margin-bottom:2px;">${tabs.map(tb=>`<button class="dtab ${priorityTab===tb.key?'active':''}" onclick="setPriorityTab(${jsArg(tb.key)})">${tb.label}</button>`).join('')}</div>` : '';
   const active=tabs.find(tb=>tb.key===priorityTab)||tabs[0];
   box.innerHTML=`<div class="priority plain">${tabBtns}${active.body}</div>`;
 }
@@ -963,8 +986,8 @@ function monthCategoryTableHtml(){
   const bodyRows=cats.map(cat=>{
     const isOpen=monthCatTableExpanded.has(cat);
     const cells=CHART_MONTHS.map((m,mi)=>monthCell(data[cat][m]?fmt(data[cat][m]):'—',mi)).join('');
-    const headerLine=`<div class="mtable-row" onclick="toggleMonthCatTable('${cat}')" style="cursor:pointer;border-bottom:1px solid var(--line);padding:4px 0;">
-      <div><span class="arrow">${isOpen?'▾':'▸'}</span><span class="cat">${cat}</span></div>${cells}<div style="text-align:right;font-weight:600;">${fmt(rowTotal(cat))}</div>
+    const headerLine=`<div class="mtable-row" onclick="toggleMonthCatTable(${jsArg(cat)})" style="cursor:pointer;border-bottom:1px solid var(--line);padding:4px 0;">
+      <div><span class="arrow">${isOpen?'▾':'▸'}</span><span class="cat">${esc(cat)}</span></div>${cells}<div style="text-align:right;font-weight:600;">${fmt(rowTotal(cat))}</div>
     </div>`;
     let projLines='';
     if(isOpen){
@@ -975,8 +998,8 @@ function monthCategoryTableHtml(){
       projLines=plist.map(pd=>{
         const ptotal=CHART_MONTHS.reduce((s,m)=>s+(pd.monthly[m]||0),0);
         const pcells=CHART_MONTHS.map((m,mi)=>monthCell(pd.monthly[m]?fmt(pd.monthly[m]):'—',mi)).join('');
-        return `<div class="mtable-row" onclick="goToProject('${pd.p.id}')" style="cursor:pointer;background:rgba(0,0,0,.025);border-bottom:1px dashed var(--line);padding:4px 0;">
-          <div style="padding-left:20px;">└ ${getName(pd.p)}</div>${pcells}<div style="text-align:right;">${fmt(ptotal)}</div>
+        return `<div class="mtable-row" onclick="goToProject(${jsArg(pd.p.id)})" style="cursor:pointer;background:rgba(0,0,0,.025);border-bottom:1px dashed var(--line);padding:4px 0;">
+          <div style="padding-left:20px;">└ ${esc(getName(pd.p))}</div>${pcells}<div style="text-align:right;">${fmt(ptotal)}</div>
         </div>`;
       }).join('');
     }
@@ -1032,10 +1055,12 @@ function monthlyChartBody(){
 }
 // ================= 按月認列：下載 Excel =================
 // 只匯出目前登入的人看得到的專案（FINP()），跟畫面一致。
-const XLSX_URL='https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+// 用放在同一個 GitHub Pages 專案裡的固定版本（SheetJS 0.18.5），不再每次從 CDN 抓
+const XLSX_URL='./vendor/xlsx.full.min.js';
+const XLSX_SRI='sha512-r22gChDnGvBylk90+2e/ycr3RVrDi8DIOkIGNhJlKfuyQM4tIRAI062MaV8sfjQKYVGjOBaZBOA87z+IhZE9DA==';
 function loadXlsx(){
   if(window.XLSX) return Promise.resolve(window.XLSX);
-  return new Promise((res,rej)=>{ const sc=document.createElement('script'); sc.src=XLSX_URL; sc.onload=()=>res(window.XLSX); sc.onerror=()=>rej(new Error('無法載入 Excel 元件')); document.head.appendChild(sc); });
+  return new Promise((res,rej)=>{ const sc=document.createElement('script'); sc.src=XLSX_URL; sc.integrity=XLSX_SRI; sc.crossOrigin='anonymous'; sc.onload=()=>res(window.XLSX); sc.onerror=()=>rej(new Error('無法載入 Excel 元件')); document.head.appendChild(sc); });
 }
 function monthlyExportData(mode){
   const cats=[], data={}, projData={}, detail=[];
@@ -1160,11 +1185,11 @@ function renderFilters(){
   if(view!=="project") return;
   const cats=["全部",...allCats()];
   document.getElementById("filters").innerHTML=cats.map(c=>
-    `<button class="${catFilter===c?'active':''}" onclick="setFilter('${c}')">${c}${c==="全部"?"":" ("+ALLP.filter(p=>p.cat===c).length+")"}</button>`
+    `<button class="${catFilter===c?'active':''}" onclick="setFilter(${jsArg(c)})">${esc(c)}${c==="全部"?"":" ("+ALLP.filter(p=>p.cat===c).length+")"}</button>`
   ).join("");
   const statuses=["全部",...STATUSES];
   document.getElementById("statusfilters").innerHTML=statuses.map(s=>
-    `<button class="${statusFilter===s?'active':''}" onclick="setStatusFilter('${s}')">${s}${s==="全部"?"":" ("+ALLP.filter(p=>getRow(p.id).status===s).length+")"}</button>`
+    `<button class="${statusFilter===s?'active':''}" onclick="setStatusFilter(${jsArg(s)})">${s}${s==="全部"?"":" ("+ALLP.filter(p=>getRow(p.id).status===s).length+")"}</button>`
   ).join("");
   const me=myName();
   const owners=[...new Set(ALLP.map(p=>getRow(p.id).assignee).filter(Boolean))];
@@ -1174,7 +1199,7 @@ function renderFilters(){
   const others=owners.filter(n=>n!==me);
   document.getElementById("ownerfilters").innerHTML=
     `<button class="${ownerFilter==='全部'?'active':''}" onclick="setOwnerFilter('全部')">全部</button>`+
-    (me&&cnt(me)?`<button class="${ownerFilter===me?'active':''}" onclick="setOwnerFilter('${esc(me)}')">★ 我負責的 (${cnt(me)})</button>`:'')+
+    (me&&cnt(me)?`<button class="${ownerFilter===me?'active':''}" onclick="setOwnerFilter(${jsArg(me)})">★ 我負責的 (${cnt(me)})</button>`:'')+
     `<select onchange="setOwnerFilter(this.value)" style="border-radius:16px;padding:4px 8px;${ownerFilter!=='全部'&&ownerFilter!==me?'border-color:var(--accent2);':''}">
       <option value="全部" ${ownerFilter==='全部'||ownerFilter===me?'selected':''}>其他負責人…</option>
       ${others.map(n=>`<option value="${esc(n)}" ${ownerFilter===n?'selected':''}>${esc(n)} (${cnt(n)})</option>`).join('')}
@@ -1260,7 +1285,7 @@ function renderAddForm(){
   const box=document.getElementById("addform");
   if(view!=="project"){ box.innerHTML=""; return; }
   if(!showAddForm){ box.innerHTML=`<button onclick="toggleAddForm()" style="padding:6px 14px;border-radius:16px;border:1px solid var(--accent);background:var(--card);color:var(--accent);font-size:.8rem;cursor:pointer;">＋ 新增專案</button>`; return; }
-  const catOptions=allCats().map(c=>`<option value="${c}">`).join("");
+  const catOptions=allCats().map(c=>`<option value="${esc(c)}">`).join("");
   const t=todayISO();
   box.innerHTML=`<div class="priority plain">
     <h3>新增專案</h3>
@@ -1298,7 +1323,7 @@ function taskItemHtml(p,idx){
   const subs=materializedSubs(p.id,t);
   const custom=isCustomIdx(p,idx);
   const info=taskInfo(p,t);
-  const nameInput=`<input type="text" class="tname-input" value="${esc(t)}" onchange="renameTopTask('${p.id}',${idx},this.value)">`;
+  const nameInput=`<input type="text" class="tname-input" value="${esc(t)}" onchange="renameTopTask(${jsArg(p.id)},${idx},this.value)">`;
   let head;
   if(subs.length){
     const d=subs.filter(s=>s.done).length;
@@ -1308,48 +1333,48 @@ function taskItemHtml(p,idx){
   } else if(p.cat==="2C零售"){
     head=`${nameInput}<span class="progtxt">（尚未新增任務，自行加入常態或專案項目）</span>`;
   } else {
-    head=`<input type="checkbox" ${info.done?'checked':''} onchange="toggleTask('${p.id}',${idx},this.checked)">
+    head=`<input type="checkbox" ${info.done?'checked':''} onchange="toggleTask(${jsArg(p.id)},${idx},this.checked)">
       ${nameInput}
-      <select style="${selStyle(info.assignee)}" onchange="setTaskAssignee('${p.id}',${idx},this.value)">${personOptsWithVendor(info.assignee)}</select>
-      <input type="text" class="mddate" placeholder="月/日" value="${shortDate(info.end)}" onchange="setTaskDeadline('${p.id}',${idx},this.value)" title="截止日（例如9/15，跨年可打2027/1/15）">`;
+      <select style="${selStyle(info.assignee)}" onchange="setTaskAssignee(${jsArg(p.id)},${idx},this.value)">${personOptsWithVendor(info.assignee)}</select>
+      <input type="text" class="mddate" placeholder="月/日" value="${esc(shortDate(info.end))}" onchange="setTaskDeadline(${jsArg(p.id)},${idx},this.value)" title="截止日（例如9/15，跨年可打2027/1/15）">`;
   }
-  const ctrl=`<button class="mini" onclick="moveTopTask('${p.id}',${idx},-1)">▲</button><button class="mini" onclick="moveTopTask('${p.id}',${idx},1)">▼</button><button class="mini danger" onclick="deleteTopTask('${p.id}',${idx})">✕</button>`;
+  const ctrl=`<button class="mini" onclick="moveTopTask(${jsArg(p.id)},${idx},-1)">▲</button><button class="mini" onclick="moveTopTask(${jsArg(p.id)},${idx},1)">▼</button><button class="mini danger" onclick="deleteTopTask(${jsArg(p.id)},${idx})">✕</button>`;
   const children=subs.map((s,si)=>{
-    const isUrl=/^https?:\/\//.test((s.note||'').trim());
-    return `<div class="subitem" draggable="true" ondragstart="handleSubtaskDragStart(event,'${p.id}','${esc(t)}',${si})" ondragover="event.preventDefault();event.stopPropagation();this.classList.add('dragover-row');" ondragleave="this.classList.remove('dragover-row');" ondrop="event.stopPropagation();this.classList.remove('dragover-row');handleSubtaskDropAt(event,'${p.id}','${esc(t)}',${si})">
+    const noteUrl=safeHttpsUrl(s.note);
+    return `<div class="subitem" draggable="true" ondragstart="handleSubtaskDragStart(event,${jsArg(p.id)},${jsArg(t)},${si})" ondragover="event.preventDefault();event.stopPropagation();this.classList.add('dragover-row');" ondragleave="this.classList.remove('dragover-row');" ondrop="event.stopPropagation();this.classList.remove('dragover-row');handleSubtaskDropAt(event,${jsArg(p.id)},${jsArg(t)},${si})">
       <span class="draghandle" title="拖曳調整順序或移到其他母項目">⠿</span>
-      <input type="checkbox" ${s.done?'checked':''} onchange="toggleSubtask('${p.id}',${idx},${si},this.checked)">
-      <select onchange="setSubtaskAudience('${p.id}',${idx},${si},this.value)" style="${audienceStyle(s.audience)}" title="對象/分類">
+      <input type="checkbox" ${s.done?'checked':''} onchange="toggleSubtask(${jsArg(p.id)},${idx},${si},this.checked)">
+      <select onchange="setSubtaskAudience(${jsArg(p.id)},${idx},${si},this.value)" style="${audienceStyle(s.audience)}" title="對象/分類">
         <option value="">未分類</option>
-        ${getRow(p.id).audienceOptions.map(a=>`<option ${s.audience===a?'selected':''}>${a}</option>`).join('')}
+        ${getRow(p.id).audienceOptions.map(a=>`<option ${s.audience===a?'selected':''}>${esc(a)}</option>`).join('')}
       </select>
-      <input type="text" class="subname" value="${esc(s.name)}" onchange="renameSubtask('${p.id}',${idx},${si},this.value)">
-      <select style="${selStyle(s.assignee)}" onchange="setSubtaskAssignee('${p.id}',${idx},${si},this.value)">${personOptsWithVendor(s.assignee)}</select>
-      <input type="text" class="mddate" placeholder="月/日" value="${shortDate(s.end)}" onchange="setSubtaskDeadline('${p.id}',${idx},${si},this.value)" title="截止日（例如9/15，跨年可打2027/1/15）">
-      <input type="text" class="subnote" placeholder="備註或連結" value="${esc(s.note||'')}" onchange="setSubtaskNote('${p.id}',${idx},${si},this.value)">
-      ${isUrl?`<a href="${esc(s.note)}" target="_blank" rel="noopener" class="mini" style="text-decoration:none;">🔗</a>`:''}
-      <button class="mini danger" onclick="deleteSubtask('${p.id}',${idx},${si})">✕</button>
+      <input type="text" class="subname" value="${esc(s.name)}" onchange="renameSubtask(${jsArg(p.id)},${idx},${si},this.value)">
+      <select style="${selStyle(s.assignee)}" onchange="setSubtaskAssignee(${jsArg(p.id)},${idx},${si},this.value)">${personOptsWithVendor(s.assignee)}</select>
+      <input type="text" class="mddate" placeholder="月/日" value="${shortDate(s.end)}" onchange="setSubtaskDeadline(${jsArg(p.id)},${idx},${si},this.value)" title="截止日（例如9/15，跨年可打2027/1/15）">
+      <input type="text" class="subnote" placeholder="備註或連結" value="${esc(s.note||'')}" onchange="setSubtaskNote(${jsArg(p.id)},${idx},${si},this.value)">
+      ${noteUrl?`<a href="${esc(noteUrl)}" target="_blank" rel="noopener" class="mini" style="text-decoration:none;">🔗</a>`:''}
+      <button class="mini danger" onclick="deleteSubtask(${jsArg(p.id)},${idx},${si})">✕</button>
     </div>`;
   }).join("");
-  return `<div class="taskitem ${custom?'custom':''}" ondragover="event.preventDefault();this.classList.add('dragover');" ondragleave="this.classList.remove('dragover');" ondrop="this.classList.remove('dragover');handleSubtaskDrop(event,'${p.id}','${esc(t)}')">
+  return `<div class="taskitem ${custom?'custom':''}" ondragover="event.preventDefault();this.classList.add('dragover');" ondragleave="this.classList.remove('dragover');" ondrop="this.classList.remove('dragover');handleSubtaskDrop(event,${jsArg(p.id)},${jsArg(t)})">
     <div class="theader">${head}${ctrl}</div>
     ${children?`<div class="children">${children}</div>`:''}
-    <div class="addsub"><input type="text" id="subin-${p.id}-${idx}" placeholder="拆成子項目，分工用…"><button onclick="addSubtask('${p.id}',${idx})">+</button></div>
+    <div class="addsub"><input type="text" id="subin-${p.id}-${idx}" placeholder="拆成子項目，分工用…"><button onclick="addSubtask(${jsArg(p.id)},${idx})">+</button></div>
   </div>`;
 }
 
 function receiptsHtml(p){
   const list=getReceipts(p.id);
   const rows=list.map((rc,i)=>`<div class="subitem">
-      <input type="number" value="${rc.amount}" onchange="setReceiptField('${p.id}',${i},'amount',this.value===''?0:Number(this.value))" style="width:110px;">
-      <select onchange="setReceiptField('${p.id}',${i},'month',this.value===''?null:Number(this.value))">${monthOptsQ(rc.month)}</select>
-      <button class="mini danger" onclick="deleteReceipt('${p.id}',${i})">✕</button>
+      <input type="number" value="${esc(rc.amount)}" onchange="setReceiptField(${jsArg(p.id)},${i},'amount',this.value===''?0:Number(this.value))" style="width:110px;">
+      <select onchange="setReceiptField(${jsArg(p.id)},${i},'month',this.value===''?null:Number(this.value))">${monthOptsQ(rc.month)}</select>
+      <button class="mini danger" onclick="deleteReceipt(${jsArg(p.id)},${i})">✕</button>
     </div>`).join('');
   return `<div class="tasklist" style="margin-bottom:8px;">${rows||'<div class="small">尚未登錄任何一期收款</div>'}</div>
     <div class="addsub" style="margin-left:0;">
       <input type="number" id="recamt-${p.id}" placeholder="這一期金額" style="width:110px;">
       <select id="recmonth-${p.id}">${monthOptsQ(null)}</select>
-      <button onclick="addReceipt('${p.id}')">新增一期</button>
+      <button onclick="addReceipt(${jsArg(p.id)})">新增一期</button>
     </div>
     <div class="small" style="margin:6px 0 12px;">合計已收：${fmt(totalActual(p))}／預估 ${fmt(getEstRev(p))}</div>`;
 }
@@ -1372,7 +1397,7 @@ function ganttHtml(p){
   const dated=rows.filter(r=>r.start&&r.end);
   const undated=rows.filter(r=>!r.start||!r.end);
   if(!dated.length){
-    const undatedHtml0=undated.length?`<div class="small" style="margin-top:6px;">尚未標日期：${undated.map(r=>r.label).join('、')}（在下面任務清單填開始/截止日就會出現在圖上）</div>`:'';
+    const undatedHtml0=undated.length?`<div class="small" style="margin-top:6px;">尚未標日期：${undated.map(r=>esc(r.label)).join('、')}（在下面任務清單填開始/截止日就會出現在圖上）</div>`:'';
     return `<div class="gantt"><div class="small">目前沒有任何任務標了開始/截止日，先在下面任務清單裡加就會自動畫出來。</div>${undatedHtml0}</div>`;
   }
   const today=new Date(); today.setHours(0,0,0,0);
@@ -1427,22 +1452,22 @@ function ganttHtml(p){
         const gLeft=pct(sp.min), gWidth=Math.max(4,pct(sp.max)-pct(sp.min));
         const gLabel=sp.min===sp.max?shortDate(sp.min):`${shortDate(sp.min)}–${shortDate(sp.max)}`;
         const gDays=dayCount(sp.min,sp.max);
-        groupHeader=`<div class="ganttrow ganttgrouprow" onclick="toggleGanttGroup('${p.id}','${r.group}')" style="cursor:pointer;">
-          <div class="ganttlabel"><span class="arrow">${curGroupExpanded?'▾':'▸'}</span><b>${r.group}</b></div>
+        groupHeader=`<div class="ganttrow ganttgrouprow" onclick="toggleGanttGroup(${jsArg(p.id)},${jsArg(r.group)})" style="cursor:pointer;">
+          <div class="ganttlabel"><span class="arrow">${curGroupExpanded?'▾':'▸'}</span><b>${esc(r.group)}</b></div>
           <div class="ganttbararea">${overlayHtml}<div class="ganttbar ganttbar-group" style="left:${gLeft}%;width:${gWidth}%;"></div><span class="ganttdate" style="left:calc(${gLeft}% + ${gWidth}% + 8px);">${gLabel}（共${gDays}天）</span></div>
         </div>`;
       } else { curGroupExpanded=true; }
     }
     if(r.group && !curGroupExpanded) return groupHeader;
-    const labelText = r.group ? `　└ ${r.label}` : r.label;
+    const labelText = esc(r.group ? `　└ ${r.label}` : r.label);
     const audDot = audienceBadge(r.audience);
     return `${groupHeader}<div class="ganttrow ${r.group?'ganttchildrow':''}">
-      <div class="ganttlabel" style="display:flex;align-items:center;gap:3px;white-space:nowrap;">${audDot}<span>${labelText}</span>${r.assignee?`<span class="small" style="color:var(--sub);">・${r.assignee}</span>`:''}</div>
+      <div class="ganttlabel" style="display:flex;align-items:center;gap:3px;white-space:nowrap;">${audDot}<span>${labelText}</span>${r.assignee?`<span class="small" style="color:var(--sub);">・${esc(r.assignee)}</span>`:''}</div>
       <div class="ganttbararea">${overlayHtml}${markerHtml}${dateTag}</div>
     </div>`;
   }).join('');
-  const undatedHtml=undated.length?`<div class="small" style="margin-top:6px;">尚未標日期：${undated.map(r=>r.label).join('、')}（在下面任務清單填開始/截止日就會出現在圖上）</div>`:'';
-  const outOfRangeHtml=outOfRange.length?`<div class="small" style="margin-top:6px;color:var(--warn);">⚠ 以下任務超出專案起訖範圍（${shortDate(proj.start)}–${shortDate(proj.end)}），圖上會裁切在邊界，建議修改任務日期或調整專案起訖日：${outOfRange.map(r=>`${r.label}（${shortDate(r.start)===shortDate(r.end)?shortDate(r.start):shortDate(r.start)+'–'+shortDate(r.end)}）`).join('、')}</div>`:'';
+  const undatedHtml=undated.length?`<div class="small" style="margin-top:6px;">尚未標日期：${undated.map(r=>esc(r.label)).join('、')}（在下面任務清單填開始/截止日就會出現在圖上）</div>`:'';
+  const outOfRangeHtml=outOfRange.length?`<div class="small" style="margin-top:6px;color:var(--warn);">⚠ 以下任務超出專案起訖範圍（${shortDate(proj.start)}–${shortDate(proj.end)}），圖上會裁切在邊界，建議修改任務日期或調整專案起訖日：${outOfRange.map(r=>`${esc(r.label)}（${shortDate(r.start)===shortDate(r.end)?shortDate(r.start):shortDate(r.start)+'–'+shortDate(r.end)}）`).join('、')}</div>`:'';
   const weekHeaderHtml=`<div class="ganttrow ganttweekrow">
     <div class="ganttlabel"></div>
     <div class="ganttbararea">${weekLabels.map(w=>`<span class="ganttweeklabel" style="left:${w.pct}%;">${w.label}</span>`).join('')}</div>
@@ -1468,11 +1493,11 @@ function detailRow(p){
   const range=getRange(p);
   const collabList=collaboratorsOf(p);
   const collabHtml=collabList.length
-    ? collabList.map(x=>`<span class="${isStaff(x)?'tag-staff':'tag-partner'}">${x}</span>`).join(" ")
+    ? collabList.map(x=>`<span class="${isStaff(x)?'tag-staff':'tag-partner'}">${esc(x)}</span>`).join(" ")
     : '<span class="small">（尚無其他人被指派任務）</span>';
   const items=taskList(p).map((t,idx)=>taskItemHtml(p,idx)).join("");
   const tab=getDetailTab(p.id);
-  const tabBtn=(key,label)=>`<button class="dtab ${tab===key?'active':''}" onclick="setDetailTab('${p.id}','${key}')">${label}</button>`;
+  const tabBtn=(key,label)=>`<button class="dtab ${tab===key?'active':''}" onclick="setDetailTab(${jsArg(p.id)},${jsArg(key)})">${label}</button>`;
   const paymentOpts=[["","（未設定）"],["一次付清","a. 一次付清"],["訂金+尾款","b. 訂金＋尾款"],["自訂分期","c. 自訂期數"]].map(([v,l])=>`<option value="${v}" ${r.paymentMethod===v?'selected':''}>${l}</option>`).join('');
 
   const estPlanTotal=(r.estPlan||[]).reduce((s,e)=>s+Number(e.amount||0),0);
@@ -1483,32 +1508,32 @@ function detailRow(p){
   const mg=marginOf(p), rv=getEstRev(p)||0;
   const basicPane=`
     <div class="basicgrid">
-      <label style="max-width:420px;">專案名稱<input type="text" value="${esc(getName(p))}" onchange="saveName('${p.id}',this.value)"></label>
-      ${isAdmin()?`<label>類別<select onchange="setProjectCat('${p.id}',this.value)">${[...new Set([...allCats(),p.cat])].map(c=>`<option value="${esc(c)}" ${c===p.cat?'selected':''}>${esc(c)}</option>`).join('')}<option value="__new__">＋ 新增類別…</option></select></label>
-      <label>&nbsp;<button class="mini danger" onclick="deleteProject('${p.id}')" style="white-space:nowrap;">🗑 刪除專案</button></label>`:''}
+      <label style="max-width:420px;">專案名稱<input type="text" value="${esc(getName(p))}" onchange="saveName(${jsArg(p.id)},this.value)"></label>
+      ${isAdmin()?`<label>類別<select onchange="setProjectCat(${jsArg(p.id)},this.value)">${[...new Set([...allCats(),p.cat])].map(c=>`<option value="${esc(c)}" ${c===p.cat?'selected':''}>${esc(c)}</option>`).join('')}<option value="__new__">＋ 新增類別…</option></select></label>
+      <label>&nbsp;<button class="mini danger" onclick="deleteProject(${jsArg(p.id)})" style="white-space:nowrap;">🗑 刪除專案</button></label>`:''}
     </div>
     ${sec('專案時程','專案人員填寫')}
     <div class="basicgrid">
-      <label>起始日<input type="date" id="startdate-${p.id}" value="${range.start}" onchange="setField('${p.id}','startDate',this.value)"></label>
-      <label>截止日<input type="date" id="enddate-${p.id}" value="${range.end}" onchange="setField('${p.id}','endDate',this.value)"></label>
+      <label>起始日<input type="date" id="startdate-${p.id}" value="${esc(range.start)}" onchange="setField(${jsArg(p.id)},'startDate',this.value)"></label>
+      <label>截止日<input type="date" id="enddate-${p.id}" value="${esc(range.end)}" onchange="setField(${jsArg(p.id)},'endDate',this.value)"></label>
       <div style="min-width:280px;">
         <label title="可新增多個，會標在甘特圖上，方便看人力撞期">活動日
           <div style="display:flex;gap:6px;">
             <input type="date" id="newevent-${p.id}">
             <input type="text" id="neweventlabel-${p.id}" placeholder="簡易名稱（選填，如：開幕）" style="width:130px;">
-            <button class="mini" onclick="addEventDate('${p.id}')">＋</button>
+            <button class="mini" onclick="addEventDate(${jsArg(p.id)})">＋</button>
           </div>
         </label>
         <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:4px;">
-          ${(r.eventDates||[]).length?r.eventDates.map((e,ei)=>`<span class="todochip">${shortDate(e.date)}${e.label?`　${esc(e.label)}`:''}<button class="mini danger" style="padding:0 4px;" onclick="removeEventDate('${p.id}',${ei})">✕</button></span>`).join(''):'<span class="small">尚未新增</span>'}
+          ${(r.eventDates||[]).length?r.eventDates.map((e,ei)=>`<span class="todochip">${shortDate(e.date)}${e.label?`　${esc(e.label)}`:''}<button class="mini danger" style="padding:0 4px;" onclick="removeEventDate(${jsArg(p.id)},${ei})">✕</button></span>`).join(''):'<span class="small">尚未新增</span>'}
         </div>
       </div>
     </div>
     <div class="basicgrid" style="margin-top:8px;">
       <label style="max-width:520px;">雲端資料夾
         <div style="display:flex;gap:6px;">
-          <input type="url" placeholder="貼上 Google Drive 連結" value="${esc(r.driveLink)}" onchange="setField('${p.id}','driveLink',this.value)" style="flex:1;">
-          ${r.driveLink?`<a href="${esc(r.driveLink)}" target="_blank" rel="noopener" class="mini" style="text-decoration:none;white-space:nowrap;">📁 開啟</a>`:''}
+          <input type="url" placeholder="貼上 Google Drive 連結" value="${esc(r.driveLink)}" onchange="setLinkField(${jsArg(p.id)},'driveLink',this)" style="flex:1;">
+          ${safeHttpsUrl(r.driveLink)?`<a href="${esc(safeHttpsUrl(r.driveLink))}" target="_blank" rel="noopener" class="mini" style="text-decoration:none;white-space:nowrap;">📁 開啟</a>`:''}
         </div>
       </label>
     </div>
@@ -1517,54 +1542,54 @@ function detailRow(p){
     ${finOK(p)?`
     ${sec('款項預估','專案人員填寫')}
     <div class="basicgrid">
-      <label>預估收入<input type="number" value="${getEstRev(p)??''}" onchange="saveRev('${p.id}',this.value)"></label>
-      <label>預估成本<input type="number" value="${r.cost===null?'':r.cost}" onchange="setField('${p.id}','cost',this.value===''?null:Number(this.value))"></label>
+      <label>預估收入<input type="number" value="${esc(getEstRev(p)??'')}" onchange="saveRev(${jsArg(p.id)},this.value)"></label>
+      <label>預估成本<input type="number" value="${esc(r.cost===null?'':r.cost)}" onchange="setField(${jsArg(p.id)},'cost',this.value===''?null:Number(this.value))"></label>
       <label style="min-width:260px;">專案表網址（成本明細）
         <div style="display:flex;gap:6px;">
-          <input type="url" id="costlink-${p.id}" placeholder="貼上專案表連結" value="${esc(r.costLink||'')}" onchange="setField('${p.id}','costLink',this.value.trim())" style="flex:1;">
-          ${r.costLink?`<a href="${esc(r.costLink)}" target="_blank" rel="noopener" class="mini" style="text-decoration:none;white-space:nowrap;">📄 開啟</a>`:''}
+          <input type="url" id="costlink-${p.id}" placeholder="貼上專案表連結" value="${esc(r.costLink||'')}" onchange="setLinkField(${jsArg(p.id)},'costLink',this)" style="flex:1;">
+          ${safeHttpsUrl(r.costLink)?`<a href="${esc(safeHttpsUrl(r.costLink))}" target="_blank" rel="noopener" class="mini" style="text-decoration:none;white-space:nowrap;">📄 開啟</a>`:''}
         </div>
       </label>
-      <label>關係人交易<span class="paidcell" style="min-height:32px;"><input type="checkbox" ${r.relatedParty?'checked':''} ${canMarkPaid()?'':'disabled title="由財務勾選"'} onchange="setRelated('${p.id}',this.checked)"> ${r.relatedParty?'<b class="paidtag">關係人交易</b>':`<span class="small">${canMarkPaid()?'集團關係人打勾':'由財務勾選'}</span>`}</span></label>
+      <label>關係人交易<span class="paidcell" style="min-height:32px;"><input type="checkbox" ${r.relatedParty?'checked':''} ${canMarkPaid()?'':'disabled title="由財務勾選"'} onchange="setRelated(${jsArg(p.id)},this.checked)"> ${r.relatedParty?'<b class="paidtag">關係人交易</b>':`<span class="small">${canMarkPaid()?'集團關係人打勾':'由財務勾選'}</span>`}</span></label>
       <label>預估毛利（自動計算）<div class="calcbox" style="color:${mg<0?'var(--warn)':'var(--ok)'};">${fmt(mg)}${rv?`<span class="small">（${Math.round(mg/rv*100)}%）</span>`:''}</div></label>
     </div>
     <div class="basicgrid" style="margin-top:6px;">
-      <label>收款方式<select onchange="setField('${p.id}','paymentMethod',this.value)">${paymentOpts}</select></label>
-      ${r.paymentMethod==='自訂分期'?`<label>期數<input type="number" min="1" max="24" value="${r.installmentCount}" onchange="setField('${p.id}','installmentCount',Math.max(1,Math.min(24,Number(this.value)||2)))" style="width:70px;"></label>`:''}
+      <label>收款方式<select onchange="setField(${jsArg(p.id)},'paymentMethod',this.value)">${paymentOpts}</select></label>
+      ${r.paymentMethod==='自訂分期'?`<label>期數<input type="number" min="1" max="24" value="${esc(r.installmentCount)}" onchange="setField(${jsArg(p.id)},'installmentCount',Math.max(1,Math.min(24,Number(this.value)||2)))" style="width:70px;"></label>`:''}
       <label>發票張數<div class="calcbox">${slotsN} 張</div></label>
-      ${r.paymentMethod?`<label>對應到甘特圖<button class="mini" onclick="syncPaymentSubtasks('${p.id}')" style="white-space:nowrap;">＋ 產生付款子項目</button></label>`:''}
+      ${r.paymentMethod?`<label>對應到甘特圖<button class="mini" onclick="syncPaymentSubtasks(${jsArg(p.id)})" style="white-space:nowrap;">＋ 產生付款子項目</button></label>`:''}
     </div>
     ${sec('認列預估','專案人員填寫・會出現在月營收表，快速看到未來營收')}
     <table class="slottable"><thead><tr><th>期別</th><th>預估認列月份</th><th>預估認列金額</th><th></th></tr></thead><tbody>
       ${estSlots.map((e,i)=>`<tr><td>${slotName(r,i)}</td>
-        <td><select id="estm-${p.id}-${i}" onchange="setEstSlot('${p.id}',${i},'month',this.value===''?null:Number(this.value))">${monthOptsQ(e.month)}</select></td>
-        <td><input type="number" id="esta-${p.id}-${i}" value="${e.amount??''}" placeholder="金額" onchange="setEstSlot('${p.id}',${i},'amount',this.value===''?null:Number(this.value))"></td>
+        <td><select id="estm-${p.id}-${i}" onchange="setEstSlot(${jsArg(p.id)},${i},'month',this.value===''?null:Number(this.value))">${monthOptsQ(e.month)}</select></td>
+        <td><input type="number" id="esta-${p.id}-${i}" value="${esc(e.amount??'')}" placeholder="金額" onchange="setEstSlot(${jsArg(p.id)},${i},'amount',this.value===''?null:Number(this.value))"></td>
         <td class="small">${invSlots[i]&&invSlots[i].amount&&invSlots[i].date?'已開發票，改用發票金額':''}</td></tr>`).join('')}
     </tbody></table>
     <div class="small" style="margin-top:4px;${estSum&&Math.abs(estSum-rv)>1?'color:var(--warn);':''}">預估認列合計：${fmt(estSum)}／預估收入 ${fmt(rv)}${estSum&&Math.abs(estSum-rv)>1?'（兩者對不起來，請確認）':''}${!estSum?'（尚未填寫時，依截止日自動估算）':''}</div>
     ${sec('發票開立','發票資料專案人員可填・「已收款」由財務勾選')}
     <table class="slottable"><thead><tr><th>期別</th><th>實際開立發票日</th><th>發票號碼</th><th>發票金額</th><th>預計收款日</th><th>實際收款</th></tr></thead><tbody>
       ${invSlots.map((v,i)=>`<tr class="${v.paid?'paidrow':''}"><td>${slotName(r,i)}</td>
-        <td><input type="date" id="invd-${p.id}-${i}" value="${v.date||''}" onchange="setInvField('${p.id}',${i},'date',this.value)"></td>
-        <td><input type="text" id="invn-${p.id}-${i}" value="${esc(v.no||'')}" placeholder="例：AB12345678" onchange="setInvField('${p.id}',${i},'no',this.value.trim())"></td>
-        <td><input type="number" id="inva-${p.id}-${i}" value="${v.amount??''}" placeholder="金額" onchange="setInvField('${p.id}',${i},'amount',this.value===''?null:Number(this.value))"></td>
-        <td><input type="date" id="invdue-${p.id}-${i}" value="${v.dueDate||''}" onchange="setInvField('${p.id}',${i},'dueDate',this.value)"></td>
-        <td><label class="paidcell"><input type="checkbox" ${v.paid?'checked':''} ${canMarkPaid()?'':'disabled title="由財務勾選"'} onchange="setInvPaid('${p.id}',${i},this.checked)">
+        <td><input type="date" id="invd-${p.id}-${i}" value="${esc(v.date||'')}" onchange="setInvField(${jsArg(p.id)},${i},'date',this.value)"></td>
+        <td><input type="text" id="invn-${p.id}-${i}" value="${esc(v.no||'')}" placeholder="例：AB12345678" onchange="setInvField(${jsArg(p.id)},${i},'no',this.value.trim())"></td>
+        <td><input type="number" id="inva-${p.id}-${i}" value="${esc(v.amount??'')}" placeholder="金額" onchange="setInvField(${jsArg(p.id)},${i},'amount',this.value===''?null:Number(this.value))"></td>
+        <td><input type="date" id="invdue-${p.id}-${i}" value="${esc(v.dueDate||'')}" onchange="setInvField(${jsArg(p.id)},${i},'dueDate',this.value)"></td>
+        <td><label class="paidcell"><input type="checkbox" ${v.paid?'checked':''} ${canMarkPaid()?'':'disabled title="由財務勾選"'} onchange="setInvPaid(${jsArg(p.id)},${i},this.checked)">
           ${v.paid?`<b class="paidtag">已收款</b>`:`<span class="small">${canMarkPaid()?'收到款後打勾':'由財務勾選'}</span>`}</label>
-          ${v.paid?(canMarkPaid()?`<input type="date" id="invpd-${p.id}-${i}" value="${v.paidDate||''}" onchange="setInvField('${p.id}',${i},'paidDate',this.value)" title="實際收款日">`:`<div class="small">${v.paidDate?shortDate(v.paidDate):''}</div>`):''}</td></tr>`).join('')}
+          ${v.paid?(canMarkPaid()?`<input type="date" id="invpd-${p.id}-${i}" value="${esc(v.paidDate||'')}" onchange="setInvField(${jsArg(p.id)},${i},'paidDate',this.value)" title="實際收款日">`:`<div class="small">${v.paidDate?shortDate(v.paidDate):''}</div>`):''}</td></tr>`).join('')}
     </tbody></table>
     <div class="small" style="margin:6px 0 12px;">已開發票 ${fmt(totalActual(p))}・已收款 <b style="color:var(--ok);">${fmt(totalPaid(p))}</b>／預估收入 ${fmt(rv)}</div>
     `:`<div class="small" style="margin:12px 0 4px;color:var(--sub);">🔒 款項、認列與發票資料只有這個專案的負責人和財務看得到</div>`}`;
   const taskPane=`
-    <div style="margin-bottom:10px;"><button class="mini" onclick="applyMarketTemplate('${p.id}')">🏪 套用市集工作模組</button></div>
+    <div style="margin-bottom:10px;"><button class="mini" onclick="applyMarketTemplate(${jsArg(p.id)})">🏪 套用市集工作模組</button></div>
     <div class="small" style="margin-bottom:10px;">
       對象分類（子項目「對象」欄位的選項，這個專案自己的設定）：
       <div style="display:flex;flex-wrap:wrap;gap:6px;margin:4px 0;">
-        ${r.audienceOptions.map((a,ai)=>`<span class="todochip" style="background:${audienceColorFor(a)};">${a}<button class="mini danger" style="padding:0 4px;" onclick="removeAudienceOption('${p.id}',${ai})">✕</button></span>`).join('')}
+        ${r.audienceOptions.map((a,ai)=>`<span class="todochip" style="background:${audienceColorFor(a)};">${esc(a)}<button class="mini danger" style="padding:0 4px;" onclick="removeAudienceOption(${jsArg(p.id)},${ai})">✕</button></span>`).join('')}
       </div>
       <div style="display:flex;gap:6px;">
         <input type="text" id="newaudopt-${p.id}" placeholder="新增對象分類，例如：董事會" style="width:160px;">
-        <button class="mini" onclick="addAudienceOption('${p.id}')">＋</button>
+        <button class="mini" onclick="addAudienceOption(${jsArg(p.id)})">＋</button>
       </div>
     </div>
     <h4>甘特圖（依任務起訖日自動產生，紅線＝今天）</h4>
@@ -1573,10 +1598,10 @@ function detailRow(p){
     <div class="tasklist">${items}</div>
     <div class="addtask">
       <input type="text" placeholder="新增一項頂層工作…" id="add-${p.id}">
-      <button onclick="addTask('${p.id}')">新增</button>
+      <button onclick="addTask(${jsArg(p.id)})">新增</button>
     </div>`;
 
-  const notesPane=`<textarea class="notesbox" placeholder="在這裡自由記錄，例如：9/25中秋公司休假、10/9雙十連假影響交件…" onchange="setField('${p.id}','notes',this.value)">${esc(r.notes)}</textarea>`;
+  const notesPane=`<textarea class="notesbox" placeholder="在這裡自由記錄，例如：9/25中秋公司休假、10/9雙十連假影響交件…" onchange="setField(${jsArg(p.id)},'notes',this.value)">${esc(r.notes)}</textarea>`;
 
   const pane = tab==='tasks' ? taskPane : tab==='notes' ? notesPane : basicPane;
   return `<tr class="detail"><td colspan="10"><div class="detailwrap">
@@ -1595,19 +1620,19 @@ function renderProjectView(){
     const tp=taskProgress(p);
     const pct=tp.total?Math.round(tp.done/tp.total*100):0;
     const urg=urgency(p);
-    const driveIcon=r.driveLink?`<a class="drive" href="${r.driveLink}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="開啟雲端資料夾">📁</a>`:'';
-    const lastEditNote=r.lastEdit?`<div class="small">最後更新：${r.lastEdit.by||'匿名'}・${relTime(r.lastEdit.at)}</div>`:'';
+    const driveIcon=safeHttpsUrl(r.driveLink)?`<a class="drive" href="${esc(safeHttpsUrl(r.driveLink))}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="開啟雲端資料夾">📁</a>`:'';
+    const lastEditNote=r.lastEdit?`<div class="small">最後更新：${esc(r.lastEdit.by||'匿名')}・${relTime(r.lastEdit.at)}</div>`:'';
     let html=`<tr id="proj-${p.id}" class="${open?'rowopen':''}">
-      <td><span class="cat">${p.cat}</span></td>
-      <td class="name" onclick="toggleExpand('${p.id}')"><span class="arrow">${open?'▾':'▸'}</span>${getName(p)}${driveIcon}${collaboratorsOf(p).length?`<div class="small">+${collaboratorsOf(p).length} 協作</div>`:""}${lastEditNote}</td>
+      <td><span class="cat">${esc(p.cat)}</span></td>
+      <td class="name" onclick="toggleExpand(${jsArg(p.id)})"><span class="arrow">${open?'▾':'▸'}</span>${esc(getName(p))}${driveIcon}${collaboratorsOf(p).length?`<div class="small">+${collaboratorsOf(p).length} 協作</div>`:""}${lastEditNote}</td>
       ${!showFinCols?'':(finOK(p)?`<td class="rev">${fmt(getEstRev(p))}${isRelated(p)?'<br><span class="small">關係人交易</span>':(isNonOp(p)?'<br><span class="small">營業外收入</span>':'')}</td>
       <td class="rev">${totalActual(p)?fmt(totalActual(p)):'—'}${diffLabel(p)}${totalPaid(p)?`<span class="small" style="color:var(--ok);font-weight:600;">已收 ${fmt(totalPaid(p))}</span>`:''}${slotCount(r)>1?`<span class="small">${getInvSlots(p).filter(isIssued).length}/${slotCount(r)} 張已開</span>`:''}</td>
       <td class="rev">${r.cost===null||r.cost===""?'—':fmt(Number(r.cost))}${costNote(p)}</td>
       <td class="rev"><b style="color:${marginOf(p)<0?'var(--warn)':'var(--ok)'}">${fmt(marginOf(p))}</b></td>`:`<td class="rev small" colspan="4" style="text-align:center;color:var(--sub);">🔒 僅負責人與財務可見</td>`)}
       <td>${shortDate(range.start)}–${shortDate(range.end)}<br>${taskCountBadge(p)}</td>
       <td><div class="progwrap"><div class="bar"><i style="width:${pct}%"></i></div><span class="progtxt">${tp.done}/${tp.total}</span></div></td>
-      <td><select class="status-${r.status}" onchange="setField('${p.id}','status',this.value)">${opts}</select></td>
-      <td><select style="${selStyle(r.assignee)}" ${canEditAssignee()?'':'disabled title="只有管理者可以更換負責人"'} onchange="setField('${p.id}','assignee',this.value)">${personOpts(r.assignee)}</select></td>
+      <td><select class="status-${esc(r.status)}" onchange="setField(${jsArg(p.id)},'status',this.value)">${opts}</select></td>
+      <td><select style="${selStyle(r.assignee)}" ${canEditAssignee()?'':'disabled title="只有管理者可以更換負責人"'} onchange="setField(${jsArg(p.id)},'assignee',this.value)">${personOpts(r.assignee)}</select></td>
     </tr>`;
     if(open) html+=detailRow(p);
     return html;
@@ -1631,16 +1656,16 @@ function personTop(t){
 function assigneeTag(name){
   if(!name) return `<span class="small" style="color:var(--warn);">未指派</span>`;
   const cls = isStaff(name)?'tag-staff' : isVendor(name)?'tag-vendor' : 'tag-partner';
-  return `<span class="${cls}">${name}</span>`;
+  return `<span class="${cls}">${esc(name)}</span>`;
 }
 function projRowHtml(p,badgeHtml){
   const r=getRow(p.id);
   const tp=taskProgress(p);
   const pct=tp.total?Math.round(tp.done/tp.total*100):0;
   const badge=badgeHtml||`<span class="badge ${urgency(p)}">${URG_LABEL[urgency(p)]}</span>`;
-  return `<div class="prow" onclick="goToProject('${p.id}')" style="cursor:pointer;">
-    <div class="prow-top"><span class="pname">${getName(p)}</span><span class="cat">${p.cat}</span>${assigneeTag(r.assignee)}${badge}</div>
-    <div class="prow-bottom"><span>${r.status}・迄 ${shortDate(getRange(p).end)}</span><span>任務 ${tp.done}/${tp.total}（${pct}%）</span></div>
+  return `<div class="prow" onclick="goToProject(${jsArg(p.id)})" style="cursor:pointer;">
+    <div class="prow-top"><span class="pname">${esc(getName(p))}</span><span class="cat">${esc(p.cat)}</span>${assigneeTag(r.assignee)}${badge}</div>
+    <div class="prow-bottom"><span>${esc(r.status)}・迄 ${shortDate(getRange(p).end)}</span><span>任務 ${tp.done}/${tp.total}（${pct}%）</span></div>
   </div>`;
 }
 function capacityOverviewHtml(){
@@ -1687,9 +1712,9 @@ function capacityOverviewHtml(){
     const totalActive=g.activeNow.length+g.activeCollab.length;
     const severityBg = totalActive===0?'rgba(46,125,50,.08)' : totalActive>=3?'rgba(192,57,43,.10)' : 'rgba(181,101,29,.08)';
     const isOpen=capacityExpanded.has(g.name);
-    const moveBtns=`<button class="mini" onclick="event.stopPropagation();moveCapacityPerson('${g.name}',-1)">▲</button><button class="mini" onclick="event.stopPropagation();moveCapacityPerson('${g.name}',1)">▼</button>`;
-    const header=`<div class="ganttrow" onclick="toggleCapacityGroup('${g.name}')" style="cursor:pointer;background:${severityBg};">
-      <div class="ganttlabel" style="${LBL}display:flex;align-items:center;gap:2px;overflow:hidden;white-space:nowrap;"><span class="arrow">${isOpen?'▾':'▸'}</span><b onclick="event.stopPropagation();goToPersonCard('${g.name}')" title="同時${totalActive}案：負責${g.activeNow.length}・協作${g.activeCollab.length}" style="text-decoration:underline;text-decoration-style:dotted;">${g.name}</b>${moveBtns}</div>
+    const moveBtns=`<button class="mini" onclick="event.stopPropagation();moveCapacityPerson(${jsArg(g.name)},-1)">▲</button><button class="mini" onclick="event.stopPropagation();moveCapacityPerson(${jsArg(g.name)},1)">▼</button>`;
+    const header=`<div class="ganttrow" onclick="toggleCapacityGroup(${jsArg(g.name)})" style="cursor:pointer;background:${severityBg};">
+      <div class="ganttlabel" style="${LBL}display:flex;align-items:center;gap:2px;overflow:hidden;white-space:nowrap;"><span class="arrow">${isOpen?'▾':'▸'}</span><b onclick="event.stopPropagation();goToPersonCard(${jsArg(g.name)})" title="同時${totalActive}案：負責${g.activeNow.length}・協作${g.activeCollab.length}" style="text-decoration:underline;text-decoration-style:dotted;">${esc(g.name)}</b>${moveBtns}</div>
       <div class="ganttbararea">${overlayHtml}</div>
     </div>`;
     if(!isOpen) return header;
@@ -1700,8 +1725,8 @@ function capacityOverviewHtml(){
       const left=pctOf(r.start), width=Math.max(2,pctOf(r.end)-pctOf(r.start));
       const evRow=getRow(p.id);
       const evM=eventMarksHtml(evRow.eventDates,pctOf,{widthPx:capW});
-      return `<div class="ganttrow" onclick="goToProject('${p.id}')" style="cursor:pointer;${evM.extraPx?'align-items:flex-start;':''}">
-        <div class="ganttlabel" style="${LBL}overflow:hidden;white-space:nowrap;">　└ <span class="cat" style="font-size:.62rem;padding:1px 4px;">${p.cat}</span> ${getName(p)}</div>
+      return `<div class="ganttrow" onclick="goToProject(${jsArg(p.id)})" style="cursor:pointer;${evM.extraPx?'align-items:flex-start;':''}">
+        <div class="ganttlabel" style="${LBL}overflow:hidden;white-space:nowrap;">　└ <span class="cat" style="font-size:.62rem;padding:1px 4px;">${esc(p.cat)}</span> ${esc(getName(p))}</div>
         <div class="ganttbararea" style="${evM.extraPx?`margin-bottom:${evM.extraPx}px;`:''}">${overlayHtml}<div class="ganttbar ${cls}" style="left:${left}%;width:${width}%;" title="${shortDate(r.start)}–${shortDate(r.end)}"></div>${evM.html}</div>
       </div>`;
     }).join('');
@@ -1712,8 +1737,8 @@ function capacityOverviewHtml(){
       const left=pctOf(r.start), width=Math.max(2,pctOf(r.end)-pctOf(r.start));
       const rr=getRow(p.id);
       const evM=eventMarksHtml(rr.eventDates,pctOf,{widthPx:capW,collab:true});
-      return `<div class="ganttrow" onclick="goToProject('${p.id}')" style="cursor:pointer;${evM.extraPx?'align-items:flex-start;':''}">
-        <div class="ganttlabel" style="${LBL}overflow:hidden;white-space:nowrap;" title="協作・負責:${rr.assignee||'未指派'}">　└ <span class="cat" style="font-size:.62rem;padding:1px 4px;">${p.cat}</span> ${getName(p)}</div>
+      return `<div class="ganttrow" onclick="goToProject(${jsArg(p.id)})" style="cursor:pointer;${evM.extraPx?'align-items:flex-start;':''}">
+        <div class="ganttlabel" style="${LBL}overflow:hidden;white-space:nowrap;" title="協作・負責:${esc(rr.assignee||'未指派')}">　└ <span class="cat" style="font-size:.62rem;padding:1px 4px;">${esc(p.cat)}</span> ${esc(getName(p))}</div>
         <div class="ganttbararea" style="${evM.extraPx?`margin-bottom:${evM.extraPx}px;`:''}">${overlayHtml}<div class="ganttbar collabbar ${cls}" style="left:${left}%;width:${width}%;" title="協作・${shortDate(r.start)}–${shortDate(r.end)}"></div>${evM.html}</div>
       </div>`;
     }).join('');
@@ -1746,7 +1771,7 @@ function personMonthlyHtml(t){
     const [y,m]=ym.split('-').map(Number);
     const label=(y!==REF_YEAR?y+'/':'')+m+'月';
     const rows=items.filter(i=>i.ym===ym).sort((a,b)=>a.date.localeCompare(b.date));
-    const body=rows.length? rows.map(it=>`<div class="monthitem${it.done?' done':''}">${shortDate(it.date)} <span class="monthproj">${it.proj}</span>：${it.task}</div>`).join('') : '<div class="small">（無）</div>';
+    const body=rows.length? rows.map(it=>`<div class="monthitem${it.done?' done':''}">${shortDate(it.date)} <span class="monthproj">${esc(it.proj)}</span>：${esc(it.task)}</div>`).join('') : '<div class="small">（無）</div>';
     return `<div class="monthcol"><div class="monthcolhead">${label}</div>${body}</div>`;
   }).join('');
   return `<div class="monthgridscroll"><div class="monthgrid">${cols}</div></div>`;
@@ -1785,22 +1810,22 @@ function personDetailHtml(t){
     const groupsHtml=[...byParent.entries()].map(([parent,arr])=>{
       const lines=arr.map(x=>{
         const cb=x.si===null
-          ? `<input type="checkbox" onchange="toggleTask('${x.p.id}',${x.idx},this.checked)">`
-          : `<input type="checkbox" onchange="toggleSubtask('${x.p.id}',${x.idx},${x.si},this.checked)">`;
-        return `<label class="todochip">${cb}<span>${x.name}</span></label>`;
+          ? `<input type="checkbox" onchange="toggleTask(${jsArg(x.p.id)},${x.idx},this.checked)">`
+          : `<input type="checkbox" onchange="toggleSubtask(${jsArg(x.p.id)},${x.idx},${x.si},this.checked)">`;
+        return `<label class="todochip">${cb}<span>${esc(x.name)}</span></label>`;
       }).join("");
-      const parentLabel = parent!=='__leaf__' ? `<div class="small" style="font-weight:600;margin-bottom:2px;">${parent}</div>` : '';
+      const parentLabel = parent!=='__leaf__' ? `<div class="small" style="font-weight:600;margin-bottom:2px;">${esc(parent)}</div>` : '';
       return `<div class="todoparentcol">${parentLabel}<div class="todochips">${lines}</div></div>`;
     }).join("");
     return `<div class="todogroup">
-      <div class="todohead"><span class="pname">${getName(p)}</span><span class="cat">${p.cat}</span><span class="badge ${urgency(p)}">${URG_LABEL[urgency(p)]}</span></div>
+      <div class="todohead"><span class="pname">${esc(getName(p))}</span><span class="cat">${esc(p.cat)}</span><span class="badge ${urgency(p)}">${URG_LABEL[urgency(p)]}</span></div>
       <div class="todoparentgrid">${groupsHtml}</div>
     </div>`;
   }).join("") : `<div class="prow small">🎉 目前沒有待辦任務</div>`;
   const moreBtn = projIds.length>TODO_LIMIT
     ? (todoIsExpanded
-        ? `<button class="mini" onclick="toggleTodoExpand('${t}')" style="margin-top:6px;">只顯示最急的${TODO_LIMIT}個</button>`
-        : `<button class="mini" onclick="toggleTodoExpand('${t}')" style="margin-top:6px;">顯示全部（共${projIds.length}個待辦專案）</button>`)
+        ? `<button class="mini" onclick="toggleTodoExpand(${jsArg(t)})" style="margin-top:6px;">只顯示最急的${TODO_LIMIT}個</button>`
+        : `<button class="mini" onclick="toggleTodoExpand(${jsArg(t)})" style="margin-top:6px;">顯示全部（共${projIds.length}個待辦專案）</button>`)
     : '';
   const doneCount=myTasks.length-pending.length;
   const ocExpanded=ownedCollabExpandedSet.has(t);
@@ -1815,7 +1840,7 @@ function personDetailHtml(t){
     ${doneCount?`<div class="small" style="margin-top:6px;">已完成 ${doneCount} 項（不列出）</div>`:''}
     <h3 style="margin-top:16px;">本季每月重點（依截止日）</h3>
     ${personMonthlyHtml(t)}
-    <button class="mini" style="margin-top:12px;" onclick="toggleOwnedCollab('${t}')">${ocExpanded?'收合':'顯示'}負責／協作專案清單（${owned.length}負責・${collab.length}協作）</button>
+    <button class="mini" style="margin-top:12px;" onclick="toggleOwnedCollab(${jsArg(t)})">${ocExpanded?'收合':'顯示'}負責／協作專案清單（${owned.length}負責・${collab.length}協作）</button>
     ${ocPane}
   </div>`;
 }
@@ -1833,11 +1858,11 @@ function personCard(t){
   }));
   const top=personTop(t);
   const topHtml=top
-    ? `<div class="small" style="margin-top:5px;">🔺最優先：${getName(top)} <span class="badge ${urgency(top)}">${URG_LABEL[urgency(top)]}</span></div>`
+    ? `<div class="small" style="margin-top:5px;">🔺最優先：${esc(getName(top))} <span class="badge ${urgency(top)}">${URG_LABEL[urgency(top)]}</span></div>`
     : `<div class="small" style="margin-top:5px;color:var(--ok);">✓ 目前沒有急件</div>`;
   const open=expandedPerson.has(t);
   const role=ROLES[t];
-  return `<div class="pcard ${group}" id="pcard-${t}" onclick="togglePerson('${t}')" style="cursor:pointer;">
+  return `<div class="pcard ${group}" id="pcard-${t}" onclick="togglePerson(${jsArg(t)})" style="cursor:pointer;">
       <b>${t}${role?` <span class="rolelabel">・${role}</span>`:''}</b><span>負責 ${activeOwned.length}/${owned.length} 案・協作 ${collabOn.length} 案・${taskCount} 項任務</span>${topHtml}
     </div>${open?personDetailHtml(t):''}`;
 }
@@ -1852,7 +1877,7 @@ function vendorCard(v){
   }));
   return `<div class="pcard" style="border-left-color:#c9a227;">
       <div style="display:flex;justify-content:space-between;align-items:center;">
-        <b>${v}</b><button class="mini" onclick="renameVendor('${esc(v)}')" title="改名（會同步更新所有指派給這個名字的任務）">✎</button>
+        <b>${esc(v)}</b><button class="mini" onclick="renameVendor(${jsArg(v)})" title="改名（會同步更新所有指派給這個名字的任務）">✎</button>
       </div>
       <span>${taskCount} 項任務</span>
     </div>`;
@@ -1867,7 +1892,7 @@ function renderPersonView(){
   const vendorCards=vendors.length?`<div class="small" style="margin:14px 0 4px;">委外單位</div><div class="people">${vendors.map(vendorCard).join("")}</div>`:'';
   const un=ALLP.filter(p=>!getRow(p.id).assignee);
   const unHtml=un.length ? `<div class="priority" style="margin-top:10px;"><h3>尚未指派負責人（${un.length}）</h3>
-      ${un.map(p=>`<div class="row"><span>${getName(p)}（${p.cat}）</span><select style="width:150px;" ${canEditAssignee()?'':'disabled title="只有管理者可以指派負責人"'} onchange="setField('${p.id}','assignee',this.value)">${personOpts('')}</select></div>`).join('')}
+      ${un.map(p=>`<div class="row"><span>${esc(getName(p))}（${esc(p.cat)}）</span><select style="width:150px;" ${canEditAssignee()?'':'disabled title="只有管理者可以指派負責人"'} onchange="setField(${jsArg(p.id)},'assignee',this.value)">${personOpts('')}</select></div>`).join('')}
     </div>` : `<div class="priority ok" style="margin-top:10px;"><h3>✓ 所有專案都已指派負責人</h3></div>`;
   const noTasks=noTaskScope(ALLP.filter(p=>getRow(p.id).status!=="已完成" && taskProgress(p).done===0));
   const noTasksHtml=noTasks.length ? `<div class="priority" style="margin-top:10px;"><h3>${noTaskScopeMine()?"你負責、":""}尚未拆分任務清單（${noTasks.length}）</h3>
@@ -1902,9 +1927,10 @@ function render(){
   }
 }
 
-try{ localStorage.removeItem('dash_backup_v2'); }catch(e){}
-function localBackupSave(){ try{ localStorage.setItem('dash_backup_v3', JSON.stringify(state)); }catch(e){} }
-function localBackupLoad(){ try{ const s=localStorage.getItem('dash_backup_v3'); return s?JSON.parse(s):null; }catch(e){ return null; } }
+// 本機備份只放在這個分頁（sessionStorage），關掉分頁就清除；舊版留在 localStorage 的完整備份一併刪掉。
+try{ localStorage.removeItem('dash_backup_v2'); localStorage.removeItem('dash_backup_v3'); }catch(e){}
+function localBackupSave(){ try{ sessionStorage.setItem('dash_backup_v3', JSON.stringify(state)); }catch(e){} }
+function localBackupLoad(){ try{ const s=sessionStorage.getItem('dash_backup_v3'); return s?JSON.parse(s):null; }catch(e){ return null; } }
 function showRestoreBanner(backup){
   const box=document.getElementById("restorebanner");
   box.innerHTML=`<div class="priority" style="margin-bottom:14px;">
@@ -1936,8 +1962,15 @@ function sheetConfigured(){ return SHEET_API_URL && !SHEET_API_URL.includes("PAS
 // 權限由 Google Apps Script 判斷；沒權限的數字根本不會傳到這台電腦。這裡只負責「畫面要不要顯示」。
 let ME=null;            // {name, level:'admin'|'finance'|'owner'|'none'}，沒登入是 null
 let loginError=null;
-function loadCode(){ try{ return localStorage.getItem('dash_code')||''; }catch(e){ return ''; } }
-function saveCode(v){ try{ if(v) localStorage.setItem('dash_code',v); else localStorage.removeItem('dash_code'); }catch(e){} }
+// 密碼放在 sessionStorage：重新整理不用重登，關掉分頁就清除，不會長期留在這台電腦上。
+let loginCode='';
+try{ loginCode=sessionStorage.getItem('dash_code')||''; }catch(e){}
+function loadCode(){ return loginCode; }
+function saveCode(value){
+  loginCode=value||'';
+  try{ if(loginCode) sessionStorage.setItem('dash_code',loginCode); else sessionStorage.removeItem('dash_code'); }catch(e){}
+}
+try{ localStorage.removeItem('dash_code'); }catch(e){}
 function finLevel(){ return ME?ME.level:'none'; }
 function isFinAll(){ return finLevel()==='admin'||finLevel()==='finance'; }
 function canEditAssignee(){ return finLevel()==='admin'; }
@@ -1980,7 +2013,7 @@ window.login=async function(){
 };
 window.logout=async function(){
   saveCode(''); ME=null; loginError=null;
-  try{ localStorage.removeItem('dash_backup_v3'); }catch(e){}
+  try{ sessionStorage.removeItem('dash_backup_v3'); }catch(e){}
   await reloadAfterAuthChange();
 };
 async function reloadAfterAuthChange(){
@@ -2159,7 +2192,7 @@ function setSyncStatus(kind){
   if(kind==='ok'){ lastSyncAt=new Date(); }
   const t=lastSyncAt?` 最後同步 ${pad(lastSyncAt.getHours())}:${pad(lastSyncAt.getMinutes())}:${pad(lastSyncAt.getSeconds())}`:'';
   if(kind==='saving') setHint("● 儲存中…"+t);
-  else if(kind==='fail') setHint("⚠ 暫時連不到 Google Sheet，修改已先存在這台瀏覽器，連上後會自動補傳。"+t,true);
+  else if(kind==='fail') setHint("⚠ 暫時連不到 Google Sheet，修改已先存在這個分頁，連上後會自動補傳（請先不要關掉分頁）。"+t,true);
   else setHint("● 自動同步中：同事的修改約 15 秒內會自動出現，不用重新整理。"+t);
 }
 function changedProjectsSummary(prev,next){
@@ -2182,7 +2215,7 @@ function showSyncToast(items){
   if(!items.length) return;
   const box=document.getElementById("synctoast"); if(!box) return;
   const first=items[0];
-  const who=first.by?first.by+' ':'同事';
+  const who=first.by?esc(first.by)+' ':'同事';
   const msg = items.length===1 ? `🔄 ${who}更新了「${esc(first.name)}」` : `🔄 已同步其他人的 ${items.length} 個專案更新（${esc(first.name)} 等）`;
   box.innerHTML=`<div style="background:var(--accent);color:#fff;padding:8px 14px;border-radius:8px;font-size:.8rem;box-shadow:0 2px 8px rgba(0,0,0,.18);">${msg}</div>`;
   clearTimeout(syncToastTimer);
@@ -2300,7 +2333,8 @@ async function doPersist(){
     setSyncStatus('ok');
   }catch(e){
     console.error(e);
-    setSyncStatus('fail');
+    if(String(e&&e.message).includes('login_required')) setHint('⚠ 請先登入（輸入個人密碼）才能儲存修改。',true);
+    else setSyncStatus('fail');
   }
 }
 
@@ -2356,6 +2390,13 @@ window.setField=async function(id,field,val){
     render();
   }
   await persist();
+};
+// 連結欄位：只接受 https:// 開頭的網址，其他（javascript:、data:、http:…）一律拒絕
+window.setLinkField=async function(pid,field,el){
+  const raw=(el.value||'').trim();
+  const url=raw?safeHttpsUrl(raw):'';
+  if(raw && !url){ alert('連結必須是 https:// 開頭的網址。'); el.value=getRow(pid)[field]||''; return; }
+  await setField(pid,field,url);
 };
 window.saveName=async function(pid,val){
   const v=(val||'').trim(); if(v===''){ render(); return; }
