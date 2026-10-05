@@ -218,11 +218,13 @@ tr.rowopen td:first-child{box-shadow:inset 4px 0 0 var(--accent2);}
   <div class="stats" id="stats" hidden></div>
 </header>
 <main id="dashboard" hidden>
+  <div id="restorebanner" role="status"></div>
+  <div id="backupnotice" role="status" style="color:var(--warn);"></div>
+  <div id="dashboardcontent">
   <div class="tabs">
     <button data-v="project" class="active">依專案</button>
     <button data-v="person">依人員</button>
   </div>
-  <div id="restorebanner"></div>
   <div id="undotoast"></div>
   <div id="synctoast" style="position:fixed;left:14px;bottom:14px;z-index:60;"></div>
   <div id="backbtn" style="position:fixed;top:14px;right:14px;z-index:49;"></div>
@@ -238,6 +240,7 @@ tr.rowopen td:first-child{box-shadow:inset 4px 0 0 var(--accent2);}
   </div>
   <div id="addform" style="margin-bottom:12px;"></div>
   <div id="view"></div>
+  </div>
   <div class="hint" id="synchint">正在連線 Google Sheet…</div>
   <button class="mini" data-ui-click='{"action":"manualRefresh","args":[]}' style="margin-top:6px;">🔄 立即同步</button>
 </main>
@@ -1933,35 +1936,124 @@ function render(){
 
 // 本機備份只放在這個分頁（sessionStorage），關掉分頁就清除；舊版留在 localStorage 的完整備份一併刪掉。
 try{ localStorage.removeItem('dash_backup_v2'); localStorage.removeItem('dash_backup_v3'); }catch(e){}
+let backupFailed=false, recoveryBusy=false, activeWrite=null;
+const BACKUP_KEY='dash_backup_v3'; // Keep the key so earlier tab backups can be detected.
+const DRAFT_FINANCE_FIELDS=['estOverride','actual','cost','receipts','estPlan','revMonth','invoiceMonth',
+  'paymentMethod','installmentCount','invoices','relatedParty','costLink'];
+function backupWarning(message){
+  backupFailed=!!message;
+  document.getElementById('backupnotice').textContent=message||'';
+}
+function writeBackup(backup){
+  try{
+    if(backup) sessionStorage.setItem(BACKUP_KEY,JSON.stringify(backup));
+    else sessionStorage.removeItem(BACKUP_KEY);
+    backupWarning(''); return true;
+  }catch(e){
+    backupWarning(backup ? '⚠ 分頁暫存失敗。最新未同步修改只留在目前畫面記憶體，請勿重新整理或關閉分頁。'
+      : '⚠ 雲端已確認目前資料，但舊的分頁暫存未能清除；下次復原前請核對內容。');
+    return false;
+  }
+}
+function makeBackup(uncertain=false){
+  return {version:4,owner:ME.name,level:ME.level,base:clone(lastSynced),state:clone(state),savedAt:Date.now(),uncertain};
+}
 function localBackupSave(){
-  if(!isAuthenticated()) return;
-  try{ sessionStorage.setItem('dash_backup_v3',JSON.stringify({owner:ME.name,level:ME.level,state})); }catch(e){}
+  if(!isAuthenticated()||window._pendingBackup) return false;
+  if(activeWrite && isCurrent(activeWrite.ctx)){
+    return writeBackup({...makeBackup(true),base:clone(activeWrite.base),sent:clone(activeWrite.sent)});
+  }
+  return writeBackup(same(normState(state),normState(lastSynced)) ? null : makeBackup());
+}
+// The current server response, never an old draft's assignee, determines financial access.
+function projectDraft(source,remote){
+  const out=clone(source);
+  const allowed=id=>isFinAll() || (ME.level==='owner' && remote[id]?.assignee===ME.name);
+  Object.keys(out).forEach(id=>{
+    if(id[0]==='_'||!isObj(out[id])) return;
+    if(!allowed(id)) DRAFT_FINANCE_FIELDS.forEach(field=>delete out[id][field]);
+    if(!canEditAssignee()) out[id].assignee=remote[id]?.assignee||'';
+  });
+  // Seed revenue is read-only in this UI; always take its current authorized version.
+  delete out._fin;
+  if(isObj(remote._fin)) out._fin=clone(remote._fin);
+  if(Array.isArray(out._customProjects)) out._customProjects.forEach(p=>{
+    if(isObj(p)&&!allowed(p.id)){ delete p.rev; delete p.plan; }
+  });
+  return out;
+}
+function scopeBackup(b,remote){
+  return {...b,state:projectDraft(b.state,remote),...(isObj(b.base)?{base:projectDraft(b.base,remote)}:{}),
+    ...(isObj(b.sent)?{sent:projectDraft(b.sent,remote)}:{})};
 }
 function localBackupLoad(){
   if(!isAuthenticated()) return null;
   try{
-    const b=JSON.parse(sessionStorage.getItem('dash_backup_v3')||'null');
-    return b && b.owner===ME.name && b.level===ME.level && isObj(b.state) ? b.state : null;
-  }catch(e){ return null; }
+    const b=JSON.parse(sessionStorage.getItem(BACKUP_KEY)||'null');
+    if(!b) return null;
+    if(b.owner!==ME.name||b.level!==ME.level){ writeBackup(null); return null; }
+    if(!isObj(b.state)) throw new Error('invalid_backup');
+    return scopeBackup(b,state);
+  }catch(e){
+    backupWarning('⚠ 無法讀取分頁暫存，請保留此分頁並聯絡管理者。'); return {unread:true};
+  }
+}
+function clearRestoreBanner(){
+  window._pendingBackup=null;
+  document.getElementById('restorebanner').innerHTML='';
+  document.getElementById('dashboardcontent').inert=false;
 }
 function showRestoreBanner(backup){
   if(!isAuthenticated()) return;
-  const box=document.getElementById("restorebanner");
-  box.innerHTML=`<div class="priority" style="margin-bottom:14px;">
-    <h3>偵測到你這台裝置有尚未同步的本機備份資料</h3>
-    <div class="small">Google Sheet裡目前是空的，但這個瀏覽器裡有之前留下的資料。要匯入嗎？（匯入後會立刻同步給所有人）</div>
-    <div style="margin-top:8px;display:flex;gap:8px;">
-      <button ${uiEvent('click','restoreBackup',[])} style="padding:5px 14px;border-radius:6px;border:1px solid var(--accent);background:var(--accent);color:#fff;cursor:pointer;">匯入本機備份</button>
-      <button class="mini" ${uiEvent('click','ignoreBackup',[])}>忽略</button>
-    </div>
-  </div>`;
   window._pendingBackup=backup;
+  document.getElementById('dashboardcontent').inert=true;
+  const supported=backup.version===4 && isObj(backup.base);
+  const description=backup.unread ? '無法讀取分頁暫存，已暫停編輯以免覆蓋尚未讀取的草稿。可重新整理重試，或保留此分頁並聯絡管理者。'
+    : !supported ? '這份舊版暫存沒有同步基準，無法安全自動合併。請保留此分頁並聯絡管理者，或確認放棄暫存。'
+    : backup.uncertain ? '上次寫入的結果尚未確認，伺服器可能已經儲存。已暫停自動重送；請核對後選擇復原或放棄本機草稿。'
+    : '畫面顯示雲端資料。復原會先重新驗證登入並讀取最新資料，再合併草稿；處理完成前暫停編輯。';
+  document.getElementById('restorebanner').innerHTML=`<div class="priority" style="margin-bottom:14px;">
+    <h3>此分頁有待處理的草稿</h3><div class="small">${description}</div>
+    ${supported?'<div class="small">不同欄位的修改會合併；同一欄位都有修改時，依下方選擇決定。復原後會同步給其他人。只復原目前權限允許的內容；已失去負責權限的財務資料及新專案尚未授權的財務草稿不會復原。</div>':''}
+    <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;">
+      ${supported?`<button class="mini" ${uiEvent('click','restoreBackup',['theirs'])}>復原草稿，衝突保留雲端</button>
+      <button class="mini" ${uiEvent('click','restoreBackup',['mine'])}>復原草稿，衝突採用草稿</button>`:''}
+      <button class="mini" ${uiEvent('click','ignoreBackup',[])}>放棄草稿，使用雲端資料</button>
+    </div></div>`;
 }
-window.restoreBackup=async function(){
-  if(!isAuthenticated()) return;
-  if(window._pendingBackup){ state=window._pendingBackup; }
-  document.getElementById("restorebanner").innerHTML="";
-  render(); await persist();
+window.restoreBackup=async function(tie='theirs'){
+  if(!isAuthenticated()||recoveryBusy||!window._pendingBackup||!['mine','theirs'].includes(tie)) return;
+  const pending=window._pendingBackup;
+  if(pending.version!==4||!isObj(pending.base)) return;
+  if(pending.uncertain && !confirm('上次寫入可能已經在伺服器完成，取消連線不能撤回它。要讀取最新資料並依選擇合併草稿嗎？')) return;
+  const ctx=authContext(); recoveryBusy=true;
+  try{
+    const data=await fetchRemote(ctx);
+    assertCurrent(ctx);
+    if(window._pendingBackup!==pending) return;
+    if(looksWiped(data.state)) throw new Error('remote looks wiped');
+    applyCatalog(data.catalog);
+    const backup=scopeBackup(pending,data.state);
+    // First reconcile the sent write, then preserve edits made while its reply was pending.
+    const reconciled=backup.uncertain && isObj(backup.sent)
+      ? mergeState(backup.sent,backup.state,mergeState(backup.base,backup.sent,data.state,tie),tie)
+      : mergeState(backup.base,backup.state,data.state,tie);
+    const merged=projectDraft(reconciled,data.state);
+    // Persist the rebased draft before releasing the recovery gate.
+    state=merged; lastSynced=clone(data.state);
+    clearRestoreBanner(); localBackupSave(); render();
+    await persist();
+    if(isCurrent(ctx)&&isAuthenticated()&&!window._pendingBackup) setSyncStatus(same(normState(state),normState(lastSynced))?'ok':'fail');
+  }catch(e){
+    if(isCurrent(ctx)&&isAuthenticated()) setHint('⚠ 尚未完成草稿復原，草稿仍保留。請確認連線與雲端資料後重試。',true);
+  }finally{ recoveryBusy=false; }
+};
+window.ignoreBackup=function(){
+  if(!isAuthenticated()||recoveryBusy||!window._pendingBackup) return;
+  if(!confirm('確定放棄此分頁草稿？未送出的修改將無法復原；已送到伺服器的寫入無法撤回。')) return;
+  // Do not claim the old draft is gone if storage removal failed.
+  if(!writeBackup(null)) return;
+  state=clone(lastSynced); clearRestoreBanner(); render(); setSyncStatus('ok');
 };
 
 let oldBackend=false;
@@ -2009,13 +2101,15 @@ function authContext(){ return {generation:authGeneration,code:loadCode()}; }
 function isCurrent(ctx){ return ctx.generation===authGeneration && ctx.code===loadCode(); }
 function assertCurrent(ctx){ if(!isCurrent(ctx)) throw new Error('stale_session'); }
 function setAuthNotice(msg){ document.getElementById('authnotice').textContent=msg; }
-function clearPrivateSession(error){
+function clearPrivateSession(error,preserveBackup=false){
   // 先同步清掉畫面及資料，再讓任何進行中的網路請求完成。
   authGeneration++;
+  activeRequests.forEach(request=>request.cancel());
+  activeWrite=null;
   ME=null; catalogReady=false; loginError=error||null; whoAmI='';
   state={}; lastSynced={}; ALLP=[]; DELETEDP=[];
   PROJECTS=[]; TEAM_STAFF_G1=[]; TEAM_STAFF_G2=[]; TEAM_STAFF=[]; TEAM_PARTNER=[]; TEAM=[]; ROLES={};
-  window._pendingBackup=null; lastDeleteSnapshot=null; backState=null; dragSubtask=null;
+  clearRestoreBanner(); backupWarning(''); lastDeleteSnapshot=null; backState=null; dragSubtask=null;
   expanded.clear(); expandedPerson.clear(); todoExpandedSet.clear(); ownedCollabExpandedSet.clear(); capacityExpanded.clear();
   lastCapacityOrder=[]; detailTab={}; ganttGroupExpanded={}; priorityExpandLevel={}; monthCatTableExpanded.clear();
   view='project'; catFilter='全部'; statusFilter='全部'; ownerFilter='全部'; searchTerm=''; showAddForm=false; showDeleted=false;
@@ -2027,7 +2121,7 @@ function clearPrivateSession(error){
   });
   document.getElementById('searchbox').value='';
   document.querySelectorAll('.tabs button').forEach(b=>b.classList.toggle('active',b.dataset.v==='project'));
-  try{ sessionStorage.removeItem('dash_backup_v3'); }catch(e){}
+  if(!preserveBackup) try{ sessionStorage.removeItem('dash_backup_v3'); }catch(e){}
   renderLogin();
 }
 function rejectSession(ctx,error){
@@ -2094,11 +2188,13 @@ function renderLogin(){
 window.login=async function(){
   const v=(document.getElementById('logincode')||{}).value||'';
   if(!v.trim()) return;
-  clearPrivateSession(); saveCode(v.trim());
+  // A connectivity retry with the same stored credential must not discard its draft.
+  const retrySameCode=!isAuthenticated() && !!loadCode() && loadCode()===v.trim();
+  clearPrivateSession(null,retrySameCode); saveCode(v.trim());
   await loadFromSheet();
 };
 window.logout=function(){
-  if(isAuthenticated() && (savingCount>0 || !same(state,lastSynced)) &&
+  if(isAuthenticated() && (window._pendingBackup || savingCount>0 || !same(state,lastSynced)) &&
      !confirm('仍有未同步的修改。登出會清除此分頁的暫存，尚未送出的修改不會儲存。確定登出？')) return;
   saveCode(''); clearPrivateSession();
 };
@@ -2198,10 +2294,34 @@ function mergeState(b,m,t,tie){
 }
 // ===== 合併核心結束 =====
 
+const REQUEST_TIMEOUT_MS=30000;
+const activeRequests=new Set();
+async function requestJson(url,init,ctx){
+  assertCurrent(ctx);
+  const controller=new AbortController();
+  let timer, rejectInterrupted;
+  const interrupted=new Promise((resolve,reject)=>{ rejectInterrupted=reject; });
+  const stop=reason=>{ rejectInterrupted(new Error(reason)); controller.abort(); };
+  const request={cancel:()=>stop('stale_session')};
+  activeRequests.add(request);
+  timer=setTimeout(()=>stop('request_timeout'),REQUEST_TIMEOUT_MS);
+  try{
+    // The deadline includes reading/parsing the response body, not just its headers.
+    const response=(async()=>{
+      const res=await fetch(url,{...init,signal:controller.signal});
+      if(!res.ok) throw new Error('http_error');
+      return await res.json();
+    })();
+    const data=await Promise.race([response,interrupted]);
+    assertCurrent(ctx); return data;
+  }finally{
+    clearTimeout(timer); activeRequests.delete(request);
+  }
+}
 async function ensureNewBackend(ctx){
   assertCurrent(ctx);
   // 每一次 POST 之前都確認（GET ?ping 對舊後端是無害的；POST 對舊後端等於覆寫資料）
-  const r=await fetch(SHEET_API_URL+'?ping=1',{cache:'no-store'}); const j=await r.json();
+  const j=await requestJson(SHEET_API_URL+'?ping=1',{cache:'no-store'},ctx);
   assertCurrent(ctx);
   if(!j || !(j.api>=4) || j.authRequired!==true){
     oldBackend=true;
@@ -2222,8 +2342,7 @@ async function fetchRemote(ctx=authContext()){
   if(!ctx.code) throw new Error('login_required');
   await ensureNewBackend(ctx);
   assertCurrent(ctx);
-  const res=await fetch(SHEET_API_URL,{method:"POST",cache:"no-store",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify({action:'read',code:ctx.code})});
-  const data=await res.json();
+  const data=await requestJson(SHEET_API_URL,{method:"POST",cache:"no-store",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify({action:'read',code:ctx.code})},ctx);
   validateResponse(data,ctx,true);
   return data;
 }
@@ -2269,7 +2388,9 @@ function setSyncStatus(kind){
   if(kind==='ok'){ lastSyncAt=new Date(); }
   const t=lastSyncAt?` 最後同步 ${pad(lastSyncAt.getHours())}:${pad(lastSyncAt.getMinutes())}:${pad(lastSyncAt.getSeconds())}`:'';
   if(kind==='saving') setHint("● 儲存中…"+t);
-  else if(kind==='fail') setHint("⚠ 暫時連不到 Google Sheet，修改已先存在這個分頁，連上後會自動補傳（請先不要關掉分頁）。"+t,true);
+  else if(kind==='fail') setHint("⚠ 尚未確認同步完成，請保留此分頁並檢查連線。"+t,true);
+  else if(window._pendingBackup) setHint("⚠ 請先處理此分頁草稿，自動寫入已暫停。"+t,true);
+  else if(!same(normState(state),normState(lastSynced))) setHint("● 尚有未同步修改，請保留此分頁。"+t,true);
   else setHint("● 自動同步中：同事的修改約 15 秒內會自動出現，不用重新整理。"+t);
 }
 function changedProjectsSummary(prev,next){
@@ -2322,7 +2443,12 @@ async function loadFromSheet(){
     state=data.state; lastSynced=clone(data.state);
     // 重新整理時，只有通過同一身分的伺服器驗證後才能讀取該分頁的備份。
     const backup=localBackupLoad();
-    if(!Object.keys(state).length && backup && Object.keys(backup).length) showRestoreBanner(backup);
+    if(backup?.unread) showRestoreBanner(backup);
+    else if(backup && (backup.uncertain || (!same(normState(backup.state),normState(state)) &&
+       (backup.version!==4 || !isObj(backup.base) || !same(normState(backup.base),normState(backup.state)))))){
+      // Save the current permission projection before showing any recovery action.
+      writeBackup(backup); showRestoreBanner(backup);
+    } else if(backup) writeBackup(null);
     setSyncStatus('ok'); render();
   }catch(e){
     if(!isCurrent(ctx)) return;
@@ -2330,20 +2456,20 @@ async function loadFromSheet(){
   }
 }
 async function pollOnce(force){
-  if(!isAuthenticated()||!sheetConfigured()||pollBusy||savingCount>0) return;
+  if(!isAuthenticated()||window._pendingBackup||!sheetConfigured()||pollBusy||savingCount>0) return;
   if(document.hidden && !force) return;
   const ctx=authContext();
   pollBusy=true;
   try{
     const data=await fetchRemote(ctx);
     assertCurrent(ctx);
-    if(savingCount>0) return;
+    if(savingCount>0||window._pendingBackup) return;
     const remote=data.state;
     if(looksWiped(remote)){ setHint('⚠ 雲端資料看起來不完整（專案數量突然大減），為了保護資料已暫停同步，請聯絡管理者。',true); return; }
     applyCatalog(data.catalog);
     const merged=mergeState(lastSynced,state,remote);
     lastSynced=clone(remote);
-    applyMerged(merged); setSyncStatus('ok');
+    applyMerged(merged); localBackupSave(); setSyncStatus('ok');
     if(!same(state,lastSynced)) persist();
   }catch(e){ if(isCurrent(ctx)&&isAuthenticated()) setSyncStatus('fail'); }
   finally{ pollBusy=false; }
@@ -2359,7 +2485,7 @@ document.addEventListener('visibilitychange',()=>{ if(!document.hidden) pollOnce
 
 // ---- 寫入（排隊執行，一次一筆）----
 function persist(){
-  if(!isAuthenticated()) return Promise.resolve();
+  if(!isAuthenticated()||window._pendingBackup) return Promise.resolve();
   localBackupSave();
   if(!sheetConfigured()){ setHint('尚未設定資料服務，無法儲存。',true); return Promise.resolve(); }
   const ctx=authContext();
@@ -2369,25 +2495,35 @@ function persist(){
   return saveChain;
 }
 async function doPersist(ctx){
-  if(!isCurrent(ctx)||!isAuthenticated()||same(state,lastSynced)) return;
+  if(!isCurrent(ctx)||!isAuthenticated()||window._pendingBackup||same(normState(state),normState(lastSynced))) return;
   setSyncStatus('saving');
+  let dispatched=false, submitted, write;
   try{
     await ensureNewBackend(ctx);
     assertCurrent(ctx);
     const pre=clone(lastSynced), mine=clone(state);
-    const res=await fetch(SHEET_API_URL,{method:"POST",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify({action:'write',code:ctx.code,base:pre,data:mine})});
-    const j=await res.json();
+    submitted=mine;
+    write={ctx,base:pre,sent:mine}; activeWrite=write;
+    // A reload can interrupt a sent request before its timeout or response arrives.
+    localBackupSave();
+    dispatched=true;
+    const j=await requestJson(SHEET_API_URL,{method:"POST",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify({action:'write',code:ctx.code,base:pre,data:mine})},ctx);
     validateResponse(j,ctx,false);
     if(looksWiped(j.state)) throw new Error('remote looks wiped');
     lastSynced=clone(j.state);
     applyMerged(mergeState(mine,state,j.state));
+    activeWrite=null;
     localBackupSave(); setSyncStatus('ok');
   }catch(e){
     if(!isCurrent(ctx)||!isAuthenticated()) return;
     if(e.message==='rejected_suspicious_write'||e.message==='remote looks wiped')
       setHint('⚠ 資料完整性檢查未通過，已暫停這次同步，請聯絡管理者。',true);
-    else setSyncStatus('fail');
-  }
+    else if(dispatched){
+      const backup={...makeBackup(true),sent:submitted};
+      writeBackup(backup); showRestoreBanner(backup);
+      setHint('⚠ 寫入結果尚未確認，可能已經儲存。草稿已保留，自動重送已暫停。',true);
+    } else setSyncStatus('fail');
+  }finally{ if(activeWrite===write) activeWrite=null; }
 }
 
 function isValidISODate(v){
@@ -2926,7 +3062,7 @@ const UI_ACTIONS=Object.freeze({
     goToTaskList:(element,event,args)=>{ return window.goToTaskList(...args); },
     gotoNoTaskList:(element,event,args)=>{ return window.gotoNoTaskList(...args); },
     gotoStatus:(element,event,args)=>{ return window.gotoStatus(...args); },
-    ignoreBackup:(element,event,args)=>{ document.getElementById('restorebanner').innerHTML=''; },
+    ignoreBackup:(element,event,args)=>{ return window.ignoreBackup(...args); },
     login:(element,event,args)=>{ return window.login(...args); },
     logout:(element,event,args)=>{ return window.logout(...args); },
     manualRefresh:(element,event,args)=>{ return window.manualRefresh(...args); },
@@ -2999,6 +3135,7 @@ function dispatchUiEvent(event){
     // Only authentication controls may run before the server verifies a session.
     if(!isAuthenticated() && !(event.type==='click'&&data.action==='login') &&
        !(event.type==='keydown'&&data.action==='loginEnter')) return;
+    if(window._pendingBackup && !(event.type==='click'&&['restoreBackup','ignoreBackup','logout'].includes(data.action))) return;
     if(element.disabled) return;
     const args=data.args.slice();
     if(data.input!=null) args.push(UI_INPUTS[data.input](element));
@@ -3016,7 +3153,7 @@ function dispatchUiEvent(event){
 Object.keys(UI_ACTIONS).forEach(type=>document.addEventListener(type,dispatchUiEvent));
 
 document.querySelectorAll(".tabs button").forEach(b=>b.addEventListener("click",()=>{
-  if(!isAuthenticated()) return;
+  if(!isAuthenticated()||window._pendingBackup) return;
   document.querySelectorAll(".tabs button").forEach(x=>x.classList.remove("active"));
   b.classList.add("active"); view=b.dataset.v; if(view==="person") priorityTab="capacity"; render();
   backState=null; document.getElementById("backbtn").innerHTML="";

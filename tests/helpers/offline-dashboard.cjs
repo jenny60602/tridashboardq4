@@ -26,7 +26,7 @@ const accepted = (options = {}) => ({
   ...options,
 });
 const ping = { api: 4, authRequired: true };
-const reply = (action, value) => ({ action, value });
+const reply = (action, value, options = {}) => ({ action, value, ...options });
 
 function deferred() {
   let resolve, reject;
@@ -137,7 +137,7 @@ function makeHarness(t, options = {}) {
     ...(options.globals || {}),
     Element: document.defaultView?.Element || options.globals?.Element,
     HTMLElement: document.defaultView?.HTMLElement || options.globals?.HTMLElement,
-    document, sessionStorage, localStorage, URL, Date: FixedDate,
+    document, sessionStorage, localStorage, URL, AbortController, Date: FixedDate,
     console: { log() {}, warn() {}, error() {} },
     setTimeout(callback, delay) { const id = ++timerId; timers.set(id, { callback, delay }); return id; },
     clearTimeout(id) { timers.delete(id); },
@@ -152,7 +152,7 @@ function makeHarness(t, options = {}) {
       const method = init.method || 'GET';
       const body = init.body ? JSON.parse(init.body) : null;
       const action = method === 'GET' ? 'ping' : body?.action;
-      calls.push({ method, action, body });
+      calls.push({ method, action, body, signal: init.signal });
       const expected = queue.shift();
       if (!expected || expected.action !== action || (method === 'GET' && !url.endsWith('?ping=1'))) {
         unexpected.push({ method, action });
@@ -160,7 +160,11 @@ function makeHarness(t, options = {}) {
       }
       const value = await expected.value;
       if (value instanceof Error) throw value;
-      return { ok: true, async json() { return copy(value); } };
+      return { ok: expected.ok !== false, async json() {
+        const payload = Object.hasOwn(expected, 'json') ? await expected.json : value;
+        if (payload instanceof Error) throw payload;
+        return copy(payload);
+      } };
     },
   }, { codeGeneration: { strings: false, wasm: false } });
   context.window = context;
@@ -175,6 +179,17 @@ function makeHarness(t, options = {}) {
     run(source) { return vm.runInContext(source, context, { timeout: 1000 }); },
     json(source) { return JSON.parse(vm.runInContext(`JSON.stringify(${source})`, context)); },
     async flush() { for (let i = 0; i < 30; i++) await Promise.resolve(); },
+    timerDelays() { return [...timers.values()].map(timer => timer.delay); },
+    async fireTimers(delay) {
+      // Trigger only timers present at entry. A request started by a callback gets
+      // its own future deadline; unresolved mocked requests never block the clock.
+      for (const [id, timer] of [...timers]) {
+        if (timer.delay !== delay || !timers.has(id)) continue;
+        if (!timer.interval) timers.delete(id);
+        timer.callback();
+      }
+      for (let i = 0; i < 30; i++) await Promise.resolve();
+    },
     async timers() {
       for (const [id, timer] of [...timers]) {
         if (!timer.interval) timers.delete(id);

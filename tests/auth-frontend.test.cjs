@@ -134,7 +134,7 @@ function makeHarness(t, options = {}) {
     static now() { return fixedTime; }
   }
   const context = vm.createContext({
-    document, sessionStorage, localStorage, URL, Date: FixedDate,
+    document, sessionStorage, localStorage, URL, AbortController, Date: FixedDate,
     console: { log() {}, warn() {}, error() {} },
     setTimeout(callback, delay) { const id = ++timerId; timers.set(id, { callback, delay }); return id; },
     clearTimeout(id) { timers.delete(id); },
@@ -211,7 +211,9 @@ async function loggedIn(t, options = {}) {
 }
 
 function seedPrivateUi(h) {
-  h.run('localBackupSave(); window._pendingBackup=clone(state); lastDeleteSnapshot={pid:"p1",row:clone(state.p1)};');
+  // Recovery now intentionally blocks polling. Seed private cache/UI residue
+  // without a pending recovery decision so these tests still exercise requests.
+  h.run('sessionStorage.setItem("dash_backup_v3",JSON.stringify(makeBackup())); lastDeleteSnapshot={pid:"p1",row:clone(state.p1)};');
   for (const id of SINKS) h.nodes.get(id).innerHTML = 'Synthetic private content';
 }
 
@@ -358,6 +360,7 @@ test('logout synchronously clears data and a delayed read cannot restore it', as
   const polling = h.run('pollOnce(true)');
   await h.flush();
   assert.equal(h.calls.at(-1).action, 'read');
+  assert.equal(h.calls.filter(call => call.action === 'read').length, 2);
   h.context.logout();
   assertLocked(h);
   gate.resolve(accepted());
