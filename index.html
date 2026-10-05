@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>三小市集 Q4 專案 x 人力儀表板</title>
 <style>
+[hidden]{display:none!important}
 :root{
   --bg:#f7f5f0; --card:#ffffff; --ink:#2b2a26; --sub:#6b6a63; --line:#e4e1d8;
   --accent:#3f6b4a; --accent2:#b5651d; --warn:#c0392b; --ok:#2e7d32; --yellow:#b7950b;
@@ -212,10 +213,11 @@ tr.rowopen td:first-child{box-shadow:inset 4px 0 0 var(--accent2);}
 <header>
   <h1>三小市集 專案執行儀表板</h1>
   <div class="sub">追蹤每個專案的進度、成本與收款，掌握人力負載與現金流。</div>
-  <div class="whoami">你是：<select id="whoami-select"></select>（用來標記「最後更新者」）</div>
-  <div class="stats" id="stats"></div>
+  <div class="whoami"></div>
+  <div id="authnotice" role="status">請先登入，才能查看或修改資料。</div>
+  <div class="stats" id="stats" hidden></div>
 </header>
-<main>
+<main id="dashboard" hidden>
   <div class="tabs">
     <button data-v="project" class="active">依專案</button>
     <button data-v="person">依人員</button>
@@ -240,51 +242,9 @@ tr.rowopen td:first-child{box-shadow:inset 4px 0 0 var(--accent2);}
   <button class="mini" onclick="manualRefresh()" style="margin-top:6px;">🔄 立即同步</button>
 </main>
 <script>
-const PROJECTS=[
-{id:"retail-douliu",cat:"2C零售",name:"斗六店舖",months:[9, 10, 11, 12]},
-{id:"retail-taipei",cat:"2C零售",name:"台北大安設攤",months:[9, 10, 11, 12]},
-{id:"retail-web",cat:"2C零售",name:"網站",months:[9, 10, 11, 12]},
-{id:"retail-market",cat:"2C零售",name:"巿集收入",months:[9, 10, 11, 12]},
-{id:"retail-event",cat:"2C零售",name:"活動收入",months:[9, 10, 11, 12]},
-{id:"haotian-baocheng2",cat:"好田",name:"保誠好田-第二期款",months:[10]},
-{id:"haotian-guandong",cat:"好田",name:"關東鑫林",months:[12]},
-{id:"haotian-zhixiao",cat:"好田",name:"直銷協會",months:[12]},
-{id:"haotian-jianxing",cat:"好田",name:"建興儲存科技",months:[9, 11]},
-{id:"biz-jti-zoudu",cat:"企業",name:"JTI-走讀 第二三期",months:[10]},
-{id:"biz-jti-gongyi",cat:"企業",name:"JTI-公益支持 第二期",months:[12]},
-{id:"biz-kaiji-shewa",cat:"企業",name:"凱基諸羅樹蛙調研",months:[10, 12]},
-{id:"biz-kaiji-bank",cat:"企業",name:"凱基銀行-志工活動",months:[9]},
-{id:"biz-kaiji-sec",cat:"企業",name:"凱基證券-志工活動",months:[9]},
-{id:"biz-wabei",cat:"企業",name:"挖貝集資-食通信好田良伴",months:[10, 12]},
-{id:"biz-ruihe-orchard",cat:"企業",name:"睿禾林果園",months:[9]},
-{id:"gov-chunhe",cat:"政府",name:"經濟部 春禾-專案服務費",months:[9, 11]},
-{id:"gov-sbir",cat:"政府",name:"經濟部 SBIR",months:[9, 10]},
-{id:"gov-qingnian",cat:"政府",name:"青年署-青聚點",months:[10]},
-{id:"gov-qingpei-fixed",cat:"政府",name:"國發會-青培站(固定費用)",months:[9, 10, 11, 12]},
-{id:"gov-qingpei-event",cat:"政府",name:"國發會-青培站(活動執行費)",months:[9, 10, 11, 12]},
-{id:"gov-edu-intern",cat:"政府",name:"教育部見習",months:[9]},
-{id:"inter-goodneighbor",cat:"中介",name:"好鄰居",months:[12]},
-{id:"inter-chuangsheng",cat:"中介",name:"創生中區-台灣鯛王總",months:[12]},
-{id:"inter-huashan",cat:"中介",name:"華山共伴",months:[10]},
-{id:"gift-baocheng",cat:"禮盒",name:"保誠人壽",months:[10]},
-{id:"gift-ruihe-fashuo",cat:"禮盒",name:"睿禾-法說會",months:[9]},
-{id:"gift-guotai1",cat:"禮盒",name:"國泰(1)",months:[10]},
-{id:"gift-guotai2",cat:"禮盒",name:"國泰(2)",months:[10]},
-{id:"gift-ruihe-midautumn",cat:"禮盒",name:"睿禾-中秋禮盒",months:[9]},
-{id:"gift-chunhe-watt",cat:"禮盒",name:"春禾.瓦特-中秋禮盒",months:[10]},
-{id:"gift-jianxing-oil",cat:"禮盒",name:"建興儲存科技-苦茶油禮盒",months:[12]},
-{id:"outsource-xiliang",cat:"委外",name:"喜亮太陽能",months:[9, 10, 11, 12]}
-];
-const TEAM_STAFF_G1=["宜倩","嘉妤","思敏","潔如"];
-const TEAM_STAFF_G2=["緯襦","宜玟","芳寧","雅芬"];
-const TEAM_STAFF=TEAM_STAFF_G1.concat(TEAM_STAFF_G2);
-const TEAM_PARTNER=["Jessica","鈺淳","紫倢","Mio"];
-const ROLES={
-  "宜倩":"總經理","嘉妤":"行銷企劃","思敏":"業務企劃","潔如":"設計企劃",
-  "Jessica":"專案企劃","鈺淳":"編輯企劃","緯襦":"營運經理","宜玟":"行政客服",
-  "芳寧":"店務","雅芬":"會計"
-};
-const TEAM=TEAM_STAFF.concat(TEAM_PARTNER);
+// 專案與團隊名單只從已驗證的 API 回應載入，不放在公開網頁原始碼。
+let PROJECTS=[], TEAM_STAFF_G1=[], TEAM_STAFF_G2=[], TEAM_STAFF=[], TEAM_PARTNER=[], TEAM=[], ROLES={};
+
 const STATUSES=["未開始","進行中","待收款","已完成"];
 const BASE_TASKS=["企劃","成本","報價/合約","款項","執行","結案"];
 const MARKET_TEMPLATE_PHASES=[
@@ -331,10 +291,12 @@ let state={};
 let ownerFilter="全部";
 let view="project", catFilter="全部", statusFilter="全部", searchTerm="", expanded=new Set(), expandedPerson=new Set(), showAddForm=false, detailTab={}, todoExpandedSet=new Set(), ownedCollabExpandedSet=new Set(), ganttGroupExpanded={}, lastDeleteSnapshot=null, capacityExpanded=new Set(), lastCapacityOrder=[], backState=null;
 function showUndoToast(label){
+  if(!isAuthenticated()) return;
   const box=document.getElementById("undotoast");
   box.innerHTML=`<span>已刪除：${esc(label)}</span><span style="display:flex;gap:6px;"><button onclick="undoLastDelete()" style="padding:4px 12px;border-radius:6px;border:1px solid var(--accent2);background:var(--accent2);color:#fff;cursor:pointer;font-size:.78rem;">復原</button><button class="mini" onclick="document.getElementById('undotoast').innerHTML=''">✕</button></span>`;
 }
 window.undoLastDelete=async function(){
+  if(!isAuthenticated()) return;
   if(!lastDeleteSnapshot) return;
   const {pid,row}=lastDeleteSnapshot;
   state[pid]=row; lastDeleteSnapshot=null;
@@ -342,9 +304,8 @@ window.undoLastDelete=async function(){
   render(); await persist();
 };
 let ALLP=[];
-function loadWhoAmI(){ try{ return localStorage.getItem('dash_whoami')||''; }catch(e){ return ''; } }
-function saveWhoAmI(v){ try{ localStorage.setItem('dash_whoami',v); }catch(e){} }
-let whoAmI=loadWhoAmI();
+let whoAmI='';
+try{ localStorage.removeItem('dash_whoami'); }catch(e){}
 
 function fmt(n){ if(n===null||n===undefined||isNaN(n)) return "—"; return "NT$"+Math.round(n).toLocaleString();}
 function pad(n){return n<10?"0"+n:""+n;}
@@ -527,6 +488,7 @@ function getRange(p){
   return {start:r.startDate||def.start, end:r.endDate||def.end};
 }
 function refreshAll(){
+  if(!isAuthenticated()) return;
   const fin=state._fin||{};
   const builtins=PROJECTS.map(p=>Object.assign({},p,{rev:fin[p.id]?fin[p.id].rev:null, plan:fin[p.id]?fin[p.id].plan:null}));
   // 自訂專案的 id 會被放進 HTML id／onclick，格式不對的一律略過
@@ -538,6 +500,7 @@ function refreshAll(){
 let DELETEDP=[], showDeleted=false;
 function isAdmin(){ return finLevel()==='admin'; }
 window.setProjectCat=async function(pid,val){
+  if(!isAuthenticated()) return;
   const p=ALLP.find(x=>x.id===pid); if(!p) return;
   let cat=val;
   if(val==='__new__'){ const v=prompt('新類別名稱：'); if(!v||!v.trim()){ render(); return; } cat=v.trim(); }
@@ -547,6 +510,7 @@ window.setProjectCat=async function(pid,val){
   render(); await persist();
 };
 window.deleteProject=async function(pid){
+  if(!isAuthenticated()) return;
   const p=ALLP.find(x=>x.id===pid); if(!p) return;
   if(!confirm(`確定要刪除「${getName(p)}」嗎？\n\n刪除後大家都看不到這個專案。之後可以在頁面最下方「已刪除的專案」還原。`)) return;
   const cur=getRow(pid); state[pid]=Object.assign({},cur,{deleted:true,deletedAt:Date.now(),deletedBy:myName()||''}); touch(pid);
@@ -554,10 +518,13 @@ window.deleteProject=async function(pid){
   render(); await persist();
 };
 window.restoreProject=async function(pid){
+  if(!isAuthenticated()) return;
   const cur=getRow(pid); const nx=Object.assign({},cur,{deleted:false}); delete nx.deletedAt; delete nx.deletedBy;
   state[pid]=nx; touch(pid); render(); await persist();
 };
-window.toggleShowDeleted=function(){ showDeleted=!showDeleted; renderProjectView(); };
+window.toggleShowDeleted=function(){
+  if(!isAuthenticated()) return;
+  showDeleted=!showDeleted; renderProjectView(); };
 function deletedListHtml(){
   if(!isAdmin() || !DELETEDP.length) return '';
   const rows=DELETEDP.map(p=>{ const r=state[p.id]||{}; return `<div class="prow" style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
@@ -649,15 +616,10 @@ function taskProgress(p){
   });
   return {done,total};
 }
-function whoAmIOpts(sel){
-  const label=n=>ROLES[n]?`${n}｜${ROLES[n]}`:n;
-  const so=TEAM_STAFF.map(x=>`<option value="${x}" ${sel===x?'selected':''}>${label(x)}</option>`).join('');
-  const po=TEAM_PARTNER.map(x=>`<option value="${x}" ${sel===x?'selected':''}>${label(x)}</option>`).join('');
-  return `<option value="">（未選擇）</option><optgroup label="三小文創">${so}</optgroup><optgroup label="合作夥伴">${po}</optgroup>`;
-}
+
 function personOpts(sel){
-  const so=TEAM_STAFF.map(x=>`<option ${sel===x?'selected':''}>${x}</option>`).join('');
-  const po=TEAM_PARTNER.map(x=>`<option ${sel===x?'selected':''}>${x}</option>`).join('');
+  const so=TEAM_STAFF.map(x=>`<option ${sel===x?'selected':''}>${esc(x)}</option>`).join('');
+  const po=TEAM_PARTNER.map(x=>`<option ${sel===x?'selected':''}>${esc(x)}</option>`).join('');
   return `<option value="">未指派</option><optgroup label="三小文創">${so}</optgroup><optgroup label="合作夥伴">${po}</optgroup>`;
 }
 function vendorNames(){
@@ -672,8 +634,8 @@ function vendorNames(){
   return [...set].sort();
 }
 function personOptsWithVendor(sel){
-  const so=TEAM_STAFF.map(x=>`<option ${sel===x?'selected':''}>${x}</option>`).join('');
-  const po=TEAM_PARTNER.map(x=>`<option ${sel===x?'selected':''}>${x}</option>`).join('');
+  const so=TEAM_STAFF.map(x=>`<option ${sel===x?'selected':''}>${esc(x)}</option>`).join('');
+  const po=TEAM_PARTNER.map(x=>`<option ${sel===x?'selected':''}>${esc(x)}</option>`).join('');
   const vendors=vendorNames();
   const vo=vendors.map(v=>`<option ${sel===v?'selected':''}>${esc(v)}</option>`).join('');
   return `<option value="">未指派</option><optgroup label="三小文創">${so}</optgroup><optgroup label="合作夥伴">${po}</optgroup>`
@@ -777,15 +739,23 @@ function projectEntries(p, mode){
   return out;
 }
 let finMode='rev';
-window.setFinMode=function(m){ finMode=m; renderPriority(); };
+window.setFinMode=function(m){
+  if(!isAuthenticated()) return;
+  finMode=m; renderPriority(); };
 const KIND_LABEL={est:'預估',issued:'已開發票',paid:'已收款',expected:'預計收款'};
 
 function touch(pid){ const cur=state[pid]||{}; state[pid]=Object.assign({},cur,{lastEdit:{by:whoAmI||'',at:Date.now()}}); }
 
 let priorityTab='urgent', priorityExpandLevel={};
-window.setPriorityTab=function(k){ priorityTab=k; renderPriority(); };
-window.advancePriorityExpand=function(k){ priorityExpandLevel[k]=(priorityExpandLevel[k]||0)+1; renderPriority(); };
-window.resetPriorityExpand=function(k){ priorityExpandLevel[k]=0; renderPriority(); };
+window.setPriorityTab=function(k){
+  if(!isAuthenticated()) return;
+  priorityTab=k; renderPriority(); };
+window.advancePriorityExpand=function(k){
+  if(!isAuthenticated()) return;
+  priorityExpandLevel[k]=(priorityExpandLevel[k]||0)+1; renderPriority(); };
+window.resetPriorityExpand=function(k){
+  if(!isAuthenticated()) return;
+  priorityExpandLevel[k]=0; renderPriority(); };
 function paginatedBody(key,itemsHtml,emptyMsg){
   const total=itemsHtml.length;
   if(!total) return emptyMsg;
@@ -852,6 +822,7 @@ function paginatedBody(key, itemsHtml, emptyMsg){
   return shown+btn;
 }
 function renderPriority(){
+  if(!isAuthenticated()) return;
   const box=document.getElementById("priority");
   const LAG_THRESHOLD=0.2;
   const list=ALLP.filter(p=>{
@@ -951,8 +922,12 @@ function monthContributions(m, mode){
   return list.sort((a,b)=>b.amount-a.amount);
 }
 let monthTableOpen=false, monthCatTableExpanded=new Set();
-window.toggleAllMonths=function(){ monthTableOpen=!monthTableOpen; renderPriority(); };
-window.toggleMonthCatTable=function(cat){ monthCatTableExpanded.has(cat)?monthCatTableExpanded.delete(cat):monthCatTableExpanded.add(cat); renderPriority(); };
+window.toggleAllMonths=function(){
+  if(!isAuthenticated()) return;
+  monthTableOpen=!monthTableOpen; renderPriority(); };
+window.toggleMonthCatTable=function(cat){
+  if(!isAuthenticated()) return;
+  monthCatTableExpanded.has(cat)?monthCatTableExpanded.delete(cat):monthCatTableExpanded.add(cat); renderPriority(); };
 function monthlyTotals(mode){
   const md=mode||'rev';
   const z=()=>{ const o={}; CHART_MONTHS.forEach(m=>o[m]=0); return o; };
@@ -1079,7 +1054,10 @@ function monthlyExportData(mode){
   return {cats,data,projData,detail,rowTotal};
 }
 window.exportMonthlyExcel=async function(){
-  let X; try{ X=await loadXlsx(); }catch(e){ alert('下載元件載入失敗，請確認網路後再試一次。'); return; }
+  if(!isAuthenticated()) return;
+  const ctx=authContext();
+  let X; try{ X=await loadXlsx(); }catch(e){ if(isCurrent(ctx)) alert('下載元件載入失敗，請確認網路後再試一次。'); return; }
+  if(!isCurrent(ctx)||!isAuthenticated()) return;
   const who=myName()||'未登入';
   const scope=isFinAll()?'全公司':'你負責的專案';
   const now=new Date(); const stamp=`${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
@@ -1155,6 +1133,7 @@ function quarterCost(){
   return {q4Cost, q1Cost};
 }
 function renderStats(){
+  if(!isAuthenticated()) return;
   const mt=monthlyTotals();
   const {q4Cost, q1Cost}=quarterCost();
   const q4Margin=mt.q4Total-q4Cost, q1Margin=mt.q1Total-q1Cost;
@@ -1181,6 +1160,7 @@ function renderStats(){
 }
 
 function renderFilters(){
+  if(!isAuthenticated()) return;
   document.getElementById("filterbar").style.display=view==="project"?"flex":"none";
   if(view!=="project") return;
   const cats=["全部",...allCats()];
@@ -1208,10 +1188,17 @@ function renderFilters(){
 function noTaskScopeMine(){ return !!ME && ME.level!=='admin'; }
 function noTaskScope(list){ return noTaskScopeMine() ? list.filter(p=>getRow(p.id).assignee===ME.name) : list; }
 function myName(){ return ME?ME.name:(whoAmI||''); }
-window.setOwnerFilter=function(n){ ownerFilter=n; renderFilters(); renderProjectView(); };
-window.setFilter=function(c){ catFilter=c; renderFilters(); renderProjectView(); };
-window.setStatusFilter=function(s){ statusFilter=s; renderFilters(); renderProjectView(); };
+window.setOwnerFilter=function(n){
+  if(!isAuthenticated()) return;
+  ownerFilter=n; renderFilters(); renderProjectView(); };
+window.setFilter=function(c){
+  if(!isAuthenticated()) return;
+  catFilter=c; renderFilters(); renderProjectView(); };
+window.setStatusFilter=function(s){
+  if(!isAuthenticated()) return;
+  statusFilter=s; renderFilters(); renderProjectView(); };
 window.gotoStatus=function(s){
+  if(!isAuthenticated()) return;
   statusFilter=s; view="project";
   document.querySelectorAll(".tabs button").forEach(x=>x.classList.remove("active"));
   document.querySelector('.tabs button[data-v="project"]').classList.add("active");
@@ -1219,6 +1206,7 @@ window.gotoStatus=function(s){
   document.getElementById("filterbar").scrollIntoView({behavior:"smooth",block:"start"});
 };
 window.gotoPerson=function(){
+  if(!isAuthenticated()) return;
   view="person";
   document.querySelectorAll(".tabs button").forEach(x=>x.classList.remove("active"));
   document.querySelector('.tabs button[data-v="person"]').classList.add("active");
@@ -1233,6 +1221,7 @@ function showBackButton(){
   document.getElementById("backbtn").innerHTML=`<button onclick="goBack()" style="padding:6px 14px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--ink);cursor:pointer;font-size:.8rem;box-shadow:0 2px 8px rgba(0,0,0,.12);">← 回到上一頁</button>`;
 }
 window.goBack=function(){
+  if(!isAuthenticated()) return;
   if(!backState) return;
   const bs=backState; backState=null;
   view=bs.view; priorityTab=bs.priorityTab; catFilter=bs.catFilter; statusFilter=bs.statusFilter; searchTerm=bs.searchTerm;
@@ -1244,6 +1233,7 @@ window.goBack=function(){
   setTimeout(()=>window.scrollTo({top:bs.scrollY,behavior:"smooth"}),50);
 };
 window.gotoNoTaskList=function(){
+  if(!isAuthenticated()) return;
   view="person";
   document.querySelectorAll(".tabs button").forEach(x=>x.classList.remove("active"));
   document.querySelector('.tabs button[data-v="person"]').classList.add("active");
@@ -1251,6 +1241,7 @@ window.gotoNoTaskList=function(){
   document.getElementById("view").scrollIntoView({behavior:"smooth", block:"end"});
 };
 window.goToTaskList=function(pid){
+  if(!isAuthenticated()) return;
   captureBackState();
   view="project"; catFilter="全部"; statusFilter="全部"; ownerFilter="全部"; searchTerm="";
   const sb=document.getElementById("searchbox"); if(sb) sb.value="";
@@ -1262,6 +1253,7 @@ window.goToTaskList=function(pid){
   setTimeout(()=>{ const el=document.getElementById("proj-"+pid); if(el) el.scrollIntoView({behavior:"smooth",block:"center"}); },50);
 };
 window.goToProject=function(pid){
+  if(!isAuthenticated()) return;
   captureBackState();
   view="project"; catFilter="全部"; statusFilter="全部"; ownerFilter="全部"; searchTerm="";
   const sb=document.getElementById("searchbox"); if(sb) sb.value="";
@@ -1272,6 +1264,7 @@ window.goToProject=function(pid){
   setTimeout(()=>{ const el=document.getElementById("proj-"+pid); if(el) el.scrollIntoView({behavior:"smooth",block:"center"}); },50);
 };
 window.goToPersonCard=function(name){
+  if(!isAuthenticated()) return;
   captureBackState();
   view="person"; priorityTab="capacity";
   document.querySelectorAll(".tabs button").forEach(x=>x.classList.remove("active"));
@@ -1282,6 +1275,7 @@ window.goToPersonCard=function(name){
 };
 
 function renderAddForm(){
+  if(!isAuthenticated()) return;
   const box=document.getElementById("addform");
   if(view!=="project"){ box.innerHTML=""; return; }
   if(!showAddForm){ box.innerHTML=`<button onclick="toggleAddForm()" style="padding:6px 14px;border-radius:16px;border:1px solid var(--accent);background:var(--card);color:var(--accent);font-size:.8rem;cursor:pointer;">＋ 新增專案</button>`; return; }
@@ -1300,8 +1294,11 @@ function renderAddForm(){
     </div>
   </div>`;
 }
-window.toggleAddForm=function(){ showAddForm=!showAddForm; renderAddForm(); };
+window.toggleAddForm=function(){
+  if(!isAuthenticated()) return;
+  showAddForm=!showAddForm; renderAddForm(); };
 window.addProject=async function(){
+  if(!isAuthenticated()) return;
   const cat=(document.getElementById('newcat').value||'其他').trim();
   const name=(document.getElementById('newname').value||'').trim();
   const rev=Number((document.getElementById('newrev')||{}).value||0);
@@ -1611,6 +1608,7 @@ function detailRow(p){
 }
 
 function renderProjectView(){
+  if(!isAuthenticated()) return;
   const showFinCols=anyFin();
   let rows=visibleProjects().map(p=>{
     const r=getRow(p.id);
@@ -1862,8 +1860,8 @@ function personCard(t){
     : `<div class="small" style="margin-top:5px;color:var(--ok);">✓ 目前沒有急件</div>`;
   const open=expandedPerson.has(t);
   const role=ROLES[t];
-  return `<div class="pcard ${group}" id="pcard-${t}" onclick="togglePerson(${jsArg(t)})" style="cursor:pointer;">
-      <b>${t}${role?` <span class="rolelabel">・${role}</span>`:''}</b><span>負責 ${activeOwned.length}/${owned.length} 案・協作 ${collabOn.length} 案・${taskCount} 項任務</span>${topHtml}
+  return `<div class="pcard ${group}" id="pcard-${esc(t)}" onclick="togglePerson(${jsArg(t)})" style="cursor:pointer;">
+      <b>${esc(t)}${role?` <span class="rolelabel">・${esc(role)}</span>`:''}</b><span>負責 ${activeOwned.length}/${owned.length} 案・協作 ${collabOn.length} 案・${taskCount} 項任務</span>${topHtml}
     </div>${open?personDetailHtml(t):''}`;
 }
 
@@ -1883,6 +1881,7 @@ function vendorCard(v){
     </div>`;
 }
 function renderPersonView(){
+  if(!isAuthenticated()) return;
   const legend=`<div style="display:flex;gap:10px;margin:6px 0 4px;"><span class="tag-staff">■ 三小文創</span><span class="tag-partner">■ 合作夥伴</span></div>`;
   const staffCards=`<div class="small" style="margin:4px 0;">三小文創</div>
     <div class="people">${TEAM_STAFF_G1.map(personCard).join("")}</div>
@@ -1902,12 +1901,14 @@ function renderPersonView(){
 }
 
 function renderInner(){
+  if(!isAuthenticated()) return;
   refreshAll();
   renderStats(); renderPriority(); renderFilters(); renderAddForm();
   if(view==="project"){ renderProjectView(); }
   else { renderPersonView(); }
 }
 function render(){
+  if(!isAuthenticated()) return;
   const active=document.activeElement;
   const aid=active&&active.id;
   const tag=active&&active.tagName;
@@ -1929,9 +1930,19 @@ function render(){
 
 // 本機備份只放在這個分頁（sessionStorage），關掉分頁就清除；舊版留在 localStorage 的完整備份一併刪掉。
 try{ localStorage.removeItem('dash_backup_v2'); localStorage.removeItem('dash_backup_v3'); }catch(e){}
-function localBackupSave(){ try{ sessionStorage.setItem('dash_backup_v3', JSON.stringify(state)); }catch(e){} }
-function localBackupLoad(){ try{ const s=sessionStorage.getItem('dash_backup_v3'); return s?JSON.parse(s):null; }catch(e){ return null; } }
+function localBackupSave(){
+  if(!isAuthenticated()) return;
+  try{ sessionStorage.setItem('dash_backup_v3',JSON.stringify({owner:ME.name,level:ME.level,state})); }catch(e){}
+}
+function localBackupLoad(){
+  if(!isAuthenticated()) return null;
+  try{
+    const b=JSON.parse(sessionStorage.getItem('dash_backup_v3')||'null');
+    return b && b.owner===ME.name && b.level===ME.level && isObj(b.state) ? b.state : null;
+  }catch(e){ return null; }
+}
 function showRestoreBanner(backup){
+  if(!isAuthenticated()) return;
   const box=document.getElementById("restorebanner");
   box.innerHTML=`<div class="priority" style="margin-bottom:14px;">
     <h3>偵測到你這台裝置有尚未同步的本機備份資料</h3>
@@ -1944,6 +1955,7 @@ function showRestoreBanner(backup){
   window._pendingBackup=backup;
 }
 window.restoreBackup=async function(){
+  if(!isAuthenticated()) return;
   if(window._pendingBackup){ state=window._pendingBackup; }
   document.getElementById("restorebanner").innerHTML="";
   render(); await persist();
@@ -1960,6 +1972,7 @@ function sheetConfigured(){ return SHEET_API_URL && !SHEET_API_URL.includes("PAS
 
 // ================= 財務權限 =================
 // 權限由 Google Apps Script 判斷；沒權限的數字根本不會傳到這台電腦。這裡只負責「畫面要不要顯示」。
+let authGeneration=0, catalogReady=false;
 let ME=null;            // {name, level:'admin'|'finance'|'owner'|'none'}，沒登入是 null
 let loginError=null;
 // 密碼放在 sessionStorage：重新整理不用重登，關掉分頁就清除，不會長期留在這台電腦上。
@@ -1984,46 +1997,109 @@ function finOK(p){
 function FINP(){ return ALLP.filter(finOK); }
 function anyFin(){ return finLevel()!=='none' && FINP().length>0; }
 const LEVEL_LABEL={admin:'管理者',finance:'財務',owner:'本人負責',none:'一般'};
-function applyIdentity(me,err){
-  const prev=JSON.stringify(ME);
-  ME=me; loginError=err;
-  if(ME){ whoAmI=ME.name; saveWhoAmI(ME.name); }
-  if(JSON.stringify(ME)!==prev || err) renderLogin();
+function isAuthenticated(){ return validIdentity(ME) && catalogReady && !!loadCode(); }
+function validIdentity(me){
+  return isObj(me) && typeof me.name==='string' && !!me.name.trim() &&
+    ['admin','finance','owner','none'].includes(me.level);
+}
+function authContext(){ return {generation:authGeneration,code:loadCode()}; }
+function isCurrent(ctx){ return ctx.generation===authGeneration && ctx.code===loadCode(); }
+function assertCurrent(ctx){ if(!isCurrent(ctx)) throw new Error('stale_session'); }
+function setAuthNotice(msg){ document.getElementById('authnotice').textContent=msg; }
+function clearPrivateSession(error){
+  // 先同步清掉畫面及資料，再讓任何進行中的網路請求完成。
+  authGeneration++;
+  ME=null; catalogReady=false; loginError=error||null; whoAmI='';
+  state={}; lastSynced={}; ALLP=[]; DELETEDP=[];
+  PROJECTS=[]; TEAM_STAFF_G1=[]; TEAM_STAFF_G2=[]; TEAM_STAFF=[]; TEAM_PARTNER=[]; TEAM=[]; ROLES={};
+  window._pendingBackup=null; lastDeleteSnapshot=null; backState=null; dragSubtask=null;
+  expanded.clear(); expandedPerson.clear(); todoExpandedSet.clear(); ownedCollabExpandedSet.clear(); capacityExpanded.clear();
+  lastCapacityOrder=[]; detailTab={}; ganttGroupExpanded={}; priorityExpandLevel={}; monthCatTableExpanded.clear();
+  view='project'; catFilter='全部'; statusFilter='全部'; ownerFilter='全部'; searchTerm=''; showAddForm=false; showDeleted=false;
+  pendingRemoteRender=false; dragActive=false; lastSyncAt=null;
+  document.getElementById('dashboard').hidden=true;
+  document.getElementById('stats').hidden=true;
+  ['stats','priority','filters','statusfilters','ownerfilters','addform','view','restorebanner','undotoast','synctoast','backbtn'].forEach(id=>{
+    document.getElementById(id).innerHTML='';
+  });
+  document.getElementById('searchbox').value='';
+  document.querySelectorAll('.tabs button').forEach(b=>b.classList.toggle('active',b.dataset.v==='project'));
+  try{ sessionStorage.removeItem('dash_backup_v3'); }catch(e){}
+  renderLogin();
+}
+function rejectSession(ctx,error){
+  assertCurrent(ctx);
+  saveCode(''); clearPrivateSession(error);
+  throw new Error(error);
+}
+function validateResponse(data,ctx,needsCatalog){
+  assertCurrent(ctx);
+  if(!data || data.ok!==true){
+    const reason=data && data.error;
+    if(reason==='bad_code'||reason==='login_required') rejectSession(ctx,reason);
+    if(reason==='catalog_not_configured') rejectSession(ctx,reason);
+    // A rejected suspicious write preserves the current authenticated work for recovery.
+    if(reason==='rejected_suspicious_write') throw new Error(reason);
+    rejectSession(ctx,'invalid_response');
+  }
+  if(data.error || !validIdentity(data.me) || !isObj(data.state) ||
+     data.state.action!==undefined || data.state.code!==undefined) rejectSession(ctx,'invalid_response');
+  if(ME && (ME.name!==data.me.name || ME.level!==data.me.level)) rejectSession(ctx,'session_changed');
+  if(needsCatalog && !validCatalog(data.catalog)) rejectSession(ctx,'invalid_response');
+}
+function validCatalog(c){
+  if(!isObj(c)||!Array.isArray(c.projects)||!c.projects.length||!Array.isArray(c.staffGroups)||
+     c.staffGroups.length!==2||!Array.isArray(c.partners)||!isObj(c.roles)) return false;
+  const name=v=>typeof v==='string'&&!!v.trim();
+  if(!c.staffGroups.every(g=>Array.isArray(g)&&g.every(name))||!c.partners.every(name)) return false;
+  if(!c.staffGroups.flat().length&&!c.partners.length) return false;
+  if(!Object.entries(c.roles).every(([k,v])=>name(k)&&name(v))) return false;
+  const ids=new Set();
+  return c.projects.every(p=>{
+    if(!isObj(p)||typeof p.id!=='string'||!SAFE_ID.test(p.id)||ids.has(p.id)||!name(p.name)||!name(p.cat)||
+       !Array.isArray(p.months)||!p.months.length||!p.months.every(m=>Number.isInteger(m)&&m>=1&&m<=12)) return false;
+    ids.add(p.id); return true;
+  });
+}
+function applyCatalog(c){
+  PROJECTS=c.projects.map(p=>({id:p.id,cat:p.cat,name:p.name,months:p.months.slice()}));
+  [TEAM_STAFF_G1,TEAM_STAFF_G2]=c.staffGroups.map(g=>g.slice());
+  TEAM_STAFF=TEAM_STAFF_G1.concat(TEAM_STAFF_G2); TEAM_PARTNER=c.partners.slice();
+  TEAM=TEAM_STAFF.concat(TEAM_PARTNER); ROLES=Object.assign(Object.create(null),c.roles);
+  catalogReady=true;
+}
+function applyIdentity(me){
+  ME={name:me.name,level:me.level}; whoAmI=ME.name; loginError=null;
+  document.getElementById('dashboard').hidden=false;
+  document.getElementById('stats').hidden=false;
+  renderLogin();
 }
 function renderLogin(){
   const box=document.querySelector('.whoami'); if(!box) return;
-  if(ME){
+  if(isAuthenticated()){
     box.innerHTML=`你是：<b>${esc(ME.name)}</b> <span class="small">（${LEVEL_LABEL[ME.level]||''}）</span> <button class="mini" onclick="logout()">登出</button>`;
+    setAuthNotice('');
   } else {
-    box.innerHTML=`你是：<select id="whoami-select">${whoAmIOpts(whoAmI)}</select>
-      <span style="margin-left:10px;">個人密碼 <input id="logincode" type="password" autocomplete="current-password" style="width:120px;" onkeydown="if(event.key==='Enter')login()"></span>
-      <button class="mini" onclick="login()">登入</button>
-      ${loginError==='bad_code'?'<span style="color:var(--warn);margin-left:6px;">密碼不正確</span>':''}`;
-    const sel=document.getElementById('whoami-select');
-    sel.value=whoAmI;
-    sel.addEventListener('change',e=>{ whoAmI=e.target.value; saveWhoAmI(whoAmI); });
+    box.innerHTML=`個人密碼 <input id="logincode" type="password" autocomplete="current-password" style="width:120px;" onkeydown="if(event.key==='Enter')login()">
+      <button class="mini" onclick="login()">登入</button>`;
+    const messages={bad_code:'密碼不正確，請重新登入。',login_required:'請先登入，才能查看或修改資料。',
+      session_changed:'登入身分或權限已變更，請重新登入。',invalid_response:'無法確認登入狀態，請稍後重新登入。',
+      catalog_not_configured:'專案與團隊設定尚未完成，請聯絡管理者。',old_backend:'登入保護尚未部署完成，請聯絡管理者。'};
+    setAuthNotice(messages[loginError]||'請先登入，才能查看或修改資料。');
   }
 }
 window.login=async function(){
   const v=(document.getElementById('logincode')||{}).value||'';
   if(!v.trim()) return;
-  saveCode(v.trim());
-  await reloadAfterAuthChange();
-  if(!ME){ saveCode(''); }
+  clearPrivateSession(); saveCode(v.trim());
+  await loadFromSheet();
 };
-window.logout=async function(){
-  saveCode(''); ME=null; loginError=null;
-  try{ sessionStorage.removeItem('dash_backup_v3'); }catch(e){}
-  await reloadAfterAuthChange();
+window.logout=function(){
+  if(isAuthenticated() && (savingCount>0 || !same(state,lastSynced)) &&
+     !confirm('仍有未同步的修改。登出會清除此分頁的暫存，尚未送出的修改不會儲存。確定登出？')) return;
+  saveCode(''); clearPrivateSession();
 };
-async function reloadAfterAuthChange(){
-  await saveChain;
-  setHint('● 重新載入中…');
-  // 身分改變時整份重新讀，不跟舊畫面合併（避免把別人的數字留在畫面上）
-  try{ const data=await fetchRemote(); state=data; lastSynced=clone(data); localBackupSave(); setSyncStatus('ok'); }
-  catch(e){ console.error(e); setSyncStatus('fail'); }
-  renderLogin(); render();
-}
+
 // ================= 自動同步（輪詢 + 三方合併）=================
 // 概念：lastSynced = 上次跟 Google Sheet 對齊時的版本（合併基準）。
 // 存檔時先抓雲端最新版，只把「我這台改過的欄位」疊上去再寫回，避免把同事剛存的東西蓋掉。
@@ -2119,16 +2195,17 @@ function mergeState(b,m,t,tie){
 }
 // ===== 合併核心結束 =====
 
-let apiChecked=false, apiVersion=0;
-async function ensureNewBackend(){
+async function ensureNewBackend(ctx){
+  assertCurrent(ctx);
   // 每一次 POST 之前都確認（GET ?ping 對舊後端是無害的；POST 對舊後端等於覆寫資料）
   const r=await fetch(SHEET_API_URL+'?ping=1',{cache:'no-store'}); const j=await r.json();
-  if(!j || !(j.api>=2)){
+  assertCurrent(ctx);
+  if(!j || !(j.api>=4) || j.authRequired!==true){
     oldBackend=true;
     setHint('⚠ 後端 Apps Script 還是舊版，為了保護資料，這個頁面暫停讀寫。請先部署新版 Apps Script。',true);
-    throw new Error('old backend');
+    rejectSession(ctx,'old_backend');
   }
-  apiChecked=true; oldBackend=false; apiVersion=j.api;
+  oldBackend=false;
 }
 function rowCount(st){ return Object.keys(st||{}).filter(k=>k[0]!=='_'&&st[k]&&typeof st[k]==='object'&&!Array.isArray(st[k])).length; }
 function looksWiped(remote){
@@ -2137,20 +2214,15 @@ function looksWiped(remote){
   if((lastSynced._customProjects||[]).length>=3 && !(remote._customProjects||[]).length) return true;
   return false;
 }
-async function fetchRemote(){
-  await ensureNewBackend();
-  const res=await fetch(SHEET_API_URL,{method:"POST",cache:"no-store",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify({action:'read',code:loadCode()})});
+async function fetchRemote(ctx=authContext()){
+  assertCurrent(ctx);
+  if(!ctx.code) throw new Error('login_required');
+  await ensureNewBackend(ctx);
+  assertCurrent(ctx);
+  const res=await fetch(SHEET_API_URL,{method:"POST",cache:"no-store",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify({action:'read',code:ctx.code})});
   const data=await res.json();
-  if(!data || data.ok!==true || !data.state || typeof data.state!=='object' || Array.isArray(data.state)){
-    // 回應不是新版格式（後端被換回舊版、或出錯）→ 絕不當成資料使用
-    apiChecked=false; oldBackend=true; setHint('');
-    throw new Error('bad read response');
-  }
-  oldBackend=false;
-  applyIdentity(data.me||null, data.error||null);
-  const st=data.state;
-  if(st.action!==undefined || st.code!==undefined) { apiChecked=false; oldBackend=true; setHint(''); throw new Error('corrupted state'); }
-  return st;
+  validateResponse(data,ctx,true);
+  return data;
 }
 
 // ---- 使用者正在操作時不要重繪（避免打到一半的字被洗掉） ----
@@ -2162,7 +2234,7 @@ document.addEventListener('keydown',()=>{ lastTypingAt=Date.now(); },true);
 function isUserBusy(){
   if(dragActive) return true;
   const a=document.activeElement;
-  if(!a||a===document.body||a.id==='searchbox'||a.id==='whoami-select') return false;
+  if(!a||a===document.body||a.id==='searchbox') return false;
   const tag=a.tagName;
   if(tag==='TEXTAREA'||a.isContentEditable) return true;
   if(tag==='INPUT'){
@@ -2173,6 +2245,7 @@ function isUserBusy(){
   return false;
 }
 function renderPreservingScroll(){
+  if(!isAuthenticated()) return;
   const sel='.ganttscroll,.monthgridscroll,.todoparentgrid,.wrap';
   const before=[...document.querySelectorAll(sel)].map(e=>[e.scrollLeft,e.scrollTop]);
   const y=window.scrollY;
@@ -2182,6 +2255,7 @@ function renderPreservingScroll(){
   window.scrollTo(0,y);
 }
 function requestRemoteRender(){
+  if(!isAuthenticated()) return;
   if(isUserBusy()){ pendingRemoteRender=true; return; }
   pendingRemoteRender=false; renderPreservingScroll();
 }
@@ -2212,6 +2286,7 @@ function changedProjectsSummary(prev,next){
 }
 let syncToastTimer=null;
 function showSyncToast(items){
+  if(!isAuthenticated()) return;
   if(!items.length) return;
   const box=document.getElementById("synctoast"); if(!box) return;
   const first=items[0];
@@ -2222,6 +2297,7 @@ function showSyncToast(items){
   syncToastTimer=setTimeout(()=>{ box.innerHTML=''; },5000);
 }
 function applyMerged(next){
+  if(!isAuthenticated()) return;
   const prev=state;
   state=next;
   if(!same(prev,next)){
@@ -2232,108 +2308,81 @@ function applyMerged(next){
 
 // ---- 讀取 ----
 async function loadFromSheet(){
-  if(!sheetConfigured()){
-    setHint("尚未設定 Google Sheet 網址，目前只存在你這台瀏覽器（單機模式）。",true);
-    const backup=localBackupLoad(); if(backup) state=backup;
-    render();
-    return;
-  }
+  const ctx=authContext();
+  if(!ctx.code){ clearPrivateSession(); return; }
+  if(!sheetConfigured()){ setAuthNotice('尚未設定資料服務，無法登入。'); return; }
+  setAuthNotice('正在驗證登入…');
   try{
-    const data=await fetchRemote();
-    if(Object.keys(data).length>0){
-      state=data; lastSynced=clone(data);
-    } else {
-      lastSynced={};
-      const backup=localBackupLoad();
-      if(backup && Object.keys(backup).length>0) showRestoreBanner(backup);
-    }
-    setSyncStatus('ok');
-    render();
+    const data=await fetchRemote(ctx);
+    assertCurrent(ctx);
+    applyCatalog(data.catalog); applyIdentity(data.me);
+    state=data.state; lastSynced=clone(data.state);
+    // 重新整理時，只有通過同一身分的伺服器驗證後才能讀取該分頁的備份。
+    const backup=localBackupLoad();
+    if(!Object.keys(state).length && backup && Object.keys(backup).length) showRestoreBanner(backup);
+    setSyncStatus('ok'); render();
   }catch(e){
-    console.error(e);
-    setHint("⚠ 連不到 Google Sheet（可能網址錯誤或還沒部署好），目前顯示你這台瀏覽器的本機備份。",true);
-    const backup=localBackupLoad(); if(backup) state=backup;
-    render();
+    if(!isCurrent(ctx)) return;
+    setAuthNotice('暫時無法驗證登入，請確認連線後重試。');
   }
 }
 async function pollOnce(force){
-  if(!sheetConfigured()||pollBusy||savingCount>0) return;
+  if(!isAuthenticated()||!sheetConfigured()||pollBusy||savingCount>0) return;
   if(document.hidden && !force) return;
+  const ctx=authContext();
   pollBusy=true;
   try{
-    const remote=await fetchRemote();
-    if(savingCount>0) return; // 存檔中途開始了，存檔流程自己會合併
-    if(looksWiped(remote)){ setHint('⚠ 雲端資料看起來不完整（專案數量突然大減），為了保護資料已暫停同步，請聯絡 Jenny。',true); return; }
+    const data=await fetchRemote(ctx);
+    assertCurrent(ctx);
+    if(savingCount>0) return;
+    const remote=data.state;
+    if(looksWiped(remote)){ setHint('⚠ 雲端資料看起來不完整（專案數量突然大減），為了保護資料已暫停同步，請聯絡管理者。',true); return; }
+    applyCatalog(data.catalog);
     const merged=mergeState(lastSynced,state,remote);
     lastSynced=clone(remote);
-    applyMerged(merged);
-    setSyncStatus('ok');
-    if(!same(state,lastSynced)) persist(); // 之前存失敗的修改，自動補傳
-  }catch(e){ console.error(e); setSyncStatus('fail'); }
+    applyMerged(merged); setSyncStatus('ok');
+    if(!same(state,lastSynced)) persist();
+  }catch(e){ if(isCurrent(ctx)&&isAuthenticated()) setSyncStatus('fail'); }
   finally{ pollBusy=false; }
 }
-window.manualRefresh=async function(){ await saveChain; await pollOnce(true); };
+window.manualRefresh=async function(){
+  if(!isAuthenticated()) return;
+  const ctx=authContext();
+  await saveChain;
+  if(isCurrent(ctx)) await pollOnce(true);
+};
 setInterval(()=>{ pollOnce(false); if(pendingRemoteRender) requestRemoteRender(); },POLL_MS);
 document.addEventListener('visibilitychange',()=>{ if(!document.hidden) pollOnce(false); });
 
 // ---- 寫入（排隊執行，一次一筆）----
 function persist(){
+  if(!isAuthenticated()) return Promise.resolve();
   localBackupSave();
-  if(!sheetConfigured()){ setHint("尚未設定 Google Sheet 網址，這次修改只存在你這台瀏覽器。",true); return Promise.resolve(); }
+  if(!sheetConfigured()){ setHint('尚未設定資料服務，無法儲存。',true); return Promise.resolve(); }
+  const ctx=authContext();
   savingCount++;
-  const p=saveChain.then(doPersist).finally(()=>{ savingCount--; });
+  const p=saveChain.then(()=>doPersist(ctx)).finally(()=>{ savingCount--; });
   saveChain=p.catch(()=>{});
   return saveChain;
 }
-async function postState(obj){
-  apiChecked=false;
-  await ensureNewBackend();
-  const res=await fetch(SHEET_API_URL,{method:"POST",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify({action:'write',code:loadCode(),data:obj})});
-  if(!res.ok) throw new Error('POST '+res.status);
-}
-async function doPersist(){
-  if(same(state,lastSynced)) return;
+async function doPersist(ctx){
+  if(!isCurrent(ctx)||!isAuthenticated()||same(state,lastSynced)) return;
   setSyncStatus('saving');
   try{
-    await ensureNewBackend();
-    if(apiVersion>=3){
-      // 新版：把「我的基準」和「我的版本」一起送到 Google，由 Google 在鎖定狀態下跟最新資料合併，不會有時間差
-      const pre=clone(lastSynced), mine=clone(state);
-      const res=await fetch(SHEET_API_URL,{method:"POST",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify({action:'write',code:loadCode(),base:pre,data:mine})});
-      const j=await res.json();
-      if(!j || j.ok!==true || !j.state || typeof j.state!=='object') throw new Error('write failed: '+(j&&j.error));
-      if(looksWiped(j.state)) throw new Error('remote looks wiped');
-      lastSynced=clone(j.state);
-      applyMerged(mergeState(mine,state,j.state));
-      localBackupSave();
-      setSyncStatus('ok');
-      return;
-    }
-    let remote;
-    try{ remote=await fetchRemote(); }catch(e){ throw e; }
-    if(looksWiped(remote)) throw new Error('remote looks wiped');
-    const pre=clone(lastSynced);
-    const mine=clone(state);
-    let merged=mergeState(pre,mine,remote);
-    await postState(merged);
-    lastSynced=clone(merged);
-    // 驗證：如果同事幾乎同一秒也在存檔，我的修改可能被他的版本蓋掉 → 重新讀一次，被蓋掉就補寫回去
-    for(let i=0;i<3;i++){
-      await new Promise(r=>setTimeout(r,900+Math.random()*900));
-      let r2; try{ r2=await fetchRemote(); }catch(e){ break; }
-      if(looksWiped(r2)) break;
-      const fixed=mergeState(pre,mine,r2,'theirs'); // 只補回「被還原成舊值」的欄位；同事之後又改的就尊重同事
-      merged=fixed; lastSynced=clone(fixed);
-      if(same(fixed,r2)) break;
-      await postState(fixed);
-    }
-    // 等待網路的這段時間，使用者可能又改了東西：把那些改動疊在合併結果上
-    applyMerged(mergeState(mine,state,merged));
-    localBackupSave();
-    setSyncStatus('ok');
+    await ensureNewBackend(ctx);
+    assertCurrent(ctx);
+    const pre=clone(lastSynced), mine=clone(state);
+    const res=await fetch(SHEET_API_URL,{method:"POST",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify({action:'write',code:ctx.code,base:pre,data:mine})});
+    const j=await res.json();
+    validateResponse(j,ctx,false);
+    if(looksWiped(j.state)) throw new Error('remote looks wiped');
+    lastSynced=clone(j.state);
+    applyMerged(mergeState(mine,state,j.state));
+    localBackupSave(); setSyncStatus('ok');
   }catch(e){
-    console.error(e);
-    if(String(e&&e.message).includes('login_required')) setHint('⚠ 請先登入（輸入個人密碼）才能儲存修改。',true);
+    if(!isCurrent(ctx)||!isAuthenticated()) return;
+    if(e.message==='rejected_suspicious_write'||e.message==='remote looks wiped')
+      setHint('⚠ 資料完整性檢查未通過，已暫停這次同步，請聯絡管理者。',true);
     else setSyncStatus('fail');
   }
 }
@@ -2349,12 +2398,14 @@ function isValidISODate(v){
 let slotRenderTimer=null;
 function slotRender(isDate){ if(isDate){ clearTimeout(slotRenderTimer); slotRenderTimer=setTimeout(()=>render(),700); } else render(); }
 window.setEstSlot=async function(pid,i,field,val){
+  if(!isAuthenticated()) return;
   const p=getProject(pid); if(!p) return;
   const cur=getRow(pid); const arr=getEstSlots(p).map(x=>Object.assign({},x));
   arr[i]=Object.assign({},arr[i],{[field]:val});
   state[pid]=Object.assign({},cur,{estPlan:arr}); touch(pid); render(); await persist();
 };
 window.setInvField=async function(pid,i,field,val){
+  if(!isAuthenticated()) return;
   const p=getProject(pid); if(!p) return;
   if(['date','dueDate','paidDate'].includes(field) && val && !isValidISODate(val)) return;
   if(field==='paidDate' && !canMarkPaid()) return;
@@ -2367,10 +2418,12 @@ window.setInvField=async function(pid,i,field,val){
   slotRender(['date','dueDate','paidDate'].includes(field)); await persist();
 };
 window.setRelated=async function(pid,checked){
+  if(!isAuthenticated()) return;
   if(!canMarkPaid()){ render(); return; }
   const cur=getRow(pid); state[pid]=Object.assign({},cur,{relatedParty:!!checked}); touch(pid); render(); await persist();
 };
 window.setInvPaid=async function(pid,i,checked){
+  if(!isAuthenticated()) return;
   if(!canMarkPaid()){ render(); return; }
   const p=getProject(pid); if(!p) return;
   const v=getInvSlots(p)[i];
@@ -2381,6 +2434,7 @@ window.setInvPaid=async function(pid,i,checked){
 };
 let dateRenderTimer=null;
 window.setField=async function(id,field,val){
+  if(!isAuthenticated()) return;
   if((field==="startDate"||field==="endDate") && !isValidISODate(val)) return;
   const cur=getRow(id); state[id]=Object.assign({},cur,{[field]:val}); touch(id);
   if(field==="startDate"||field==="endDate"){
@@ -2393,28 +2447,33 @@ window.setField=async function(id,field,val){
 };
 // 連結欄位：只接受 https:// 開頭的網址，其他（javascript:、data:、http:…）一律拒絕
 window.setLinkField=async function(pid,field,el){
+  if(!isAuthenticated()) return;
   const raw=(el.value||'').trim();
   const url=raw?safeHttpsUrl(raw):'';
   if(raw && !url){ alert('連結必須是 https:// 開頭的網址。'); el.value=getRow(pid)[field]||''; return; }
   await setField(pid,field,url);
 };
 window.saveName=async function(pid,val){
+  if(!isAuthenticated()) return;
   const v=(val||'').trim(); if(v===''){ render(); return; }
   const cur=getRow(pid); state[pid]=Object.assign({},cur,{nameOverride:v}); touch(pid);
   render(); await persist();
 };
 window.saveRev=async function(pid,val){
+  if(!isAuthenticated()) return;
   const num=val===''?null:Number(val);
   const cur=getRow(pid); state[pid]=Object.assign({},cur,{estOverride:num}); touch(pid);
   render(); await persist();
 };
 window.toggleTask=async function(pid,idx,checked){
+  if(!isAuthenticated()) return;
   const p=getProject(pid); const t=taskList(p)[idx]; const cur=getRow(pid);
   const prev=cur.tasks[t]||{};
   const tasks=Object.assign({},cur.tasks,{[t]:Object.assign({},prev,{done:checked})});
   state[pid]=Object.assign({},cur,{tasks}); touch(pid); render(); await persist();
 };
 window.setTaskAssignee=async function(pid,idx,val){
+  if(!isAuthenticated()) return;
   if(val==='__vendor__'){ const name=prompt('請輸入委外單位名稱：'); if(!name||!name.trim()){ render(); return; } val=name.trim(); }
   const p=getProject(pid); const t=taskList(p)[idx]; const cur=getRow(pid);
   const prev=cur.tasks[t]||{};
@@ -2422,12 +2481,14 @@ window.setTaskAssignee=async function(pid,idx,val){
   state[pid]=Object.assign({},cur,{tasks}); touch(pid); render(); await persist();
 };
 window.setTaskDate=async function(pid,idx,field,val){
+  if(!isAuthenticated()) return;
   const p=getProject(pid); const t=taskList(p)[idx]; const cur=getRow(pid);
   const prev=cur.tasks[t]||{};
   const tasks=Object.assign({},cur.tasks,{[t]:Object.assign({},prev,{[field]:val})});
   state[pid]=Object.assign({},cur,{tasks}); touch(pid); render(); await persist();
 };
 window.setTaskDeadline=async function(pid,idx,mdVal){
+  if(!isAuthenticated()) return;
   const p=getProject(pid); const t=taskList(p)[idx]; const cur=getRow(pid);
   const iso=mdToISO(mdVal,p);
   const prev=cur.tasks[t]||{};
@@ -2435,11 +2496,13 @@ window.setTaskDeadline=async function(pid,idx,mdVal){
   state[pid]=Object.assign({},cur,{tasks}); touch(pid); render(); await persist();
 };
 window.addTask=async function(id){
+  if(!isAuthenticated()) return;
   const inp=document.getElementById("add-"+id); const val=(inp.value||"").trim(); if(!val) return;
   const cur=getRow(id); state[id]=Object.assign({},cur,{custom:cur.custom.concat([val])}); touch(id);
   expanded.add(id); render(); await persist();
 };
 window.moveTopTask=async function(pid,idx,dir){
+  if(!isAuthenticated()) return;
   const p=getProject(pid); const entries=orderedEntries(p);
   const ni=idx+dir; if(ni<0||ni>=entries.length) return;
   const keys=entries.map(e=>e.key);
@@ -2448,6 +2511,7 @@ window.moveTopTask=async function(pid,idx,dir){
   state[pid]=Object.assign({},cur,{taskOrder:keys}); touch(pid); render(); await persist();
 };
 window.deleteCustomTask=async function(pid,idx){
+  if(!isAuthenticated()) return;
   const p=getProject(pid); const pos=customPos(p,idx); const name=taskList(p)[idx]; const cur=getRow(pid);
   if(!confirm(`確定要刪除「${name}」這個任務嗎？底下的子項目也會一併移除。`)) return;
   lastDeleteSnapshot={pid,row:JSON.parse(JSON.stringify(cur))};
@@ -2459,6 +2523,7 @@ window.deleteCustomTask=async function(pid,idx){
   showUndoToast(`任務「${name}」`);
 };
 window.renameCustomTask=async function(pid,idx,newName){
+  if(!isAuthenticated()) return;
   const p=getProject(pid); const pos=customPos(p,idx); const cur=getRow(pid);
   const oldName=cur.custom[pos]; const nn=(newName||'').trim(); if(!nn||nn===oldName){ render(); return; }
   const custom=cur.custom.slice(); custom[pos]=nn;
@@ -2468,6 +2533,7 @@ window.renameCustomTask=async function(pid,idx,newName){
   state[pid]=Object.assign({},cur,{custom,tasks,subtasks,taskOrder}); touch(pid); render(); await persist();
 };
 window.renameBaseTask=async function(pid,idx,newName){
+  if(!isAuthenticated()) return;
   const p=getProject(pid); const raw=rawBaseNameAt(p,idx); if(!raw) return;
   const cur=getRow(pid);
   const prevDisplay=cur.taskRenames[raw]||raw;
@@ -2478,6 +2544,7 @@ window.renameBaseTask=async function(pid,idx,newName){
   state[pid]=Object.assign({},cur,{taskRenames,tasks,subtasks}); touch(pid); render(); await persist();
 };
 window.deleteBaseTask=async function(pid,idx){
+  if(!isAuthenticated()) return;
   const p=getProject(pid); const raw=rawBaseNameAt(p,idx); if(!raw) return;
   if(!confirm(`確定要刪除「${raw}」這個任務嗎？底下的子項目也會一併移除。`)) return;
   const cur=getRow(pid);
@@ -2487,16 +2554,19 @@ window.deleteBaseTask=async function(pid,idx){
   showUndoToast(`任務「${raw}」`);
 };
 window.renameTopTask=async function(pid,idx,newName){
+  if(!isAuthenticated()) return;
   const p=getProject(pid);
   if(isCustomIdx(p,idx)) return renameCustomTask(pid,idx,newName);
   return renameBaseTask(pid,idx,newName);
 };
 window.deleteTopTask=async function(pid,idx){
+  if(!isAuthenticated()) return;
   const p=getProject(pid);
   if(isCustomIdx(p,idx)) return deleteCustomTask(pid,idx);
   return deleteBaseTask(pid,idx);
 };
 window.syncPaymentSubtasks=async function(pid){
+  if(!isAuthenticated()) return;
   const p=getProject(pid); const cur=getRow(pid);
   const method=cur.paymentMethod;
   if(!method){ alert('請先選擇付款方式'); return; }
@@ -2512,6 +2582,7 @@ window.syncPaymentSubtasks=async function(pid){
   expanded.add(pid); state[pid]=Object.assign({},cur,{subtasks}); touch(pid); render(); await persist();
 };
 window.addSubtask=async function(pid,idx){
+  if(!isAuthenticated()) return;
   const p=getProject(pid); const t=taskList(p)[idx];
   const inp=document.getElementById(`subin-${pid}-${idx}`); const val=(inp.value||'').trim(); if(!val) return;
   const cur=getRow(pid); const subtasks=Object.assign({},cur.subtasks);
@@ -2519,12 +2590,14 @@ window.addSubtask=async function(pid,idx){
   expanded.add(pid); state[pid]=Object.assign({},cur,{subtasks}); touch(pid); render(); await persist();
 };
 window.toggleSubtask=async function(pid,idx,si,checked){
+  if(!isAuthenticated()) return;
   const p=getProject(pid); const t=taskList(p)[idx]; const cur=getRow(pid);
   const subtasks=Object.assign({},cur.subtasks); const arr=materializedSubs(pid,t);
   arr[si]=Object.assign({},arr[si],{done:checked}); subtasks[t]=arr;
   state[pid]=Object.assign({},cur,{subtasks}); touch(pid); render(); await persist();
 };
 window.setSubtaskAssignee=async function(pid,idx,si,val){
+  if(!isAuthenticated()) return;
   if(val==='__vendor__'){ const name=prompt('請輸入委外單位名稱：'); if(!name||!name.trim()){ render(); return; } val=name.trim(); }
   const p=getProject(pid); const t=taskList(p)[idx]; const cur=getRow(pid);
   const subtasks=Object.assign({},cur.subtasks); const arr=materializedSubs(pid,t);
@@ -2532,12 +2605,14 @@ window.setSubtaskAssignee=async function(pid,idx,si,val){
   state[pid]=Object.assign({},cur,{subtasks}); touch(pid); render(); await persist();
 };
 window.setSubtaskAudience=async function(pid,idx,si,val){
+  if(!isAuthenticated()) return;
   const p=getProject(pid); const t=taskList(p)[idx]; const cur=getRow(pid);
   const subtasks=Object.assign({},cur.subtasks); const arr=materializedSubs(pid,t);
   arr[si]=Object.assign({},arr[si],{audience:val}); subtasks[t]=arr;
   state[pid]=Object.assign({},cur,{subtasks}); touch(pid); render(); await persist();
 };
 window.addAudienceOption=async function(pid){
+  if(!isAuthenticated()) return;
   const input=document.getElementById("newaudopt-"+pid);
   const val=(input?input.value:"").trim();
   if(!val){ alert("請輸入分類名稱"); return; }
@@ -2547,6 +2622,7 @@ window.addAudienceOption=async function(pid){
   state[pid]=Object.assign({},cur,{audienceOptions}); touch(pid); render(); await persist();
 };
 window.removeAudienceOption=async function(pid,idx){
+  if(!isAuthenticated()) return;
   const cur=getRow(pid);
   const removed=cur.audienceOptions[idx];
   if(!confirm(`確定要刪除「${removed}」這個對象分類嗎？已經用這個分類標記的子項目不會被清掉，只是選單裡不會再看到它。`)) return;
@@ -2554,6 +2630,7 @@ window.removeAudienceOption=async function(pid,idx){
   state[pid]=Object.assign({},cur,{audienceOptions}); touch(pid); render(); await persist();
 };
 window.applyMarketTemplate=async function(pid){
+  if(!isAuthenticated()) return;
   if(!confirm('套用「市集工作模組」會：\n1. 清空目前所有的頂層工作（不管是內建的還是你自己加的自訂項目）\n2. 換成5個時間階段＋預設子項目\n\n確定要套用嗎？（原本的任務資料會被取代，無法復原）')) return;
   const p=getProject(pid); const cur=getRow(pid);
   const taskDeletes=[...new Set([...(cur.taskDeletes||[]), ...BASE_TASKS])];
@@ -2568,12 +2645,14 @@ window.applyMarketTemplate=async function(pid){
   touch(pid); expanded.add(pid); detailTab[pid]='tasks'; render(); await persist();
 };
 window.setSubtaskDate=async function(pid,idx,si,field,val){
+  if(!isAuthenticated()) return;
   const p=getProject(pid); const t=taskList(p)[idx]; const cur=getRow(pid);
   const subtasks=Object.assign({},cur.subtasks); const arr=materializedSubs(pid,t);
   arr[si]=Object.assign({},arr[si],{[field]:val}); subtasks[t]=arr;
   state[pid]=Object.assign({},cur,{subtasks}); touch(pid); render(); await persist();
 };
 window.setSubtaskDeadline=async function(pid,idx,si,mdVal){
+  if(!isAuthenticated()) return;
   const p=getProject(pid); const t=taskList(p)[idx]; const cur=getRow(pid);
   const iso=mdToISO(mdVal,p);
   const subtasks=Object.assign({},cur.subtasks); const arr=materializedSubs(pid,t);
@@ -2581,6 +2660,7 @@ window.setSubtaskDeadline=async function(pid,idx,si,mdVal){
   state[pid]=Object.assign({},cur,{subtasks}); touch(pid); render(); await persist();
 };
 window.deleteSubtask=async function(pid,idx,si){
+  if(!isAuthenticated()) return;
   const p=getProject(pid); const t=taskList(p)[idx]; const cur=getRow(pid);
   const peek=materializedSubs(pid,t); const subName=peek[si]?peek[si].name:'這個子項目';
   if(!confirm(`確定要刪除子項目「${subName}」嗎？`)) return;
@@ -2592,11 +2672,13 @@ window.deleteSubtask=async function(pid,idx,si){
 };
 let dragSubtask=null;
 window.handleSubtaskDragStart=function(e,pid,fromTask,si){
+  if(!isAuthenticated()) return;
   dragSubtask={pid,fromTask,si};
   e.dataTransfer.effectAllowed="move";
   try{ e.dataTransfer.setData("text/plain", JSON.stringify(dragSubtask)); }catch(err){}
 };
 window.handleSubtaskDropAt=async function(e,pid,toTask,toIndex){
+  if(!isAuthenticated()) return;
   e.preventDefault();
   let d=dragSubtask;
   if(!d){
@@ -2626,6 +2708,7 @@ window.handleSubtaskDropAt=async function(e,pid,toTask,toIndex){
   state[pid]=Object.assign({},cur,{subtasks}); touch(pid); render(); await persist();
 };
 window.handleSubtaskDrop=async function(e,pid,toTask){
+  if(!isAuthenticated()) return;
   e.preventDefault();
   let d=dragSubtask;
   if(!d){
@@ -2645,6 +2728,7 @@ window.handleSubtaskDrop=async function(e,pid,toTask){
   state[pid]=Object.assign({},cur,{subtasks}); touch(pid); render(); await persist();
 };
 window.renameSubtask=async function(pid,idx,si,val){
+  if(!isAuthenticated()) return;
   const name=(val||'').trim(); if(!name) return;
   const p=getProject(pid); const t=taskList(p)[idx]; const cur=getRow(pid);
   const subtasks=Object.assign({},cur.subtasks); const arr=materializedSubs(pid,t);
@@ -2652,12 +2736,14 @@ window.renameSubtask=async function(pid,idx,si,val){
   state[pid]=Object.assign({},cur,{subtasks}); touch(pid); render(); await persist();
 };
 window.setSubtaskNote=async function(pid,idx,si,val){
+  if(!isAuthenticated()) return;
   const p=getProject(pid); const t=taskList(p)[idx]; const cur=getRow(pid);
   const subtasks=Object.assign({},cur.subtasks); const arr=materializedSubs(pid,t);
   arr[si]=Object.assign({},arr[si],{note:val||''}); subtasks[t]=arr;
   state[pid]=Object.assign({},cur,{subtasks}); touch(pid); render(); await persist();
 };
 window.addReceipt=async function(pid){
+  if(!isAuthenticated()) return;
   const amtEl=document.getElementById('recamt-'+pid); const moEl=document.getElementById('recmonth-'+pid);
   if(!amtEl||!moEl){ alert('發生錯誤，請重新整理頁面再試一次'); return; }
   const amt=Number(amtEl.value||0);
@@ -2669,11 +2755,13 @@ window.addReceipt=async function(pid){
   expanded.add(pid); render(); await persist();
 };
 window.setReceiptField=async function(pid,idx,field,val){
+  if(!isAuthenticated()) return;
   const cur=getRow(pid); const receipts=getReceipts(pid).slice();
   receipts[idx]=Object.assign({},receipts[idx],{[field]:val});
   state[pid]=Object.assign({},cur,{receipts}); touch(pid); render(); await persist();
 };
 window.addEstPlan=async function(pid){
+  if(!isAuthenticated()) return;
   const amtInput=document.getElementById("estamt-"+pid); const monInput=document.getElementById("estmon-"+pid);
   const amt=Number(amtInput?amtInput.value:0); const mon=Number(monInput?monInput.value:0);
   if(!amt||amt<=0){ alert("請輸入金額"); return; }
@@ -2682,11 +2770,13 @@ window.addEstPlan=async function(pid){
   state[pid]=Object.assign({},cur,{estPlan}); touch(pid); render(); await persist();
 };
 window.removeEstPlan=async function(pid,idx){
+  if(!isAuthenticated()) return;
   const cur=getRow(pid);
   const estPlan=(cur.estPlan||[]).slice(); estPlan.splice(idx,1);
   state[pid]=Object.assign({},cur,{estPlan}); touch(pid); render(); await persist();
 };
 window.addEventDate=async function(pid){
+  if(!isAuthenticated()) return;
   const input=document.getElementById("newevent-"+pid);
   const labelInput=document.getElementById("neweventlabel-"+pid);
   const val=input?input.value:"";
@@ -2698,12 +2788,14 @@ window.addEventDate=async function(pid){
   state[pid]=Object.assign({},cur,{eventDates}); touch(pid); render(); await persist();
 };
 window.removeEventDate=async function(pid,idx){
+  if(!isAuthenticated()) return;
   const cur=getRow(pid);
   const eventDates=(cur.eventDates||[]).slice();
   eventDates.splice(idx,1);
   state[pid]=Object.assign({},cur,{eventDates}); touch(pid); render(); await persist();
 };
 window.deleteReceipt=async function(pid,idx){
+  if(!isAuthenticated()) return;
   const cur=getRow(pid);
   if(!confirm('確定要刪除這一期收款紀錄嗎？')) return;
   lastDeleteSnapshot={pid,row:JSON.parse(JSON.stringify(cur))};
@@ -2713,10 +2805,17 @@ window.deleteReceipt=async function(pid,idx){
   showUndoToast('這一期收款紀錄');
 };
 function getDetailTab(pid){ return detailTab[pid]||'basic'; }
-window.setDetailTab=function(pid,tab){ detailTab[pid]=tab; renderProjectView(); };
-window.toggleExpand=function(id){ expanded.has(id)?expanded.delete(id):expanded.add(id); renderProjectView(); };
-window.togglePerson=function(t){ expandedPerson.has(t)?expandedPerson.delete(t):expandedPerson.add(t); renderPersonView(); };
+window.setDetailTab=function(pid,tab){
+  if(!isAuthenticated()) return;
+  detailTab[pid]=tab; renderProjectView(); };
+window.toggleExpand=function(id){
+  if(!isAuthenticated()) return;
+  expanded.has(id)?expanded.delete(id):expanded.add(id); renderProjectView(); };
+window.togglePerson=function(t){
+  if(!isAuthenticated()) return;
+  expandedPerson.has(t)?expandedPerson.delete(t):expandedPerson.add(t); renderPersonView(); };
 window.renameVendor=async function(oldName){
+  if(!isAuthenticated()) return;
   const input=prompt(`將委外單位「${oldName}」改名為：`, oldName);
   if(!input) return;
   const nn=input.trim();
@@ -2746,10 +2845,17 @@ window.renameVendor=async function(oldName){
   render();
   await persist();
 };
-window.toggleTodoExpand=function(t){ todoExpandedSet.has(t)?todoExpandedSet.delete(t):todoExpandedSet.add(t); renderPersonView(); };
-window.toggleGanttGroup=function(pid,group){ const key=pid+'::'+group; ganttGroupExpanded[key]=!ganttGroupExpanded[key]; renderProjectView(); };
-window.toggleCapacityGroup=function(name){ capacityExpanded.has(name)?capacityExpanded.delete(name):capacityExpanded.add(name); renderPriority(); };
+window.toggleTodoExpand=function(t){
+  if(!isAuthenticated()) return;
+  todoExpandedSet.has(t)?todoExpandedSet.delete(t):todoExpandedSet.add(t); renderPersonView(); };
+window.toggleGanttGroup=function(pid,group){
+  if(!isAuthenticated()) return;
+  const key=pid+'::'+group; ganttGroupExpanded[key]=!ganttGroupExpanded[key]; renderProjectView(); };
+window.toggleCapacityGroup=function(name){
+  if(!isAuthenticated()) return;
+  capacityExpanded.has(name)?capacityExpanded.delete(name):capacityExpanded.add(name); renderPriority(); };
 window.moveCapacityPerson=async function(name,dir){
+  if(!isAuthenticated()) return;
   const arr=lastCapacityOrder.slice();
   const idx=arr.indexOf(name); const ni=idx+dir;
   if(idx<0||ni<0||ni>=arr.length) return;
@@ -2758,9 +2864,12 @@ window.moveCapacityPerson=async function(name,dir){
   await persist();
   renderPriority();
 };
-window.toggleOwnedCollab=function(t){ ownedCollabExpandedSet.has(t)?ownedCollabExpandedSet.delete(t):ownedCollabExpandedSet.add(t); renderPersonView(); };
+window.toggleOwnedCollab=function(t){
+  if(!isAuthenticated()) return;
+  ownedCollabExpandedSet.has(t)?ownedCollabExpandedSet.delete(t):ownedCollabExpandedSet.add(t); renderPersonView(); };
 
 document.querySelectorAll(".tabs button").forEach(b=>b.addEventListener("click",()=>{
+  if(!isAuthenticated()) return;
   document.querySelectorAll(".tabs button").forEach(x=>x.classList.remove("active"));
   b.classList.add("active"); view=b.dataset.v; if(view==="person") priorityTab="capacity"; render();
   backState=null; document.getElementById("backbtn").innerHTML="";
