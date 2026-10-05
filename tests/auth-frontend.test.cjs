@@ -5,7 +5,6 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
-const { readCatalogFromGit } = require('../scripts/prepare-catalog.cjs');
 
 const ROOT = path.resolve(__dirname, '..');
 const HTML = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
@@ -46,6 +45,18 @@ function storage(initial = {}) {
   };
 }
 
+function addListener(store, name, callback, options = false) {
+  const listeners = store.get(name) || [];
+  listeners.push({ callback, capture: typeof options === 'boolean' ? options : !!options.capture });
+  store.set(name, listeners);
+}
+
+function callListeners(store, name, event) {
+  for (const listener of [...(store.get(name) || [])].sort((a, b) => Number(b.capture) - Number(a.capture))) {
+    listener.callback(event);
+  }
+}
+
 function makeHarness(t, options = {}) {
   const nodes = new Map();
   const listeners = new Map();
@@ -72,8 +83,8 @@ function makeHarness(t, options = {}) {
           return on;
         },
       },
-      addEventListener(name, callback) { localListeners.set(name, callback); },
-      dispatch(name, event = {}) { return localListeners.get(name)?.({ target: node, ...event }); },
+      addEventListener(name, callback, options) { addListener(localListeners, name, callback, options); },
+      dispatch(name, event = {}) { callListeners(localListeners, name, { type: name, target: node, ...event }); },
       focus() { document.activeElement = node; },
       setSelectionRange() {}, scrollIntoView() {},
       appendChild(child) { scripts.push(child); return child; },
@@ -110,7 +121,8 @@ function makeHarness(t, options = {}) {
       return null;
     },
     querySelectorAll: selector => selector === '.tabs button' ? tabs : [],
-    addEventListener(name, callback) { listeners.set(name, callback); },
+    addEventListener(name, callback, options) { addListener(listeners, name, callback, options); },
+    dispatchEvent(event) { callListeners(listeners, event.type, event); },
   };
   nodes.get('dashboard').hidden = true;
   nodes.get('stats').hidden = true;
@@ -470,18 +482,8 @@ test('finance helpers keep admin, finance, owner and none scopes distinct', asyn
   }
 });
 
-test('the public source contains no project or person names from the pinned private catalog', () => {
-  // Read local Git only. Do not persist the old catalog or print any real names.
-  const catalog = readCatalogFromGit(ROOT);
-  const names = new Set([
-    ...catalog.projects.map(project => project.name),
-    ...catalog.staffGroups.flat(), ...catalog.partners, ...Object.keys(catalog.roles),
-  ]);
-  let leaks = 0;
-  for (const name of names) {
-    const doubleQuoted = JSON.stringify(name);
-    const singleQuoted = `'${name.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`;
-    if (HTML.includes(doubleQuoted) || HTML.includes(singleQuoted)) leaks++;
-  }
-  assert.equal(leaks, 0, 'Private catalog literals remain in public source (names deliberately omitted)');
+test('the public script starts with empty catalogs and no embedded team data', () => {
+  // Check the empty declarations only; never read historical company data.
+  assert.match(SOURCE, /let PROJECTS=\[\], TEAM_STAFF_G1=\[\], TEAM_STAFF_G2=\[\], TEAM_STAFF=\[\], TEAM_PARTNER=\[\], TEAM=\[\], ROLES=\{\};/);
+  assert.doesNotMatch(SOURCE, /const (?:PROJECTS|TEAM_STAFF_G1|TEAM_STAFF_G2|TEAM_PARTNER|ROLES)\s*=/);
 });
