@@ -1,0 +1,120 @@
+{
+  "format_version": 1,
+  "record_kind": "TEMPLATE_NOT_EVIDENCE",
+  "task_id": null,
+  "purpose": null,
+  "audience_mode": "general_colleague",
+  "change_types": [],
+  "expected_behaviors": [],
+  "scope": {
+    "allowed_changes": [],
+    "excluded_operations": ["production_data_testing", "public_sensitive_upload", "unapproved_history_rewrite"],
+    "actual_changed_files": [],
+    "production_data_impact": "UNKNOWN",
+    "availability_impact": "UNKNOWN",
+    "visibility_impact": "UNKNOWN"
+  },
+  "versions": {
+    "observed_at": null,
+    "base_commit": null,
+    "candidate_commit": null,
+    "candidate_worktree_patch_sha256": null,
+    "observed_remote_main_commit": null,
+    "gas_project_id": null,
+    "gas_deployment_id": null,
+    "gas_current_deployment_version": null,
+    "gas_candidate_source_sha256": null,
+    "interface_contract": null,
+    "not_applicable_reasons": {}
+  },
+  "technical": {
+    "status": "UNKNOWN",
+    "required_checks": [],
+    "checks": [
+      {
+        "id": "replace-with-real-check-id",
+        "purpose": null,
+        "status": "NOT_RUN",
+        "tested_candidate": null,
+        "environment": null,
+        "data_origin": null,
+        "method_or_command": null,
+        "evidence_refs": [],
+        "evidence_sha256": null,
+        "actual_result": null,
+        "limitations_or_not_applicable_reason": null
+      }
+    ],
+    "independent_review": {
+      "status": "NOT_RUN",
+      "reviewer_or_controlled_process": null,
+      "evidence_refs": [],
+      "limitations_or_not_applicable_reason": null
+    },
+    "blockers": [],
+    "remaining_unknowns": []
+  },
+  "business_acceptance": {
+    "status": "NOT_CHECKED",
+    "candidate_reference": null,
+    "safe_preview_reference": null,
+    "scenarios": [
+      {
+        "id": "replace-with-real-scenario-id",
+        "action_in_fake_environment": null,
+        "expected_observable_result": null,
+        "actual_evidence_refs": [],
+        "technical_check_ids": [],
+        "colleague_result": "NOT_CHECKED",
+        "colleague_feedback": null,
+        "confirmed_by": null,
+        "confirmation_reference": null
+      }
+    ],
+    "not_applicable_reason": null
+  },
+  "authorization": {
+    "status": "UNKNOWN",
+    "authorized_operations_and_targets": [],
+    "trusted_request_references": [],
+    "remaining_decisions": []
+  },
+  "release": {
+    "intended_target": null,
+    "compatibility_evidence_refs": [],
+    "rollback_pair_reference": null,
+    "rollback_privacy_verified": false,
+    "not_applicable_reason": null
+  },
+  "delivery": {
+    "local_change_created": false,
+    "remote_pushed": false,
+    "merged": false,
+    "frontend": {
+      "applicability": "UNKNOWN",
+      "deployed": false,
+      "post_deployment_verified": false,
+      "actual_commit": null,
+      "actual_target_reference": null,
+      "evidence_refs": [],
+      "not_applicable_reason": null
+    },
+    "gas": {
+      "applicability": "UNKNOWN",
+      "deployed": false,
+      "post_deployment_verified": false,
+      "actual_project_id": null,
+      "actual_deployment_id": null,
+      "actual_version": null,
+      "actual_source_sha256": null,
+      "evidence_refs": [],
+      "not_applicable_reason": null
+    },
+    "actual_evidence_refs": []
+  },
+  "enforcement": {
+    "status": "PENDING",
+    "enforced_controls": [],
+    "pending_controls": ["independent_checks", "required_ci", "protected_main", "restricted_release_permissions"]
+  }
+}
