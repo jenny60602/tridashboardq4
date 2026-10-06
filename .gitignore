@@ -1,0 +1,19 @@
+# Private configuration, credentials and production data must stay outside Git.
+.private/
+private/
+backups/
+exports/
+artifacts/
+.env
+.env.*
+!.env.example
+.clasprc.json
+credentials*.json
+.secrets/
+local-config/
+
+# Local dependencies and editor output.
+node_modules/
+*.log
+.DS_Store
+Thumbs.db
