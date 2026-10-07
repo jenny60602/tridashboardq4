@@ -237,12 +237,14 @@ tr.rowopen td:first-child{box-shadow:inset 4px 0 0 var(--accent2);}
   <div class="stats" id="stats"></div>
 </header>
 <main>
+  <div id="restorebanner" role="status"></div>
+  <div id="backupnotice" role="status" style="color:var(--warn);"></div>
+  <div id="dashboardcontent">
   <div id="inbox"></div>
   <div class="tabs">
     <button data-v="project" class="active">依專案</button>
     <button data-v="person">依人員</button>
   </div>
-  <div id="restorebanner"></div>
   <div id="undotoast"></div>
   <div id="synctoast" style="position:fixed;left:14px;bottom:14px;z-index:60;"></div>
   <div id="backbtn" style="position:fixed;top:14px;right:14px;z-index:49;"></div>
@@ -258,6 +260,7 @@ tr.rowopen td:first-child{box-shadow:inset 4px 0 0 var(--accent2);}
   </div>
   <div id="addform" style="margin-bottom:12px;"></div>
   <div id="view"></div>
+  </div>
   <div class="hint" id="synchint">正在連線 Google Sheet…</div>
   <button class="mini" data-ui-click="{&quot;action&quot;:&quot;manualRefresh&quot;,&quot;args&quot;:[]}" style="margin-top:6px;">🔄 立即同步</button>
 </main>
@@ -2019,27 +2022,134 @@ function render(){
   }
 }
 
-// 資安：不再把資料、密碼存在瀏覽器（舊版留下的一併清掉）
+// 資安：localStorage 不存任何資料或密碼（舊版留下的一併清掉）。
+// 尚未同步的草稿只放在「這個分頁」的 sessionStorage：關掉分頁或確認登出就清除，
+// 重新整理後要先通過伺服器驗證、而且是同一個人同一個權限，才會提供復原。
 try{ ['dash_backup_v2','dash_backup_v3','dash_code','dash_whoami'].forEach(k=>localStorage.removeItem(k)); }catch(e){}
-function localBackupSave(){}
-function localBackupLoad(){ return null; }
-function showRestoreBanner(backup){
-  const box=document.getElementById("restorebanner");
-  box.innerHTML=`<div class="priority" style="margin-bottom:14px;">
-    <h3>偵測到你這台裝置有尚未同步的本機備份資料</h3>
-    <div class="small">Google Sheet裡目前是空的，但這個瀏覽器裡有之前留下的資料。要匯入嗎？（匯入後會立刻同步給所有人）</div>
-    <div style="margin-top:8px;display:flex;gap:8px;">
-      <button ${uiEvent('click','restoreBackup',[])} style="padding:5px 14px;border-radius:6px;border:1px solid var(--accent);background:var(--accent);color:#fff;cursor:pointer;">匯入本機備份</button>
-      <button class="mini" ${uiEvent('click','ignoreBackup',[])}>忽略</button>
-    </div>
-  </div>`;
-  window._pendingBackup=backup;
+const DRAFT_KEY='dash_draft_v4';
+const DRAFT_FINANCE_FIELDS=['estOverride','actual','cost','receipts','estPlan','revMonth','invoiceMonth',
+  'paymentMethod','installmentCount','invoices','relatedParty','costLink','expenses'];
+let backupFailed=false, recoveryBusy=false, activeWrite=null;
+function backupWarning(message){
+  backupFailed=!!message;
+  const el=document.getElementById('backupnotice'); if(el) el.textContent=message||'';
 }
-window.restoreBackup=async function(){
-  if(window._pendingBackup){ state=window._pendingBackup; }
-  document.getElementById("restorebanner").innerHTML="";
-  render(); await persist();
+function writeBackup(backup){
+  try{
+    if(backup) sessionStorage.setItem(DRAFT_KEY,JSON.stringify(backup));
+    else sessionStorage.removeItem(DRAFT_KEY);
+    backupWarning(''); return true;
+  }catch(e){
+    backupWarning(backup ? '⚠ 分頁暫存失敗。最新未同步修改只留在目前畫面，請勿重新整理或關閉分頁。'
+      : '⚠ 雲端已確認目前資料，但舊的分頁暫存未能清除；下次復原前請核對內容。');
+    return false;
+  }
+}
+function makeBackup(uncertain=false){
+  return {version:4,owner:ME.name,level:ME.level,base:clone(lastSynced),state:clone(state),savedAt:Date.now(),uncertain};
+}
+function localBackupSave(){
+  if(!isAuthenticated()||window._pendingBackup) return false;
+  if(activeWrite && isCurrent(activeWrite.ctx)){
+    return writeBackup({...makeBackup(true),base:clone(activeWrite.base),sent:clone(activeWrite.sent)});
+  }
+  return writeBackup(same(normState(state),normState(lastSynced)) ? null : makeBackup());
+}
+// 復原時以「最新伺服器資料」的負責人與目前角色判斷財務權限，不用草稿裡的舊負責人。
+function projectDraft(source,remote){
+  const out=clone(source);
+  const allowed=id=>isFinAll() || (ME.level==='owner' && !!remote[id] && remote[id].assignee===ME.name);
+  Object.keys(out).forEach(id=>{
+    if(id[0]==='_'||!isObj(out[id])) return;
+    if(!allowed(id)) DRAFT_FINANCE_FIELDS.forEach(f=>delete out[id][f]);
+    if(!canEditAssignee()) out[id].assignee=(remote[id]&&remote[id].assignee)||'';
+  });
+  // 營收基準在網頁上是唯讀的，一律用伺服器目前允許你看的版本。
+  delete out._fin;
+  if(isObj(remote._fin)) out._fin=clone(remote._fin);
+  if(Array.isArray(out._customProjects)) out._customProjects.forEach(p=>{ if(isObj(p)&&!allowed(p.id)) delete p.rev; });
+  return out;
+}
+function scopeBackup(b,remote){
+  return {...b,state:projectDraft(b.state,remote),...(isObj(b.base)?{base:projectDraft(b.base,remote)}:{}),
+    ...(isObj(b.sent)?{sent:projectDraft(b.sent,remote)}:{})};
+}
+function localBackupLoad(){
+  if(!isAuthenticated()) return null;
+  try{
+    const b=JSON.parse(sessionStorage.getItem(DRAFT_KEY)||'null');
+    if(!b) return null;
+    if(b.owner!==ME.name||b.level!==ME.level){ writeBackup(null); return null; }
+    if(!isObj(b.state)) throw new Error('invalid_backup');
+    return scopeBackup(b,state);
+  }catch(e){
+    backupWarning('⚠ 無法讀取分頁暫存，請保留此分頁並聯絡管理者。'); return {unread:true};
+  }
+}
+function clearRestoreBanner(){
+  window._pendingBackup=null;
+  document.getElementById('restorebanner').innerHTML='';
+  document.getElementById('dashboardcontent').inert=false;
+}
+function showRestoreBanner(backup){
+  if(!isAuthenticated()) return;
+  window._pendingBackup=backup;
+  document.getElementById('dashboardcontent').inert=true;
+  const supported=backup.version===4 && isObj(backup.base);
+  const description=backup.unread ? '無法讀取分頁暫存，已暫停編輯以免覆蓋尚未讀取的草稿。可重新整理重試，或保留此分頁並聯絡管理者。'
+    : !supported ? '這份暫存沒有同步基準，無法安全自動合併。請保留此分頁並聯絡管理者，或確認放棄暫存。'
+    : backup.uncertain ? '上次寫入的結果尚未確認，伺服器可能已經儲存。已暫停自動重送；請核對後選擇復原或放棄草稿。'
+    : '畫面顯示的是雲端資料。復原會先重新讀取最新資料，再合併草稿；處理完成前暫停編輯。';
+  document.getElementById('restorebanner').innerHTML=`<div class="priority" style="margin-bottom:14px;">
+    <h3>這個分頁有尚未同步的草稿</h3><div class="small">${description}</div>
+    ${supported?'<div class="small">不同欄位的修改會合併；同一欄位兩邊都改過時，依下方選擇決定。復原後會同步給其他人。只復原目前權限允許的內容。</div>':''}
+    <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;">
+      ${supported?`<button class="mini" ${uiEvent('click','restoreBackup',['theirs'])}>復原草稿，衝突時保留雲端</button>
+      <button class="mini" ${uiEvent('click','restoreBackup',['mine'])}>復原草稿，衝突時採用草稿</button>`:''}
+      <button class="mini" ${uiEvent('click','ignoreBackup',[])}>放棄草稿，使用雲端資料</button>
+    </div></div>`;
+}
+window.restoreBackup=async function(tie='theirs'){
+  if(!isAuthenticated()||recoveryBusy||!window._pendingBackup||!['mine','theirs'].includes(tie)) return;
+  const pending=window._pendingBackup;
+  if(pending.version!==4||!isObj(pending.base)) return;
+  if(pending.uncertain && !confirm('上次寫入可能已經在伺服器完成，取消連線不能撤回它。要讀取最新資料並依選擇合併草稿嗎？')) return;
+  const ctx=authContext(); recoveryBusy=true;
+  try{
+    const remote=await fetchRemote(ctx);
+    assertCurrent(ctx);
+    if(window._pendingBackup!==pending) return;
+    if(looksWiped(remote)) throw new Error('remote looks wiped');
+    const b=scopeBackup(pending,remote);
+    // 先處理「已送出但結果未知」的那次寫入，再合併等待期間的新修改。
+    const reconciled=b.uncertain && isObj(b.sent)
+      ? mergeState(b.sent,b.state,mergeState(b.base,b.sent,remote,tie),tie)
+      : mergeState(b.base,b.state,remote,tie);
+    state=projectDraft(reconciled,remote); lastSynced=clone(remote);
+    clearRestoreBanner(); localBackupSave(); render();
+    await persist();
+    if(isCurrent(ctx)&&isAuthenticated()&&!window._pendingBackup) setSyncStatus(same(state,lastSynced)?'ok':'fail');
+  }catch(e){
+    console.error(e);
+    if(isCurrent(ctx)&&isAuthenticated()) setHint('⚠ 尚未完成草稿復原，草稿仍保留。請確認連線與雲端資料後重試。',true);
+  }finally{ recoveryBusy=false; }
 };
+window.ignoreBackup=function(){
+  if(!isAuthenticated()||recoveryBusy||!window._pendingBackup) return;
+  if(!confirm('確定放棄這個分頁的草稿？未送出的修改將無法復原；已送到伺服器的寫入無法撤回。')) return;
+  if(!writeBackup(null)) return; // 清不掉就不要宣稱草稿已經移除
+  state=clone(lastSynced); clearRestoreBanner(); render(); setSyncStatus('ok');
+};
+// 讀到雲端資料後決定要不要提示草稿（雲端是否已有資料都會提示）。
+function offerDraftIfAny(){
+  const backup=localBackupLoad();
+  if(backup && backup.unread){ showRestoreBanner(backup); return; }
+  if(!backup) return;
+  const differs=!same(normState(backup.state),normState(state));
+  const hasEdits=!(backup.version===4 && isObj(backup.base)) || !same(normState(backup.base),normState(backup.state));
+  if(backup.uncertain || (differs && hasEdits)){ writeBackup(backup); showRestoreBanner(backup); }
+  else writeBackup(null);
+}
 
 let oldBackend=false;
 function setHint(msg,isWarn){
@@ -2057,11 +2167,45 @@ let loginError=null;
 // 密碼只在登入那一次送出，不存任何地方。登入後拿到一張「通行證」（6 小時後失效），只放在這個分頁，關掉分頁就沒了。
 let authToken=(()=>{ try{ return sessionStorage.getItem('dash_token')||''; }catch(e){ return ''; } })();
 function setToken(t){ authToken=t||''; try{ if(authToken) sessionStorage.setItem('dash_token',authToken); else sessionStorage.removeItem('dash_token'); }catch(e){} }
-async function apiPost(body){
-  const res=await fetch(SHEET_API_URL,{method:"POST",cache:"no-store",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify(body)});
-  return res.json();
+// 每次登入／登出／通行證失效都換一個「世代」；舊世代送出的請求即使晚到也不能改畫面。
+let authGeneration=0;
+function authContext(){ return {generation:authGeneration,token:authToken}; }
+function isCurrent(ctx){ return !!ctx && ctx.generation===authGeneration && ctx.token===authToken; }
+function assertCurrent(ctx){ if(!isCurrent(ctx)) throw new Error('stale_session'); }
+function isAuthenticated(){ return !!ME && !!authToken; }
+const REQUEST_TIMEOUT_MS=30000;
+const activeRequests=new Set();
+// 每個請求最多等 30 秒（包含讀取與解析回應內容）；登出時一併取消。
+async function requestJson(url,init,ctx){
+  if(ctx) assertCurrent(ctx);
+  const controller=new AbortController();
+  let rejectInterrupted;
+  const interrupted=new Promise((resolve,reject)=>{ rejectInterrupted=reject; });
+  const stop=reason=>{ rejectInterrupted(new Error(reason)); controller.abort(); };
+  const request={cancel:()=>stop('stale_session')};
+  activeRequests.add(request);
+  const timer=setTimeout(()=>stop('request_timeout'),REQUEST_TIMEOUT_MS);
+  try{
+    const response=(async()=>{
+      const res=await fetch(url,{...init,signal:controller.signal});
+      if(!res.ok) throw new Error('http_error');
+      return await res.json();
+    })();
+    response.catch(()=>{});
+    const data=await Promise.race([response,interrupted]);
+    if(ctx) assertCurrent(ctx);
+    return data;
+  }finally{ clearTimeout(timer); activeRequests.delete(request); }
 }
-function lockUI(){
+async function apiPost(body,ctx){
+  return requestJson(SHEET_API_URL,{method:"POST",cache:"no-store",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify(body)},ctx);
+}
+function lockUI(preserveDraft=false){
+  authGeneration++;
+  activeRequests.forEach(r=>r.cancel()); activeWrite=null;
+  if(window._pendingBackup||document.getElementById('dashboardcontent').inert) clearRestoreBanner();
+  backupWarning('');
+  if(!preserveDraft) try{ sessionStorage.removeItem(DRAFT_KEY); }catch(e){}
   ME=null; state={}; lastSynced={}; applyConfig(null); setToken('');
   expanded=new Set(); document.body.classList.add('locked'); renderLogin();
 }
@@ -2105,11 +2249,14 @@ window.login=async function(){
   if(el) el.value='';
   let j=null;
   try{ await ensureNewBackend(); j=await apiPost({action:'login',code:v}); }catch(e){ console.error(e); loginError='network'; renderLogin(); return; }
+  if(authToken) return; // 另一次登入已經先完成
   if(!j || j.ok!==true || !j.token){ loginError=(j&&j.error)||'bad_code'; renderLogin(); return; }
   setToken(j.token); loginError=null;
   await reloadAfterAuthChange();
 };
 window.logout=async function(){
+  if(isAuthenticated() && (window._pendingBackup || savingCount>0 || !same(state,lastSynced)) &&
+     !confirm('仍有未同步的修改。登出會清除這個分頁的草稿，尚未送出的修改不會儲存。確定登出？')) return;
   const t=authToken;
   lockUI(); loginError=null; render(); renderLogin();
   try{ if(t) await apiPost({action:'logout',token:t}); }catch(e){}
@@ -2118,9 +2265,13 @@ async function reloadAfterAuthChange(){
   await saveChain;
   setHint('● 重新載入中…');
   // 身分改變時整份重新讀，不跟舊畫面合併（避免把別人的數字留在畫面上）
-  try{ const data=await fetchRemote(); state=data; lastSynced=clone(data); setSyncStatus('ok'); }
-  catch(e){ console.error(e); if(authToken) setSyncStatus('fail'); }
-  renderLogin(); render();
+  const ctx=authContext();
+  try{
+    const data=await fetchRemote(ctx);
+    state=data; lastSynced=clone(data);
+    offerDraftIfAny(); setSyncStatus('ok');
+  }catch(e){ console.error(e); if(isCurrent(ctx)&&authToken) setSyncStatus('fail'); }
+  if(isCurrent(ctx)){ renderLogin(); render(); }
 }
 // ================= 自動同步（輪詢 + 三方合併）=================
 // 概念：lastSynced = 上次跟 Google Sheet 對齊時的版本（合併基準）。
@@ -2218,9 +2369,9 @@ function mergeState(b,m,t,tie){
 // ===== 合併核心結束 =====
 
 let apiChecked=false, apiVersion=0;
-async function ensureNewBackend(){
+async function ensureNewBackend(ctx){
   // 每一次 POST 之前都確認（GET ?ping 對舊後端是無害的；POST 對舊後端等於覆寫資料）
-  const r=await fetch(SHEET_API_URL+'?ping=1',{cache:'no-store'}); const j=await r.json();
+  const j=await requestJson(SHEET_API_URL+'?ping=1',{cache:'no-store'},ctx);
   if(!j || !(j.api>=4)){
     oldBackend=true;
     setHint('⚠ 後端 Apps Script 還是舊版，為了保護資料，這個頁面暫停讀寫。請先部署新版 Apps Script。',true);
@@ -2235,12 +2386,13 @@ function looksWiped(remote){
   if((lastSynced._customProjects||[]).length>=3 && !(remote._customProjects||[]).length) return true;
   return false;
 }
-async function fetchRemote(){
-  await ensureNewBackend();
-  if(!authToken) throw new Error('not logged in');
-  const data=await apiPost({action:'read',token:authToken});
+async function fetchRemote(ctx=authContext()){
+  if(!ctx.token) throw new Error('not logged in');
+  await ensureNewBackend(ctx);
+  const data=await apiPost({action:'read',token:ctx.token},ctx);
   if(data && data.ok===false && (data.error==='login_required'||data.error==='session_expired')){
-    const wasIn=!!ME; lockUI(); loginError=wasIn?'session_expired':null; render(); renderLogin();
+    // 通行證過期：保留這個分頁的草稿，重新登入同一個人後可以復原。
+    const wasIn=!!ME; lockUI(true); loginError=wasIn?'session_expired':null; render(); renderLogin();
     throw new Error('not logged in');
   }
   if(!data || data.ok!==true || !data.state || typeof data.state!=='object' || Array.isArray(data.state)){
@@ -2295,7 +2447,9 @@ function setSyncStatus(kind){
   if(kind==='ok'){ lastSyncAt=new Date(); }
   const t=lastSyncAt?` 最後同步 ${pad(lastSyncAt.getHours())}:${pad(lastSyncAt.getMinutes())}:${pad(lastSyncAt.getSeconds())}`:'';
   if(kind==='saving') setHint("● 儲存中…"+t);
-  else if(kind==='fail') setHint("⚠ 暫時連不到 Google Sheet，修改已先存在這台瀏覽器，連上後會自動補傳。"+t,true);
+  else if(kind==='fail') setHint((backupFailed?"⚠ 尚未確認同步完成，分頁暫存也失敗，請勿重新整理或關閉分頁。":"⚠ 尚未確認同步完成，修改已暫存在這個分頁，連上後會自動補傳（請先不要關掉分頁）。")+t,true);
+  else if(window._pendingBackup) setHint("⚠ 請先處理這個分頁的草稿，自動寫入已暫停。"+t,true);
+  else if(!same(state,lastSynced)) setHint("● 尚有未同步修改，請保留此分頁。"+t,true);
   else setHint("● 自動同步中：同事的修改約 15 秒內會自動出現，不用重新整理。"+t);
 }
 function changedProjectsSummary(prev,next){
@@ -2341,32 +2495,37 @@ async function loadFromSheet(){
     render();
     return;
   }
-  if(!authToken){ lockUI(); render(); return; }
+  if(!authToken){ lockUI(true); render(); return; }
+  const ctx=authContext();
   try{
-    const data=await fetchRemote();
+    const data=await fetchRemote(ctx);
     state=data; lastSynced=clone(data);
+    offerDraftIfAny();
     setSyncStatus('ok');
     render();
   }catch(e){
     console.error(e);
+    if(!isCurrent(ctx)) return;
     if(authToken) setHint("⚠ 連不到 Google Sheet，請稍後按「立即同步」再試。",true);
     render();
   }
 }
 async function pollOnce(force){
-  if(!sheetConfigured()||!authToken||pollBusy||savingCount>0) return;
+  if(!sheetConfigured()||!isAuthenticated()||window._pendingBackup||pollBusy||savingCount>0) return;
   if(document.hidden && !force) return;
+  const ctx=authContext();
   pollBusy=true;
   try{
-    const remote=await fetchRemote();
-    if(savingCount>0) return; // 存檔中途開始了，存檔流程自己會合併
+    const remote=await fetchRemote(ctx);
+    assertCurrent(ctx);
+    if(savingCount>0||window._pendingBackup) return; // 存檔中途開始了，存檔流程自己會合併
     if(looksWiped(remote)){ setHint('⚠ 雲端資料看起來不完整（專案數量突然大減），為了保護資料已暫停同步，請聯絡 Jenny。',true); return; }
     const merged=mergeState(lastSynced,state,remote);
     lastSynced=clone(remote);
-    applyMerged(merged);
+    applyMerged(merged); localBackupSave();
     setSyncStatus('ok');
     if(!same(state,lastSynced)) persist(); // 之前存失敗的修改，自動補傳
-  }catch(e){ console.error(e); setSyncStatus('fail'); }
+  }catch(e){ console.error(e); if(isCurrent(ctx)&&isAuthenticated()) setSyncStatus('fail'); }
   finally{ pollBusy=false; }
 }
 window.manualRefresh=async function(){ await saveChain; await pollOnce(true); };
@@ -2375,32 +2534,48 @@ document.addEventListener('visibilitychange',()=>{ if(!document.hidden) pollOnce
 
 // ---- 寫入（排隊執行，一次一筆）----
 function persist(){
+  if(!isAuthenticated()||window._pendingBackup) return Promise.resolve();
   localBackupSave();
   if(!sheetConfigured()){ setHint("尚未設定 Google Sheet 網址，這次修改只存在你這台瀏覽器。",true); return Promise.resolve(); }
+  const ctx=authContext();
   savingCount++;
-  const p=saveChain.then(doPersist).finally(()=>{ savingCount--; });
+  const p=saveChain.then(()=>doPersist(ctx)).finally(()=>{ savingCount--; });
   saveChain=p.catch(()=>{});
   return saveChain;
 }
-async function doPersist(){
-  if(same(state,lastSynced)) return;
+async function doPersist(ctx){
+  if(!isCurrent(ctx)||!isAuthenticated()||window._pendingBackup||same(state,lastSynced)) return;
   setSyncStatus('saving');
+  let dispatched=false, submitted=null, write=null;
   try{
-    if(!authToken) return;
-    await ensureNewBackend();
+    await ensureNewBackend(ctx);
     // 把「我的基準」和「我的版本」一起送到 Google，由 Google 在鎖定狀態下跟最新資料合併、檢查權限
     const pre=clone(lastSynced), mine=clone(state);
-    const j=await apiPost({action:'write',token:authToken,base:pre,data:mine});
-    if(j && j.ok===false && (j.error==='login_required'||j.error==='session_expired')){ lockUI(); loginError='session_expired'; render(); renderLogin(); return; }
-    if(!j || j.ok!==true || !j.state || typeof j.state!=='object') throw new Error('write failed: '+(j&&j.error));
-    if(looksWiped(j.state)) throw new Error('remote looks wiped');
+    submitted=mine; write={ctx,base:pre,sent:mine}; activeWrite=write;
+    localBackupSave(); // 送出前先存：送出途中重新整理也找得回來
+    dispatched=true;
+    const j=await apiPost({action:'write',token:ctx.token,base:pre,data:mine},ctx);
+    if(j && j.ok===false && (j.error==='login_required'||j.error==='session_expired')){
+      activeWrite=null; localBackupSave(); // 伺服器明確拒絕：沒有寫入，草稿保留給重新登入後復原
+      lockUI(true); loginError='session_expired'; render(); renderLogin(); return;
+    }
+    if(!j || j.ok!==true || !j.state || typeof j.state!=='object'){ dispatched=false; activeWrite=null; throw new Error('write failed: '+(j&&j.error)); }
+    if(looksWiped(j.state)){ dispatched=false; throw new Error('remote looks wiped'); }
     lastSynced=clone(j.state);
     applyMerged(mergeState(mine,state,j.state));
-    setSyncStatus('ok');
+    activeWrite=null;
+    localBackupSave(); setSyncStatus('ok');
   }catch(e){
     console.error(e);
-    setSyncStatus('fail');
-  }
+    if(!isCurrent(ctx)||!isAuthenticated()) return;
+    if(e.message==='remote looks wiped') setHint('⚠ 資料完整性檢查未通過，已暫停這次同步，請聯絡管理者。',true);
+    else if(dispatched){
+      // 已送出但沒收到結果（逾時或斷線）：伺服器可能已經寫入，不自動重送，交給使用者決定。
+      const backup={...makeBackup(true),base:clone(write.base),sent:submitted};
+      activeWrite=null; writeBackup(backup); showRestoreBanner(backup);
+      setHint('⚠ 寫入結果尚未確認，可能已經儲存。草稿已保留，自動重送已暫停。',true);
+    } else { localBackupSave(); setSyncStatus('fail'); }
+  }finally{ if(activeWrite===write) activeWrite=null; }
 }
 
 function isValidISODate(v){
@@ -3061,7 +3236,7 @@ const UI_ACTIONS=Object.freeze({
       'toggleExpand','toggleGanttGroup','toggleInbox','toggleMonthCatTable','toggleOwnedCollab','togglePerson',
       'toggleShowDeleted','toggleTodoExpand','undoLastDelete','withdrawInbox']),
     clearUndoToast:()=>{ document.getElementById('undotoast').innerHTML=''; },
-    ignoreBackup:()=>{ document.getElementById('restorebanner').innerHTML=''; },
+    ignoreBackup:uiCall('ignoreBackup'),
     toggleInboxShowDone:()=>{ inboxShowDone=!inboxShowDone; renderInbox(); },
     stopClick:()=>{}
   }),
@@ -3109,6 +3284,8 @@ function dispatchUiEvent(event){
        (d.stop!==undefined&&typeof d.stop!=='boolean')) return;
     // 還沒登入時，只有登入本身可以執行（伺服器仍會再檢查身分）。
     if(!ME && !UI_PRELOGIN.has(event.type+':'+d.action)) return;
+    // 有待處理草稿時，只能復原、放棄或登出，避免新修改蓋掉草稿。
+    if(window._pendingBackup && !(event.type==='click'&&['restoreBackup','ignoreBackup','logout'].includes(d.action))) return;
     if(el.disabled) return;
     const args=d.args.slice();
     if(d.input!=null) args.push(UI_INPUTS[d.input](el));
@@ -3121,6 +3298,7 @@ function dispatchUiEvent(event){
 Object.keys(UI_ACTIONS).forEach(type=>document.addEventListener(type,dispatchUiEvent));
 
 document.querySelectorAll(".tabs button").forEach(b=>b.addEventListener("click",()=>{
+  if(!isAuthenticated()||window._pendingBackup) return;
   document.querySelectorAll(".tabs button").forEach(x=>x.classList.remove("active"));
   b.classList.add("active"); view=b.dataset.v; if(view==="person") priorityTab="capacity"; render();
   backState=null; document.getElementById("backbtn").innerHTML="";
