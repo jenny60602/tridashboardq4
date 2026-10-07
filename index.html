@@ -198,6 +198,22 @@ tr.rowopen td:first-child{box-shadow:inset 4px 0 0 var(--accent2);}
 .chartbar.estimated,.chartbar.est{background:var(--line);}
 .chartbar.expected{background:#cfe0cf;}
 .lg{display:inline-block;width:10px;height:10px;border-radius:2px;margin:0 3px -1px 6px;}
+.inboxbox{background:var(--card);border:1px solid var(--line);border-left:4px solid var(--accent2);border-radius:10px;padding:10px 14px;margin:0 0 14px;font-size:.82rem;}
+.inboxhead{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
+.inboxform{display:flex;flex-direction:column;gap:8px;margin-top:10px;padding:10px;background:rgba(0,0,0,.025);border-radius:8px;}
+.inboxform textarea{width:100%;min-height:54px;font-size:.85rem;padding:6px 8px;border:1px solid var(--line);border-radius:6px;font-family:inherit;}
+.inboxfields{display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;}
+.inboxfields label{display:flex;flex-direction:column;gap:2px;font-size:.72rem;color:var(--sub);}
+.inboxcols{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:10px;}
+@media (max-width:800px){ .inboxcols{grid-template-columns:1fr;} }
+.inboxitem{border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin-top:6px;background:var(--card);}
+.inboxitem.new{border-color:var(--accent2);box-shadow:0 0 0 2px rgba(181,101,29,.12);}
+.inboxitem .meta{font-size:.72rem;color:var(--sub);}
+.inboxitem .txt{margin:3px 0;white-space:pre-wrap;}
+.inboxitem .acts{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:4px;}
+.ibadge{display:inline-block;padding:1px 7px;border-radius:9px;font-size:.7rem;margin-left:4px;}
+.ib-sent{background:#f4e3c9;color:#8a4b12;} .ib-ack{background:#dfe9df;color:#2e5d34;} .ib-scheduled{background:#d6e6f0;color:#24506e;} .ib-done{background:#e6e3dc;color:#666;} .ib-wait{background:#ece6f3;color:#5b3f86;}
+.ip-urgent{background:#f6d5cf;color:#9b2c1d;} .ip-low{background:#eceae4;color:#6b6b63;}
 .lg.outpaid{background:#c0703a;} .lg.outexpected{background:#efcfb4;} .chartbar.outpaid{background:#c0703a;} .chartbar.outexpected{background:#efcfb4;}
 .lg.paid{background:var(--accent);} .lg.issued{background:#8fb28f;} .lg.est{background:var(--line);} .lg.expected{background:#cfe0cf;}
 .secthead{display:flex;align-items:baseline;gap:10px;font-weight:700;color:var(--accent2);margin:16px 0 6px;padding-bottom:4px;border-bottom:1px solid var(--line);font-size:.85rem;}
@@ -221,6 +237,7 @@ tr.rowopen td:first-child{box-shadow:inset 4px 0 0 var(--accent2);}
   <div class="stats" id="stats"></div>
 </header>
 <main>
+  <div id="inbox"></div>
   <div class="tabs">
     <button data-v="project" class="active">依專案</button>
     <button data-v="person">依人員</button>
@@ -253,6 +270,7 @@ const TEAM_STAFF=[];
 const TEAM_PARTNER=[];
 const ROLES={};
 const TEAM=[];
+const PEOPLE=[]; // 可以被交辦的人（含管理者）
 function applyConfig(cfg){
   const c=cfg||{}, tm=c.team||{};
   const setArr=(arr,v)=>{ arr.splice(0,arr.length,...(Array.isArray(v)?v:[])); };
@@ -260,6 +278,7 @@ function applyConfig(cfg){
   setArr(TEAM_STAFF_G1,tm.staffG1); setArr(TEAM_STAFF_G2,tm.staffG2); setArr(TEAM_PARTNER,tm.partner);
   setArr(TEAM_STAFF,TEAM_STAFF_G1.concat(TEAM_STAFF_G2)); setArr(TEAM,TEAM_STAFF.concat(TEAM_PARTNER));
   Object.keys(ROLES).forEach(k=>delete ROLES[k]); Object.assign(ROLES,tm.roles||{});
+  setArr(PEOPLE,[...new Set(TEAM.concat(Array.isArray(c.people)?c.people:[]))]);
 }
 const STATUSES=["未開始","進行中","待收款","已完成"];
 const BASE_TASKS=["企劃","成本","報價/合約","款項","執行","結案"];
@@ -1636,7 +1655,9 @@ function detailRow(p){
     </tbody></table>
     <div class="small" style="margin:6px 0 12px;">已開發票 ${fmt(totalActual(p))}・已收款 <b style="color:var(--ok);">${fmt(totalPaid(p))}</b>／預估收入 ${fmt(rv)}</div>
     `:`<div class="small" style="margin:12px 0 4px;color:var(--sub);">🔒 收支、認列、支出與發票資料只有這個專案的負責人和財務看得到</div>`}`;
+  const projInbox=inboxList().filter(it=>it.pid===p.id && inboxVisibleNow(it) && (it.status==='sent'||it.status==='ack'));
   const taskPane=`
+    ${projInbox.length?`<div class="inboxbox" style="margin-bottom:12px;"><b>📥 這個專案還沒排進甘特圖的交辦（${projInbox.length}）</b>${projInbox.map(it=>inboxItemHtml(it,it.from===myName()?'out':'in','t')).join('')}</div>`:''}
     <div style="margin-bottom:10px;"><button class="mini" onclick="applyMarketTemplate('${p.id}')">🏪 套用市集工作模組</button></div>
     <div class="small" style="margin-bottom:10px;">
       對象分類（子項目「對象」欄位的選項，這個專案自己的設定）：
@@ -1890,6 +1911,7 @@ function personDetailHtml(t){
     <h3 style="margin-top:14px;">協作的專案（依急迫度排序）</h3>${collabHtml}` : '';
 
   return `<div class="priority plain persondetail">
+    ${personInboxHtml(t)}
     <h3 style="color:var(--ink);">我的待辦事項${pending.length?`（${pending.length}項）`:''}</h3>
     ${todoHtml}
     ${moreBtn}
@@ -1901,6 +1923,15 @@ function personDetailHtml(t){
   </div>`;
 }
 
+function personInboxHtml(t){
+  const list=inboxList().filter(it=>it.to===t && inboxVisibleNow(it) && it.status!=='done');
+  if(!list.length) return '';
+  const ord={urgent:0,normal:1,low:2};
+  list.sort((a,b)=>(a.status==='sent'?0:1)-(b.status==='sent'?0:1)||ord[a.priority||'normal']-ord[b.priority||'normal']);
+  return `<h3 style="color:var(--accent2);">📥 別人交辦的工作（${list.length}）<span class="small" style="font-weight:400;">記得按「收到」，再排進專案</span></h3>
+    ${list.map(it=>inboxItemHtml(it,'in','p')).join('')}
+    <div style="height:10px;"></div>`;
+}
 function personCard(t){
   const group=isStaff(t)?'staff':'partner';
   const owned=ALLP.filter(p=>getRow(p.id).assignee===t);
@@ -1918,8 +1949,9 @@ function personCard(t){
     : `<div class="small" style="margin-top:5px;color:var(--ok);">✓ 目前沒有急件</div>`;
   const open=expandedPerson.has(t);
   const role=ROLES[t];
+  const inbN=inboxList().filter(it=>it.to===t && inboxVisibleNow(it) && it.status==='sent').length;
   return `<div class="pcard ${group}" id="pcard-${esc(t)}" onclick="togglePerson(${jsArg(t)})" style="cursor:pointer;">
-      <b>${esc(t)}${role?` <span class="rolelabel">・${esc(role)}</span>`:''}</b><span>負責 ${activeOwned.length}/${owned.length} 案・協作 ${collabOn.length} 案・${taskCount} 項任務</span>${topHtml}
+      <b>${esc(t)}${role?` <span class="rolelabel">・${esc(role)}</span>`:''}${inbN?` <span class="ibadge ib-sent">📥 ${inbN} 件新交辦</span>`:''}</b><span>負責 ${activeOwned.length}/${owned.length} 案・協作 ${collabOn.length} 案・${taskCount} 項任務</span>${topHtml}
     </div>${open?personDetailHtml(t):''}`;
 }
 
@@ -1959,7 +1991,7 @@ function renderPersonView(){
 
 function renderInner(){
   refreshAll();
-  renderStats(); renderPriority(); renderFilters(); renderAddForm();
+  renderStats(); renderInbox(); renderPriority(); renderFilters(); renderAddForm();
   if(view==="project"){ renderProjectView(); }
   else { renderPersonView(); }
 }
@@ -2807,6 +2839,198 @@ window.moveCapacityPerson=async function(name,dir){
   renderPriority();
 };
 window.toggleOwnedCollab=function(t){ ownedCollabExpandedSet.has(t)?ownedCollabExpandedSet.delete(t):ownedCollabExpandedSet.add(t); renderPersonView(); };
+
+
+// ================= 交辦收件匣 =================
+// 想到就打一句話 → 系統猜專案、對象、日期 → 晚上 9 點後預設隔天早上 9:00 才送出
+// 被交辦的人：收到 → 排進專案（變成甘特圖子項目）→ 完成；可以回覆討論
+let inboxOpen=false, inboxFormOpen=false, inboxDraft={text:'',pid:'',to:'',due:'',priority:'normal',send:''}, inboxSched=null, inboxShowDone=false;
+const INBOX_ST_LABEL={sent:'未讀',ack:'已收到',scheduled:'已排入專案',done:'已完成'};
+const INBOX_PR_LABEL={urgent:'急',normal:'一般',low:'有空再做'};
+function inboxList(){ return (state._inbox||[]).filter(it=>it&&SAFE_ID.test(String(it.id||''))); }
+function inboxVisibleNow(it){ return !(Number(it.sendAt)>Date.now()); }
+function myInboxIn(){ const me=myName(); return inboxList().filter(it=>it.to===me && inboxVisibleNow(it)); }
+function myInboxOut(){ const me=myName(); return inboxList().filter(it=>it.from===me); }
+function isNightNow(){ const h=new Date().getHours(); return h>=21||h<9; }
+function nextMorning9(){ const d=new Date(); if(d.getHours()>=9) d.setDate(d.getDate()+1); d.setHours(9,0,0,0); return d.getTime(); }
+function newId(prefix){ return prefix+Date.now().toString(36)+Math.random().toString(36).slice(2,7); }
+// ---- 規則比對：猜專案、對象、日期、急不急 ----
+function bigrams(str){ const t=String(str||'').toLowerCase().replace(/[\s\-–_()（）·.、,，\/「」]+/g,''); const out=new Set(); for(let i=0;i<t.length-1;i++) out.add(t.slice(i,i+2)); return out; }
+function rankProjects(text){
+  const tb=bigrams(text); if(!tb.size) return [];
+  const list=ALLP.map(p=>({p,bg:bigrams(getName(p))})); const df={};
+  list.forEach(x=>x.bg.forEach(g=>{ df[g]=(df[g]||0)+1; }));
+  const N=Math.max(list.length,1);
+  return list.map(x=>{ let sc=0; x.bg.forEach(g=>{ if(tb.has(g)) sc+=Math.log(1+N/df[g]); }); if(String(text).includes(getName(x.p))) sc+=10; return {p:x.p,score:sc}; })
+    .filter(x=>x.score>=1.8).sort((a,b)=>b.score-a.score);
+}
+function guessPerson(text){
+  const me=myName(); const t=String(text||''); let best=null;
+  PEOPLE.filter(n=>n&&n!==me).sort((a,b)=>b.length-a.length).forEach(n=>{
+    const re=new RegExp(n.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'),'i'); const m=re.exec(t); if(!m) return;
+    const before=t.slice(Math.max(0,m.index-2),m.index); const bonus=/[請給找@叫交]/.test(before)?-1000:0;
+    const pos=m.index+bonus; if(!best||pos<best.pos) best={n,pos};
+  });
+  return best?best.n:'';
+}
+function guessDate(text){
+  const t=String(text||''); const now=new Date(); now.setHours(0,0,0,0);
+  const iso=d=>`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+  let m=t.match(/(20\d{2})[\/\-.年](\d{1,2})[\/\-.月](\d{1,2})/); if(m){ const d=new Date(+m[1],+m[2]-1,+m[3]); if(!isNaN(d)) return iso(d); }
+  m=t.match(/(\d{1,2})[\/月](\d{1,2})(?!\d)/); if(m){ const mo=+m[1], da=+m[2]; if(mo>=1&&mo<=12&&da>=1&&da<=31){ let d=new Date(now.getFullYear(),mo-1,da); if(d<new Date(now.getTime()-60*86400000)) d=new Date(now.getFullYear()+1,mo-1,da); return iso(d); } }
+  if(/大後天/.test(t)){ const d=new Date(now); d.setDate(d.getDate()+3); return iso(d); }
+  if(/後天/.test(t)){ const d=new Date(now); d.setDate(d.getDate()+2); return iso(d); }
+  if(/明天|明日/.test(t)){ const d=new Date(now); d.setDate(d.getDate()+1); return iso(d); }
+  if(/今天|今日/.test(t)) return iso(now);
+  m=t.match(/(下下|下|這|本)?(?:週|周|星期|禮拜)([一二三四五六日天])/); if(m){ const map={一:1,二:2,三:3,四:4,五:5,六:6,日:0,天:0}; const want=map[m[2]];
+    const cur=now.getDay(); const curMon=(cur+6)%7; const wantMon=(want+6)%7; let add=wantMon-curMon;
+    if(m[1]==='下') add+=7; else if(m[1]==='下下') add+=14; else if(!m[1] && add<0) add+=7;
+    const d=new Date(now); d.setDate(d.getDate()+add); return iso(d); }
+  if(/月底/.test(t)){ const d=new Date(now.getFullYear(),now.getMonth()+1,0); return iso(d); }
+  return '';
+}
+function guessPriority(text){ const t=String(text||''); if(/急|盡快|儘快|馬上|立刻|ASAP/i.test(t)) return 'urgent'; if(/有空|不急|慢慢/.test(t)) return 'low'; return 'normal'; }
+function applyGuess(force){
+  const t=inboxDraft.text; const g=inboxDraft._guessed||{};
+  const ranked=rankProjects(t); const pid=ranked.length?ranked[0].p.id:'';
+  const to=guessPerson(t), due=guessDate(t), pr=guessPriority(t);
+  // 使用者手動改過的欄位就不再覆蓋
+  if(force||!inboxDraft._manual_pid) inboxDraft.pid=pid;
+  if(force||!inboxDraft._manual_to) inboxDraft.to=to||inboxDraft.to;
+  if(force||!inboxDraft._manual_due) inboxDraft.due=due;
+  if(force||!inboxDraft._manual_priority) inboxDraft.priority=pr;
+  inboxDraft._ranked=ranked.slice(0,5).map(x=>x.p.id);
+}
+let inboxGuessTimer=null;
+window.inboxType=function(v){ inboxDraft.text=v; clearTimeout(inboxGuessTimer); inboxGuessTimer=setTimeout(()=>{ applyGuess(false); renderInboxFields(); },350); };
+window.inboxSet=function(k,v){ inboxDraft[k]=v; inboxDraft['_manual_'+k]=true; };
+window.toggleInbox=function(){ inboxOpen=!inboxOpen; renderInbox(); };
+window.openInboxForm=function(){ inboxOpen=true; inboxFormOpen=true; inboxDraft={text:'',pid:'',to:'',due:'',priority:'normal',send:isNightNow()?'morning':'now'}; renderInbox(); setTimeout(()=>{ const el=document.getElementById('inboxtext'); if(el) el.focus(); },30); };
+window.closeInboxForm=function(){ inboxFormOpen=false; renderInbox(); };
+function projOptsFor(sel,ranked){
+  const r=(ranked||[]).map(id=>getProject(id)).filter(Boolean);
+  const rest=ALLP.filter(p=>!r.includes(p)).sort((a,b)=>getName(a).localeCompare(getName(b)));
+  const o=p=>`<option value="${esc(p.id)}" ${sel===p.id?'selected':''}>${esc(getName(p))}</option>`;
+  return `<option value="">（不指定專案）</option>${r.length?`<optgroup label="系統猜的">${r.map(o).join('')}</optgroup>`:''}<optgroup label="全部專案">${rest.map(o).join('')}</optgroup>`;
+}
+function personOptsInbox(sel){ const me=myName(); return `<option value="">請選擇…</option>`+PEOPLE.filter(n=>n!==me).map(n=>`<option value="${esc(n)}" ${sel===n?'selected':''}>${esc(n)}${ROLES[n]?'｜'+esc(ROLES[n]):''}</option>`).join(''); }
+function renderInboxFields(){
+  const box=document.getElementById('inboxfields'); if(!box) return;
+  const d=inboxDraft, night=isNightNow();
+  box.innerHTML=`
+    <label>專案<select onchange="inboxSet('pid',this.value)" style="max-width:260px;">${projOptsFor(d.pid,d._ranked)}</select></label>
+    <label>交給<select onchange="inboxSet('to',this.value)">${personOptsInbox(d.to)}</select></label>
+    <label>希望完成日<input type="date" value="${esc(d.due)}" onchange="inboxSet('due',this.value)"></label>
+    <label>急不急<select onchange="inboxSet('priority',this.value)">${['urgent','normal','low'].map(k=>`<option value="${k}" ${d.priority===k?'selected':''}>${INBOX_PR_LABEL[k]}</option>`).join('')}</select></label>
+    <label>送出時間<select onchange="inboxSet('send',this.value)"><option value="now" ${d.send==='now'?'selected':''}>立即</option><option value="morning" ${d.send==='morning'?'selected':''}>${new Date().getHours()<9?'今天':'明天'}早上 9:00</option></select></label>
+    <button class="mini" style="background:var(--accent);color:#fff;border-color:var(--accent);padding:5px 14px;" onclick="sendInbox()">送出交辦</button>
+    <button class="mini" onclick="closeInboxForm()">取消</button>
+    ${night&&d.send==='morning'?'<span class="small" style="color:var(--sub);">晚上寫的先存起來，明早才會出現在同事那裡 🌙</span>':''}`;
+}
+window.sendInbox=async function(){
+  const d=inboxDraft; const text=(document.getElementById('inboxtext')||{}).value||d.text;
+  if(!text.trim()){ alert('請先輸入要交辦的內容'); return; }
+  if(!d.to){ alert('請選擇要交給誰'); return; }
+  const it={id:newId('i'),from:myName(),to:d.to,pid:d.pid||'',text:text.trim(),due:d.due||'',priority:d.priority||'normal',createdAt:Date.now(),sendAt:d.send==='morning'?nextMorning9():Date.now(),status:'sent',replies:[]};
+  state._inbox=inboxList().concat([it]);
+  inboxFormOpen=false; inboxDraft={text:'',pid:'',to:'',due:'',priority:'normal',send:''};
+  render(); await persist();
+};
+function updInbox(id,fn){ state._inbox=inboxList().map(it=>it.id===id?fn(Object.assign({},it)):it); }
+window.ackInbox=async function(id){ updInbox(id,it=>{ if(it.status==='sent') it.status='ack'; return it; }); render(); await persist(); };
+window.doneInbox=async function(id){ updInbox(id,it=>{ it.status='done'; it.doneAt=Date.now(); return it; }); render(); await persist(); };
+window.reopenInbox=async function(id){ updInbox(id,it=>{ it.status=it.scheduled?'scheduled':'ack'; delete it.doneAt; return it; }); render(); await persist(); };
+window.withdrawInbox=async function(id){ if(!confirm('確定要撤回這件交辦嗎？')) return; state._inbox=inboxList().filter(it=>it.id!==id); render(); await persist(); };
+window.replyInbox=async function(id,ctx){
+  const el=document.getElementById('rep-'+(ctx||'m')+'-'+id); const v=((el||{}).value||'').trim(); if(!v) return;
+  updInbox(id,it=>{ it.replies=(it.replies||[]).concat([{id:newId('r'),by:myName(),at:Date.now(),text:v}]); if(it.to===myName()&&it.status==='sent') it.status='ack'; return it; });
+  render(); await persist();
+};
+window.openSchedule=function(id,ctx){ const it=inboxList().find(x=>x.id===id); if(!it) return; const p=getProject(it.pid); inboxSched={id, ctx:ctx||'m', pid:it.pid||'', parent:p?(taskList(p)[0]||''):'', due:it.due||''}; inboxOpen=true; render(); };
+window.schedSet=function(k,v){ if(!inboxSched) return; inboxSched[k]=v; if(k==='pid'){ const p=getProject(v); inboxSched.parent=p?(taskList(p)[0]||''):''; render(); } };
+window.cancelSchedule=function(){ inboxSched=null; render(); };
+window.confirmSchedule=async function(){
+  const sc=inboxSched; if(!sc) return; const it=inboxList().find(x=>x.id===sc.id); const p=getProject(sc.pid);
+  if(!it||!p){ alert('請先選擇要排進哪個專案'); return; }
+  let parent=sc.parent; const nameEl=document.getElementById('schedname'); const subName=((nameEl||{}).value||it.text).trim().slice(0,120);
+  const cur=getRow(p.id); let custom=cur.custom.slice(), taskOrder=cur.taskOrder.slice();
+  if(parent==='__new__'||!parent){ parent='交辦事項'; if(!taskList(p).includes(parent)){ custom.push(parent); if(taskOrder.length) taskOrder.push(parent); } }
+  const subtasks=Object.assign({},cur.subtasks); const arr=(taskList(p).includes(parent)?materializedSubs(p.id,parent):[]);
+  arr.push({name:subName,done:false,assignee:it.to,start:sc.due||'',end:sc.due||'',note:`交辦：${it.from}`});
+  subtasks[parent]=arr;
+  state[p.id]=Object.assign({},cur,{custom,taskOrder,subtasks}); touch(p.id);
+  updInbox(it.id,x=>{ x.status='scheduled'; x.pid=p.id; x.scheduled={pid:p.id,parent}; return x; });
+  inboxSched=null; render(); await persist();
+};
+function fmtWhen(ts){ if(!ts) return ''; const d=new Date(ts); return `${d.getMonth()+1}/${d.getDate()} ${pad(d.getHours())}:${pad(d.getMinutes())}`; }
+function inboxItemHtml(it, role, ctx){
+  ctx=ctx||'m';
+  const me=myName(), p=getProject(it.pid);
+  const pending=Number(it.sendAt)>Date.now();
+  const st=pending?`<span class="ibadge ib-wait">排程中・${fmtWhen(it.sendAt)} 送出</span>`:`<span class="ibadge ib-${esc(it.status)}">${INBOX_ST_LABEL[it.status]||''}</span>`;
+  const pr=it.priority&&it.priority!=='normal'?`<span class="ibadge ip-${esc(it.priority)}">${INBOX_PR_LABEL[it.priority]}</span>`:'';
+  const who=role==='out'?`→ 交給 <b>${esc(it.to)}</b>`:`<b>${esc(it.from)}</b> 交辦`;
+  const proj=p?`｜<a href="javascript:void(0)" onclick="goToProject('${p.id}')">${esc(getName(p))}</a>`:'';
+  const due=it.due?`｜希望 ${esc(shortDate(it.due))} 前`:'';
+  const replies=(it.replies||[]).map(r=>`<div class="small" style="margin-top:2px;">💬 <b>${esc(r.by)}</b>：${esc(r.text)} <span style="color:var(--sub);">${fmtWhen(r.at)}</span></div>`).join('');
+  const canAct=(it.to===me)||(p&&getRow(p.id).assignee===me)||isAdmin();
+  const isSched=inboxSched&&inboxSched.id===it.id&&inboxSched.ctx===ctx;
+  let acts='';
+  if(it.status!=='done'){
+    if(it.to===me&&it.status==='sent') acts+=`<button class="mini" onclick="ackInbox('${it.id}')">✓ 收到</button>`;
+    if(canAct&&it.status!=='scheduled'&&!pending) acts+=`<button class="mini" onclick="openSchedule('${it.id}','${ctx}')">📅 排進專案</button>`;
+    if(canAct||it.from===me) acts+=`<button class="mini" onclick="doneInbox('${it.id}')">完成</button>`;
+    if(it.from===me) acts+=`<button class="mini danger" onclick="withdrawInbox('${it.id}')">撤回</button>`;
+  } else if(canAct||it.from===me) acts+=`<button class="mini" onclick="reopenInbox('${it.id}')">↩ 還沒完成</button>`;
+  const replyBox=!pending?`<input type="text" id="rep-${ctx}-${it.id}" placeholder="回覆，例如：10/15 來不及，可以 10/18 嗎？" style="flex:1;min-width:160px;font-size:.78rem;" onkeydown="if(event.key==='Enter')replyInbox('${it.id}','${ctx}')"><button class="mini" onclick="replyInbox('${it.id}','${ctx}')">💬 回覆</button>`:'';
+  const schedForm=isSched?`<div class="inboxform" style="margin-top:6px;">
+      <div class="inboxfields">
+        <label>專案<select onchange="schedSet('pid',this.value)" style="max-width:240px;">${projOptsFor(inboxSched.pid,[])}</select></label>
+        ${getProject(inboxSched.pid)?`<label>放在哪個母項目<select onchange="schedSet('parent',this.value)">${taskList(getProject(inboxSched.pid)).map(t=>`<option value="${esc(t)}" ${inboxSched.parent===t?'selected':''}>${esc(t)}</option>`).join('')}<option value="__new__" ${inboxSched.parent==='__new__'?'selected':''}>＋ 新增「交辦事項」母項目</option></select></label>`:''}
+        <label>子項目名稱<input type="text" id="schedname" value="${esc(it.text.slice(0,120))}" style="min-width:240px;"></label>
+        <label>截止日（自己評估）<input type="date" value="${esc(inboxSched.due)}" onchange="schedSet('due',this.value)"></label>
+        <button class="mini" style="background:var(--accent);color:#fff;border-color:var(--accent);" onclick="confirmSchedule()">排入甘特圖</button>
+        <button class="mini" onclick="cancelSchedule()">取消</button>
+      </div></div>`:'';
+  const sched=it.scheduled&&getProject(it.scheduled.pid)?`<div class="small" style="color:#24506e;">📅 已排入：${esc(getName(getProject(it.scheduled.pid)))} ／ ${esc(it.scheduled.parent)}</div>`:'';
+  return `<div class="inboxitem ${it.status==='sent'&&role==='in'?'new':''}">
+    <div class="meta">${who}${proj}${due}${pr}${st}　<span>${fmtWhen(it.createdAt)}</span></div>
+    <div class="txt">${esc(it.text)}</div>${sched}${replies}
+    <div class="acts">${acts}${replyBox}</div>${schedForm}
+  </div>`;
+}
+function inboxSection(title,list,role,empty){
+  const live=list.filter(it=>it.status!=='done'), done=list.filter(it=>it.status==='done');
+  const ord={urgent:0,normal:1,low:2};
+  live.sort((a,b)=>(a.status==='sent'?0:1)-(b.status==='sent'?0:1)||ord[a.priority||'normal']-ord[b.priority||'normal']||(a.due||'9').localeCompare(b.due||'9'));
+  return `<div><div style="font-weight:700;">${title}（${live.length}）</div>
+    ${live.length?live.map(it=>inboxItemHtml(it,role)).join(''):`<div class="small" style="margin-top:6px;">${empty}</div>`}
+    ${done.length?`<div class="small" style="margin-top:6px;cursor:pointer;color:var(--sub);" onclick="inboxShowDone=!inboxShowDone;renderInbox()">${inboxShowDone?'▾':'▸'} 已完成 ${done.length} 件</div>${inboxShowDone?done.sort((a,b)=>(b.doneAt||0)-(a.doneAt||0)).slice(0,20).map(it=>inboxItemHtml(it,role)).join(''):''}`:''}
+  </div>`;
+}
+function renderInbox(){
+  const box=document.getElementById('inbox'); if(!box) return;
+  if(!ME){ box.innerHTML=''; return; }
+  const inc=myInboxIn(), out=myInboxOut();
+  const nNew=inc.filter(it=>it.status==='sent').length, nIn=inc.filter(it=>it.status!=='done').length;
+  const nOut=out.filter(it=>it.status!=='done').length, nReply=out.filter(it=>it.status!=='done'&&(it.replies||[]).some(r=>r.by!==myName())).length;
+  const summary=`<span style="font-weight:700;">📥 交辦</span>
+    ${nNew?`<span class="ibadge ib-sent" style="font-size:.78rem;">你有 ${nNew} 件新交辦</span>`:`<span class="small">交辦給我 ${nIn} 件</span>`}
+    <span class="small">｜我交辦出去 ${nOut} 件進行中${nReply?`（${nReply} 件有回覆）`:''}</span>
+    <button class="mini" style="background:var(--accent2);color:#fff;border-color:var(--accent2);" onclick="openInboxForm()">＋ 交辦一件事</button>
+    <button class="mini" onclick="toggleInbox()">${inboxOpen?'收合':'展開'}</button>`;
+  const form=inboxFormOpen?`<div class="inboxform">
+      <textarea id="inboxtext" placeholder="想到什麼就打，例如：綠光市集 主視覺請阿哲 10/15 前給初稿" oninput="inboxType(this.value)">${esc(inboxDraft.text)}</textarea>
+      <div class="small" style="color:var(--sub);">系統會從你打的字猜「專案、交給誰、日期、急不急」，送出前可以再改。</div>
+      <div class="inboxfields" id="inboxfields"></div>
+    </div>`:'';
+  const cols=inboxOpen?`<div class="inboxcols">
+      ${inboxSection('交辦給我的',inc,'in','目前沒有別人交辦給你的事')}
+      ${inboxSection('我交辦出去的',out,'out','你還沒有交辦任何事')}
+    </div>`:'';
+  box.innerHTML=`<div class="inboxbox"><div class="inboxhead">${summary}</div>${form}${cols}</div>`;
+  if(inboxFormOpen) renderInboxFields();
+}
 
 document.querySelectorAll(".tabs button").forEach(b=>b.addEventListener("click",()=>{
   document.querySelectorAll(".tabs button").forEach(x=>x.classList.remove("active"));
