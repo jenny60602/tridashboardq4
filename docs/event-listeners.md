@@ -23,4 +23,6 @@
 
 ## 尚未處理
 
-畫面仍以 `innerHTML` 產生（輸出已跳脫）。改成 DOM 節點建立，以及正式網站的 Content-Security-Policy，留待之後另外處理。
+畫面仍以 `innerHTML` 產生（輸出已跳脫，`tests/xss.test.cjs` 以攻擊字串逐畫面檢查）。改成 DOM 節點建立留待之後處理。
+
+正式頁面已加上 Content-Security-Policy（`<meta>`）：`script-src-attr 'none'` 封鎖任何 HTML 事件屬性，連線只允許同源與 Apps Script 網域，禁止外部腳本、iframe、object、`<base>` 與表單送出。因為主程式仍是 inline `<script>`，`script-src` 暫時保留 `'unsafe-inline'`；改成外部檔或 hash 後即可移除。新增連線網域（例如搬家後的 GAS）時必須同步更新 CSP 的 `connect-src`。

@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; script-src-attr 'none'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://script.google.com https://script.googleusercontent.com; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
 <title>三小市集 Q4 專案 x 人力儀表板</title>
 <style>
 :root{
@@ -3149,7 +3150,7 @@ function inboxItemHtml(it, role, ctx){
   const st=pending?`<span class="ibadge ib-wait">排程中・${fmtWhen(it.sendAt)} 送出</span>`:`<span class="ibadge ib-${esc(it.status)}">${INBOX_ST_LABEL[it.status]||''}</span>`;
   const pr=it.priority&&it.priority!=='normal'?`<span class="ibadge ip-${esc(it.priority)}">${INBOX_PR_LABEL[it.priority]}</span>`:'';
   const who=role==='out'?`→ 交給 <b>${esc(it.to)}</b>`:`<b>${esc(it.from)}</b> 交辦`;
-  const proj=p?`｜<a href="javascript:void(0)" ${uiEvent('click','goToProject',[String(p.id)])}>${esc(getName(p))}</a>`:'';
+  const proj=p?`｜<a href="#" ${uiEvent('click','goToProject',[String(p.id)])}>${esc(getName(p))}</a>`:'';
   const due=it.due?`｜希望 ${esc(shortDate(it.due))} 前`:'';
   const replies=(it.replies||[]).map(r=>`<div class="small" style="margin-top:2px;">💬 <b>${esc(r.by)}</b>：${esc(r.text)} <span style="color:var(--sub);">${fmtWhen(r.at)}</span></div>`).join('');
   const canAct=(it.to===me)||(p&&getRow(p.id).assignee===me)||isAdmin();
@@ -3290,6 +3291,7 @@ function dispatchUiEvent(event){
     const args=d.args.slice();
     if(d.input!=null) args.push(UI_INPUTS[d.input](el));
     if(d.stop) event.stopPropagation();
+    if(event.type==='click' && el.tagName==='A' && el.getAttribute('href')==='#') event.preventDefault();
     const r=allowed[d.action](el,event,args);
     if(r && typeof r.catch==='function') r.catch(e=>console.error(e));
     if(d.stop) break;

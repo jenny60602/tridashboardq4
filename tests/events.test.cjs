@@ -54,7 +54,7 @@ test('preview refuses to start if a production script host would remain', () => 
   const { preparePreviewHtml } = require('../scripts/preview-synthetic.cjs');
   const page = preparePreviewHtml(HTML);
   assert.match(page, /const SHEET_API_URL="\/__test_api__";/);
-  assert.doesNotMatch(page, /script\.google/);
+  assert.doesNotMatch(page.replace(/<meta http-equiv="Content-Security-Policy"[^>]*>/gi, ''), /script\.google/);
   assert.throws(() => preparePreviewHtml(HTML + '<!-- https://script.google.com/macros/s/x/exec -->'), /production script host/);
 });
 

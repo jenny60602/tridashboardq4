@@ -30,7 +30,10 @@ function preparePreviewHtml(html) {
   const decl = [...html.matchAll(/\bconst\s+SHEET_API_URL\s*=\s*(["'])([^"'\r\n]*)\1\s*;/g)];
   if (decl.length !== 1) throw new Error('Synthetic preview requires exactly one SHEET_API_URL declaration.');
   let out = html.replace(decl[0][0], `const SHEET_API_URL="${API_PATH}";`);
-  if (/script\.google(usercontent)?\.com/i.test(out)) throw new Error('Synthetic preview refused: a production script host remains.');
+  // The production CSP is kept (both policies apply, so the preview is at least as strict);
+  // its allow-list is the only place the Apps Script hosts may still appear.
+  const withoutCsp = out.replace(/<meta http-equiv="Content-Security-Policy"[^>]*>/gi, '');
+  if (/script\.google(usercontent)?\.com/i.test(withoutCsp)) throw new Error('Synthetic preview refused: a production script host remains.');
   if ((out.match(/<body(?:\s[^>]*)?>/gi) || []).length !== 1) throw new Error('Synthetic preview requires one <body>.');
   const banner = `<aside data-synthetic-preview style="position:sticky;top:0;z-index:10000;background:#7f1d1d;color:#fff;padding:12px 16px;border:4px solid #fbbf24;font:15px/1.5 sans-serif;">
     <strong>離線合成測試｜127.0.0.1｜不是正式 GAS</strong><br>
