@@ -2054,7 +2054,7 @@ function localBackupSave(){
   if(activeWrite && isCurrent(activeWrite.ctx)){
     return writeBackup({...makeBackup(true),base:clone(activeWrite.base),sent:clone(activeWrite.sent)});
   }
-  return writeBackup(same(normState(state),normState(lastSynced)) ? null : makeBackup());
+  return writeBackup(inSync() ? null : makeBackup());
 }
 // 復原時以「最新伺服器資料」的負責人與目前角色判斷財務權限，不用草稿裡的舊負責人。
 function projectDraft(source,remote){
@@ -2129,7 +2129,7 @@ window.restoreBackup=async function(tie='theirs'){
     state=projectDraft(reconciled,remote); lastSynced=clone(remote);
     clearRestoreBanner(); localBackupSave(); render();
     await persist();
-    if(isCurrent(ctx)&&isAuthenticated()&&!window._pendingBackup) setSyncStatus(same(state,lastSynced)?'ok':'fail');
+    if(isCurrent(ctx)&&isAuthenticated()&&!window._pendingBackup) setSyncStatus(inSync()?'ok':'fail');
   }catch(e){
     console.error(e);
     if(isCurrent(ctx)&&isAuthenticated()) setHint('⚠ 尚未完成草稿復原，草稿仍保留。請確認連線與雲端資料後重試。',true);
@@ -2256,7 +2256,7 @@ window.login=async function(){
   await reloadAfterAuthChange();
 };
 window.logout=async function(){
-  if(isAuthenticated() && (window._pendingBackup || savingCount>0 || !same(state,lastSynced)) &&
+  if(isAuthenticated() && (window._pendingBackup || savingCount>0 || !inSync()) &&
      !confirm('仍有未同步的修改。登出會清除這個分頁的草稿，尚未送出的修改不會儲存。確定登出？')) return;
   const t=authToken;
   lockUI(); loginError=null; render(); renderLogin();
@@ -2380,6 +2380,9 @@ async function ensureNewBackend(ctx){
   }
   apiChecked=true; oldBackend=false; apiVersion=j.api;
 }
+// 是否已與雲端一致：一律比較正規化後的內容。畫面資料會補上預設欄位（例如 expenses: []），
+// 伺服器回傳的不會，用原始內容比較會永遠「不一樣」，導致每次同步後都多送一次寫入。
+function inSync(){ return same(normState(state),normState(lastSynced)); }
 function rowCount(st){ return Object.keys(st||{}).filter(k=>k[0]!=='_'&&st[k]&&typeof st[k]==='object'&&!Array.isArray(st[k])).length; }
 function looksWiped(remote){
   const before=rowCount(lastSynced), now=rowCount(remote);
@@ -2450,7 +2453,7 @@ function setSyncStatus(kind){
   if(kind==='saving') setHint("● 儲存中…"+t);
   else if(kind==='fail') setHint((backupFailed?"⚠ 尚未確認同步完成，分頁暫存也失敗，請勿重新整理或關閉分頁。":"⚠ 尚未確認同步完成，修改已暫存在這個分頁，連上後會自動補傳（請先不要關掉分頁）。")+t,true);
   else if(window._pendingBackup) setHint("⚠ 請先處理這個分頁的草稿，自動寫入已暫停。"+t,true);
-  else if(!same(state,lastSynced)) setHint("● 尚有未同步修改，請保留此分頁。"+t,true);
+  else if(!inSync()) setHint("● 尚有未同步修改，請保留此分頁。"+t,true);
   else setHint("● 自動同步中：同事的修改約 15 秒內會自動出現，不用重新整理。"+t);
 }
 function changedProjectsSummary(prev,next){
@@ -2525,7 +2528,7 @@ async function pollOnce(force){
     lastSynced=clone(remote);
     applyMerged(merged); localBackupSave();
     setSyncStatus('ok');
-    if(!same(state,lastSynced)) persist(); // 之前存失敗的修改，自動補傳
+    if(!inSync()) persist(); // 之前存失敗的修改，自動補傳
   }catch(e){ console.error(e); if(isCurrent(ctx)&&isAuthenticated()) setSyncStatus('fail'); }
   finally{ pollBusy=false; }
 }
@@ -2545,7 +2548,7 @@ function persist(){
   return saveChain;
 }
 async function doPersist(ctx){
-  if(!isCurrent(ctx)||!isAuthenticated()||window._pendingBackup||same(state,lastSynced)) return;
+  if(!isCurrent(ctx)||!isAuthenticated()||window._pendingBackup||inSync()) return;
   setSyncStatus('saving');
   let dispatched=false, submitted=null, write=null;
   try{

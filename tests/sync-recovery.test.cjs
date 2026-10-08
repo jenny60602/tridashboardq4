@@ -201,3 +201,23 @@ test('a request that never answers is abandoned after the timeout and frees the 
   assert.ok(Date.now() - started >= 29000, 'waited for the full limit');
   assert.deepEqual(problems, [], JSON.stringify(problems));
 });
+
+test('polling with no edits never sends a write and the hint says in sync', { skip, timeout: 90000 }, async t => {
+  const { page, api, problems } = await setup(t);
+  await login(page);
+  const writes = () => api.log.filter(a => a === 'write').length;
+  const before = writes();
+  for (let i = 0; i < 3; i++) await page.evaluate(() => window.manualRefresh());
+  await page.waitForTimeout(800);
+  assert.equal(writes(), before, 'no write without a real edit');
+  assert.match(await page.locator('#synchint').innerText(), /自動同步中/);
+  // A real edit is still written exactly once, and polling afterwards stays quiet.
+  await setStatus(page, '待收款');
+  await page.waitForFunction(() => document.getElementById('synchint').textContent.includes('自動同步中'));
+  const afterEdit = writes();
+  assert.equal(afterEdit, before + 1, 'one write for one edit');
+  for (let i = 0; i < 2; i++) await page.evaluate(() => window.manualRefresh());
+  await page.waitForTimeout(800);
+  assert.equal(writes(), afterEdit, 'no extra writes after the edit synced');
+  assert.deepEqual(problems, [], JSON.stringify(problems));
+});
