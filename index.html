@@ -638,6 +638,32 @@ function taskProgress(p){
   });
   return {done,total};
 }
+// 「已經拆解過任務」：只要做過任何一項就算——加了子項目或自訂任務、改過任務名稱、刪過預設任務、
+// 頂層任務指派了負責人或日期、或已有任何完成項目。只是還沒打勾完成，不算「沒拆解」。
+function hasTaskBreakdown(p){
+  const r=getRow(p.id);
+  if(Object.values(r.subtasks||{}).some(a=>Array.isArray(a)&&a.length)) return true;
+  if((r.custom||[]).length || (r.taskDeletes||[]).length || Object.keys(r.taskRenames||{}).length) return true;
+  if(Object.values(r.tasks||{}).some(t=>t===true || (t&&typeof t==='object'&&(t.done||t.assignee||t.start||t.end)))) return true;
+  return taskProgress(p).done>0;
+}
+function daysUntil(iso){ if(!iso) return null; const t=new Date(); t.setHours(0,0,0,0); return Math.round((new Date(iso+"T00:00:00")-t)/86400000); }
+function dueBadge(end){ const d=daysUntil(end); if(d===null) return '';
+  if(d<0) return `<span class="badge overdue">逾期 ${shortDate(end)}</span>`;
+  if(d<=7) return `<span class="badge soon7">${d===0?'今天':d+' 天後'}到期</span>`;
+  return ''; }
+// 某人「需要注意」的數字：自己的未完成任務已逾期／7 天內到期，以及自己負責、已開始卻還沒拆解的專案。
+function personAlerts(t){
+  let overdue=0, soon=0;
+  ALLP.forEach(p=>{ if(getRow(p.id).status==="已完成") return; taskList(p).forEach(tn=>{
+    const subs=materializedSubs(p.id,tn);
+    const items=subs.length?subs:[taskInfo(p,tn)];
+    items.forEach(x=>{ if(x.done||x.assignee!==t) return; const d=daysUntil(x.end); if(d===null) return; if(d<0) overdue++; else if(d<=7) soon++; });
+  }); });
+  const unsplit=ALLP.filter(p=>getRow(p.id).assignee===t && needsBreakdown(p) && daysUntil(getRange(p).start)<=0).length;
+  return {overdue,soon,unsplit};
+}
+function needsBreakdown(p){ return getRow(p.id).status!=="已完成" && !hasTaskBreakdown(p); }
 function whoAmIOpts(sel){
   const label=n=>ROLES[n]?`${n}｜${ROLES[n]}`:n;
   const so=TEAM_STAFF.map(x=>`<option value="${esc(x)}" ${sel===x?'selected':''}>${esc(label(x))}</option>`).join('');
@@ -1227,7 +1253,7 @@ function renderStats(){
   const q4Margin=mt.q4Total-q4Cost, q1Margin=mt.q1Total-q1Cost;
   let tDone=0,tAll=0; ALLP.forEach(p=>{const t=taskProgress(p); tDone+=t.done; tAll+=t.total;});
   const pct=tAll?Math.round(tDone/tAll*100):0;
-  const noTaskCount=noTaskScope(ALLP.filter(p=>getRow(p.id).status!=="已完成" && taskProgress(p).done===0)).length;
+  const noTaskCount=noTaskScope(ALLP.filter(needsBreakdown)).length;
   let actualSum=0,actualCount=0,costSum=0,costCount=0;
   ALLP.forEach(p=>{const r=getRow(p.id);
     { const list=getReceipts(p.id); if(list.length){ actualSum+=list.reduce((s,x)=>s+Number(x.amount||0),0); actualCount++; } }
@@ -1238,7 +1264,7 @@ function renderStats(){
       <div class="statgrouplabel">${isFinAll()?"財務":(anyFin()?"總覽（金額只計算你負責的專案）":"總覽")}</div>
       <div class="stats">
         <div class="stat clickable" ${uiEvent('click','gotoStatus',['全部'])}><b>${ALLP.length}</b><span>專案總數</span></div>
-        <div class="stat"><b>${pct}%</b><span>全公司任務完成率</span>${noTaskCount?`<span class="small" style="color:var(--accent2);cursor:pointer;text-decoration:underline;text-decoration-style:dotted;" ${uiEvent('click','gotoNoTaskList',[])}>${noTaskScopeMine()?`你負責的 ${noTaskCount} 個專案還沒拆過任務清單`:`${noTaskCount}個專案還沒拆過任務清單`}</span>`:''}</div>
+        <div class="stat"><b>${pct}%</b><span>全公司任務完成率</span>${noTaskCount?`<span class="small" style="color:var(--accent2);cursor:pointer;text-decoration:underline;text-decoration-style:dotted;" ${uiEvent('click','gotoNoTaskList',[])}>${noTaskScopeMine()?`你負責的 ${noTaskCount} 個專案還沒拆解任務`:`${noTaskCount} 個專案還沒拆解任務`}</span>`:''}</div>
         ${anyFin()?`        <div class="stat"><b>${fmt(mt.q4Total)}</b><span>2026Q4 認列營收（未稅，預估＋已開發票）</span><span class="small">核心 ${fmt(mt.q4Core)}／關係人 ${fmt(mt.q4Rel)}／營業外 ${fmt(mt.q4NonOp)}</span></div>
         <div class="stat"><b style="color:${q4Margin<0?'var(--warn)':'var(--ink)'}">${mt.q4Total?Math.round(q4Margin/mt.q4Total*100)+'%':'—'}</b><span>2026Q4 毛利率估算</span><span class="small">毛利 ${fmt(q4Margin)}</span></div>
         <div class="stat"><b>${fmt(mt.q1Total)}</b><span>2027Q1 認列營收（未稅，預估＋已開發票）</span><span class="small">核心 ${fmt(mt.q1Core)}／關係人 ${fmt(mt.q1Rel)}／營業外 ${fmt(mt.q1NonOp)}</span></div>
@@ -1315,7 +1341,8 @@ window.gotoNoTaskList=function(){
   document.querySelectorAll(".tabs button").forEach(x=>x.classList.remove("active"));
   document.querySelector('.tabs button[data-v="person"]').classList.add("active");
   render();
-  document.getElementById("view").scrollIntoView({behavior:"smooth", block:"end"});
+  const target=document.getElementById("notasklist")||document.getElementById("view");
+  target.scrollIntoView({behavior:"smooth", block:target.id==="notasklist"?"start":"end"});
 };
 window.goToTaskList=function(pid){
   captureBackState();
@@ -1870,8 +1897,8 @@ function personDetailHtml(t){
   ALLP.forEach(p=>{
     taskList(p).forEach((tn,idx)=>{
       const subs=materializedSubs(p.id,tn);
-      if(subs.length){ subs.forEach((s,si)=>{ if(s.assignee===t) myTasks.push({p,idx,si,parent:tn,name:s.name,done:s.done}); }); }
-      else { const info=taskInfo(p,tn); if(info.assignee===t) myTasks.push({p,idx,si:null,parent:null,name:tn,done:info.done}); }
+      if(subs.length){ subs.forEach((s,si)=>{ if(s.assignee===t) myTasks.push({p,idx,si,parent:tn,name:s.name,done:s.done,end:s.end||''}); }); }
+      else { const info=taskInfo(p,tn); if(info.assignee===t) myTasks.push({p,idx,si:null,parent:null,name:tn,done:info.done,end:info.end||''}); }
     });
   });
   const ownedHtml=owned.map(p=>projRowHtml(p)).join("")||'<div class="prow small">（無）</div>';
@@ -1881,9 +1908,11 @@ function personDetailHtml(t){
   const pending=myTasks.filter(x=>!x.done);
   const byProject=new Map();
   pending.forEach(x=>{ const k=x.p.id; if(!byProject.has(k)) byProject.set(k,[]); byProject.get(k).push(x); });
+  // 有逾期項目的專案排最前，其次是 7 天內到期，再依原本的專案急迫度。
+  const dueRank=pid=>{ const ds=byProject.get(pid).map(x=>daysUntil(x.end)).filter(d=>d!==null); return ds.some(d=>d<0)?0:(ds.some(d=>d<=7)?1:2); };
   const projIds=[...byProject.keys()].sort((a,b)=>{
     const pa=getProject(a), pb=getProject(b);
-    return URG_RANK[urgency(pa)]-URG_RANK[urgency(pb)] || new Date(getRange(pa).end)-new Date(getRange(pb).end);
+    return dueRank(a)-dueRank(b) || URG_RANK[urgency(pa)]-URG_RANK[urgency(pb)] || new Date(getRange(pa).end)-new Date(getRange(pb).end);
   });
   const TODO_LIMIT=3;
   const todoIsExpanded=todoExpandedSet.has(t);
@@ -1897,7 +1926,7 @@ function personDetailHtml(t){
         const cb=x.si===null
           ? `<input type="checkbox" ${uiEvent('change','toggleTask',[String(x.p.id),x.idx],'checked')}>`
           : `<input type="checkbox" ${uiEvent('change','toggleSubtask',[String(x.p.id),x.idx,x.si],'checked')}>`;
-        return `<label class="todochip">${cb}<span>${esc(x.name)}</span></label>`;
+        return `<label class="todochip">${cb}<span>${esc(x.name)}</span>${dueBadge(x.end)}</label>`;
       }).join("");
       const parentLabel = parent!=='__leaf__' ? `<div class="small" style="font-weight:600;margin-bottom:2px;">${esc(parent)}</div>` : '';
       return `<div class="todoparentcol">${parentLabel}<div class="todochips">${lines}</div></div>`;
@@ -1955,11 +1984,16 @@ function personCard(t){
   const topHtml=top
     ? `<div class="small" style="margin-top:5px;">🔺最優先：${esc(getName(top))} <span class="badge ${urgency(top)}">${URG_LABEL[urgency(top)]}</span></div>`
     : `<div class="small" style="margin-top:5px;color:var(--ok);">✓ 目前沒有急件</div>`;
+  const al=personAlerts(t);
+  const alertBits=[al.overdue?`<span style="color:var(--warn);font-weight:700;">逾期 ${al.overdue}</span>`:'',
+    al.soon?`<span style="color:var(--accent2);font-weight:700;">7 天內到期 ${al.soon}</span>`:'',
+    al.unsplit?`<span>已開始未拆解 ${al.unsplit}</span>`:''].filter(Boolean);
+  const alertHtml=alertBits.length?`<div class="small" style="margin-top:5px;">⚠ ${alertBits.join('・')}</div>`:'';
   const open=expandedPerson.has(t);
   const role=ROLES[t];
   const inbN=inboxList().filter(it=>it.to===t && inboxVisibleNow(it) && it.status==='sent').length;
   return `<div class="pcard ${group}" id="pcard-${esc(t)}" ${uiEvent('click','togglePerson',[jsStr(t)])} style="cursor:pointer;">
-      <b>${esc(t)}${role?` <span class="rolelabel">・${esc(role)}</span>`:''}${inbN?` <span class="ibadge ib-sent">📥 ${inbN} 件新交辦</span>`:''}</b><span>負責 ${activeOwned.length}/${owned.length} 案・協作 ${collabOn.length} 案・${taskCount} 項任務</span>${topHtml}
+      <b>${esc(t)}${role?` <span class="rolelabel">・${esc(role)}</span>`:''}${inbN?` <span class="ibadge ib-sent">📥 ${inbN} 件新交辦</span>`:''}</b><span>負責 ${activeOwned.length}/${owned.length} 案・協作 ${collabOn.length} 案・${taskCount} 項任務</span>${alertHtml}${topHtml}
     </div>${open?personDetailHtml(t):''}`;
 }
 
@@ -1990,10 +2024,21 @@ function renderPersonView(){
   const unHtml=un.length ? `<div class="priority" style="margin-top:10px;"><h3>尚未指派負責人（${un.length}）</h3>
       ${un.map(p=>`<div class="row"><span>${esc(getName(p))}（${esc(p.cat)}）</span><select style="width:150px;" ${canEditAssignee()?'':'disabled title="只有管理者可以指派負責人"'} ${uiEvent('change','setField',[String(p.id),'assignee'],'value')}>${personOpts('')}</select></div>`).join('')}
     </div>` : `<div class="priority ok" style="margin-top:10px;"><h3>✓ 所有專案都已指派負責人</h3></div>`;
-  const noTasks=noTaskScope(ALLP.filter(p=>getRow(p.id).status!=="已完成" && taskProgress(p).done===0));
-  const noTasksHtml=noTasks.length ? `<div class="priority" style="margin-top:10px;"><h3>${noTaskScopeMine()?"你負責、":""}尚未拆分任務清單（${noTasks.length}）</h3>
-      ${noTasks.map(p=>projRowHtml(p)).join('')}
-    </div>` : `<div class="priority ok" style="margin-top:10px;"><h3>✓ 所有進行中的專案都已經有任務進度</h3></div>`;
+  // 依開始日期排序：最快要開始的放最上面，每列可以直接按「開始拆解」進入任務分頁。
+  const noTasks=noTaskScope(ALLP.filter(needsBreakdown)).sort((a,b)=>getRange(a).start.localeCompare(getRange(b).start));
+  const today=new Date(); today.setHours(0,0,0,0);
+  const startHint=p=>{ const d=Math.round((new Date(getRange(p).start+"T00:00:00")-today)/86400000);
+    return d>0?`${d} 天後開始`:(d===0?'今天開始':'已開始'); };
+  const noTasksHtml=noTasks.length ? `<div class="priority" id="notasklist" style="margin-top:10px;"><h3>${noTaskScopeMine()?"你負責、":""}還沒拆解任務的專案（${noTasks.length}）</h3>
+      <div class="small" style="margin:-4px 0 8px;">已加過子項目、自訂任務、指派過任務負責人或日期的專案不會出現在這裡。依開始日期排序。</div>
+      ${noTasks.map(p=>{ const r=getRow(p.id); const g=getRange(p);
+        return `<div class="row" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:6px 0;border-bottom:1px dashed var(--line);">
+          <span class="pname" style="flex:1 1 220px;cursor:pointer;" ${uiEvent('click','goToProject',[String(p.id)])}>${esc(getName(p))} <span class="cat">${esc(p.cat)}</span></span>
+          ${assigneeTag(r.assignee)}
+          <span class="small">${esc(r.status)}・${shortDate(g.start)}～${shortDate(g.end)}・${startHint(p)}</span>
+          <button class="mini" style="background:var(--accent);color:#fff;border-color:var(--accent);" ${uiEvent('click','goToTaskList',[String(p.id)])}>📝 開始拆解</button>
+        </div>`; }).join('')}
+    </div>` : `<div class="priority ok" style="margin-top:10px;"><h3>✓ 進行中的專案都已經拆解過任務</h3></div>`;
   document.getElementById("view").innerHTML=legend+staffCards+partnerCards+vendorCards+unHtml+noTasksHtml;
 }
 
