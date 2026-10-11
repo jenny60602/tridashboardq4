@@ -65,6 +65,15 @@ function safeData(value, depth = 0) {
   return Object.entries(value).every(([k, v]) => !FORBIDDEN.has(k) && safeData(v, depth + 1));
 }
 
+// Mirrors the GAS v11 allow-list for the fields the page can set here.
+const STATUSES = ['未開始', '提案中', '進行中', '待收款', '已完成', '未成案'];
+const httpsOrEmpty = v => { try { const u = new URL(String(v || '').trim()); return u.protocol === 'https:' ? u.href : ''; } catch { return ''; } };
+function cleanRow(row, prev) {
+  if ('status' in row && !STATUSES.includes(row.status)) { if (prev && 'status' in prev) row.status = prev.status; else delete row.status; }
+  if (isObject(row.tasks)) for (const t of Object.values(row.tasks)) if (isObject(t) && 'link' in t) t.link = httpsOrEmpty(t.link);
+  if (isObject(row.subtasks)) for (const arr of Object.values(row.subtasks)) if (Array.isArray(arr)) arr.forEach(x => { if (isObject(x) && 'link' in x) x.link = httpsOrEmpty(x.link); });
+  return row;
+}
 // Simplified stand-in: last writer wins per row, protected fields keep the stored value.
 function applyWrite(stored, incoming, user) {
   const out = clone(stored);
@@ -74,7 +83,7 @@ function applyWrite(stored, incoming, user) {
       const row = { ...prev, ...clone(value) };
       const keep = [...(canSeeFin(user, prev) ? [] : FIN_FIELDS), ...(user.level === 'admin' ? [] : ADMIN_FIELDS)];
       for (const f of keep) { if (Object.hasOwn(prev, f)) row[f] = clone(prev[f]); else delete row[f]; }
-      out[id] = row;
+      out[id] = cleanRow(row, prev);
     } else if (id === '_fin') {
       if (user.level === 'admin' || user.level === 'finance') out._fin = clone(value);
     } else if (id.startsWith('_')) {
