@@ -77,10 +77,10 @@ td.name .drive{margin-left:4px;text-decoration:none;}
 select,input[type=number],input[type=text],input[type=date],input[type=url]{background:var(--bg);color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:4px 6px;font-size:.76rem;}
 .mddate{width:56px;}
 .subname{width:150px;}
-.subnote{width:110px;}
+.subnote{width:130px;} .sublink{width:130px;} .tlinks{display:inline-flex;gap:4px;align-items:center;margin-left:6px;} .tlinks .subnote,.tlinks .sublink{font-size:.78rem;}
 .tname-input{font-weight:600;background:transparent;border:1px solid transparent;padding:2px 4px;}
 .tname-input:hover,.tname-input:focus{border-color:var(--line);background:var(--card);}
-.status-未開始{color:var(--sub);} .status-進行中{color:var(--accent2);font-weight:600;} .status-待收款{color:var(--warn);font-weight:600;} .status-已完成{color:var(--ok);}
+.status-未開始{color:var(--sub);} .status-進行中{color:var(--accent2);font-weight:600;} .status-待收款{color:var(--warn);font-weight:600;} .status-已完成{color:var(--ok);} .status-提案中{color:#6a4fa3;font-weight:600;} .status-未成案{color:var(--sub);text-decoration:line-through;}
 .rev{text-align:right;font-variant-numeric:tabular-nums;}
 .diff{font-size:.66rem;display:block;margin-top:2px;}
 .diff.short{color:var(--warn);} .diff.over{color:var(--ok);} .diff.wait{color:var(--sub);}
@@ -284,7 +284,13 @@ function applyConfig(cfg){
   Object.keys(ROLES).forEach(k=>delete ROLES[k]); Object.assign(ROLES,tm.roles||{});
   setArr(PEOPLE,[...new Set(TEAM.concat(Array.isArray(c.people)?c.people:[]))]);
 }
-const STATUSES=["未開始","進行中","待收款","已完成"];
+const STATUSES=["未開始","提案中","進行中","待收款","已完成","未成案"];
+// 「已完成」與「未成案」都算結束：不再提醒逾期、不列入人力與未拆解清單。
+const CLOSED_STATUSES=["已完成","未成案"];
+function isClosedStatus(st){ return CLOSED_STATUSES.includes(st); }
+function isClosed(p){ return isClosedStatus(getRow(p.id).status); }
+// 營收／支出預估只算已成案的專案；「提案中」「未成案」只計入已經發生的錢（已收款、已開發票、已付款）。
+function countsForForecast(p){ const st=getRow(p.id).status; return st!=="提案中" && st!=="未成案"; }
 const BASE_TASKS=["企劃","成本","報價/合約","款項","執行","結案"];
 const MARKET_TEMPLATE_PHASES=[
   {name:"1. 企劃期", subs:[
@@ -624,9 +630,9 @@ function defaultAssigneeFor(p,name){
 }
 function taskInfo(p,name){
   const r=getRow(p.id); const t=r.tasks[name];
-  if(!t) return {done:false,assignee:defaultAssigneeFor(p,name),start:"",end:""};
-  if(typeof t==="boolean") return {done:t,assignee:"",start:"",end:""};
-  return {done:!!t.done, assignee:t.assignee||"", start:t.start||"", end:t.end||""};
+  if(!t) return {done:false,assignee:defaultAssigneeFor(p,name),start:"",end:"",note:"",link:""};
+  if(typeof t==="boolean") return {done:t,assignee:"",start:"",end:"",note:"",link:""};
+  return {done:!!t.done, assignee:t.assignee||"", start:t.start||"", end:t.end||"", note:t.note||"", link:t.link||""};
 }
 function taskProgress(p){
   const list=taskList(p);
@@ -655,7 +661,7 @@ function dueBadge(end){ const d=daysUntil(end); if(d===null) return '';
 // 某人「需要注意」的數字：自己的未完成任務已逾期／7 天內到期，以及自己負責、已開始卻還沒拆解的專案。
 function personAlerts(t){
   let overdue=0, soon=0;
-  ALLP.forEach(p=>{ if(getRow(p.id).status==="已完成") return; taskList(p).forEach(tn=>{
+  ALLP.forEach(p=>{ if(isClosed(p)) return; taskList(p).forEach(tn=>{
     const subs=materializedSubs(p.id,tn);
     const items=subs.length?subs:[taskInfo(p,tn)];
     items.forEach(x=>{ if(x.done||x.assignee!==t) return; const d=daysUntil(x.end); if(d===null) return; if(d<0) overdue++; else if(d<=7) soon++; });
@@ -663,7 +669,7 @@ function personAlerts(t){
   const unsplit=ALLP.filter(p=>getRow(p.id).assignee===t && needsBreakdown(p) && daysUntil(getRange(p).start)<=0).length;
   return {overdue,soon,unsplit};
 }
-function needsBreakdown(p){ return getRow(p.id).status!=="已完成" && !hasTaskBreakdown(p); }
+function needsBreakdown(p){ return !isClosed(p) && !hasTaskBreakdown(p); }
 function whoAmIOpts(sel){
   const label=n=>ROLES[n]?`${n}｜${ROLES[n]}`:n;
   const so=TEAM_STAFF.map(x=>`<option value="${esc(x)}" ${sel===x?'selected':''}>${esc(label(x))}</option>`).join('');
@@ -698,7 +704,7 @@ function personOptsWithVendor(sel){
 
 function urgency(p){
   const r=getRow(p.id);
-  if(r.status==="已完成") return "later";
+  if(isClosedStatus(r.status)) return "later";
   const end=new Date(getRange(p).end+"T23:59:59");
   const diffDays=Math.ceil((end-new Date())/86400000);
   if(diffDays<0) return "overdue";
@@ -752,7 +758,8 @@ function getExpenses(p){ return (getRow(p.id).expenses||[]).filter(e=>e&&typeof 
 function totalExpense(p){ return getExpenses(p).reduce((s2,e)=>s2+Number(e.amount||0),0); }
 function totalExpensePaid(p){ return getExpenses(p).filter(e=>e.paid).reduce((s2,e)=>s2+Number(e.amount||0),0); }
 // mode='rev'：依認列月份算支出；mode='cash'：已付款依實際付款日，未付款依預計付款日（沒填就用認列月份）
-function expenseEntries(p, mode){
+function expenseEntries(p, mode){ return expenseEntriesAll(p,mode).filter(e=>countsForForecast(p)||e.kind==="outPaid"); }
+function expenseEntriesAll(p, mode){
   const out=[];
   getExpenses(p).forEach(e=>{ const a=Number(e.amount||0); if(!(a>0)) return;
     const recM=CHART_MONTHS.includes(e.month)?e.month:null;
@@ -776,7 +783,8 @@ function diffLabel(p){
   return `<span class="diff over">✓ 全數開立</span>`;
 }
 // 每個專案的按月金額：mode='rev' 營收認列（預估 → 已開發票 → 已收款），mode='cash' 現金收款（已收款／預計收款）
-function projectEntries(p, mode){
+function projectEntries(p, mode){ return projectEntriesAll(p,mode).filter(e=>countsForForecast(p)||e.kind==="paid"||e.kind==="issued"); }
+function projectEntriesAll(p, mode){
   const r=getRow(p.id), n=slotCount(r);
   const hasInv=!!(r.invoices&&r.invoices.length);
   const inv=getInvSlots(p);
@@ -836,7 +844,7 @@ function paginatedBody(key,itemsHtml,emptyMsg){
 }
 function lagInfo(p){
   const r=getRow(p.id);
-  if(r.status==="已完成") return {overdue:false, lag:0, done:true};
+  if(isClosedStatus(r.status)) return {overdue:false, lag:0, done:true, label:r.status};
   const range=getRange(p);
   const start=new Date(range.start+"T00:00:00"), end=new Date(range.end+"T23:59:59");
   const now=new Date();
@@ -852,7 +860,7 @@ function lagInfo(p){
   return {overdue, lag, done:false};
 }
 function lagBadge(li){
-  if(li.done) return `<span class="badge later">已完成</span>`;
+  if(li.done) return `<span class="badge later">${esc(li.label||'已完成')}</span>`;
   if(li.overdue) return `<span class="badge overdue">已逾期</span>`;
   if(li.lag>=0.2) return `<span class="badge soon7">進度落後${Math.round(li.lag*100)}%</span>`;
   return `<span class="badge later">進度正常</span>`;
@@ -863,7 +871,7 @@ function taskCountBadge(p){
   const remaining=tp.total-tp.done;
   const cls = li.done?'later' : li.overdue?'overdue' : li.lag>=0.2?'soon7':'later';
   let label;
-  if(li.done) label='已完成';
+  if(li.done) label=li.label||'已完成';
   else if(remaining<=0) label='任務已勾完，可結案';
   else label=`還有${remaining}項任務待完成`;
   if(li.overdue) label=`已逾期・${label}`;
@@ -888,7 +896,7 @@ function renderPriority(){
   const box=document.getElementById("priority");
   const LAG_THRESHOLD=0.2;
   const list=ALLP.filter(p=>{
-    const r=getRow(p.id); if(r.status==="已完成") return false;
+    const r=getRow(p.id); if(isClosedStatus(r.status)) return false;
     const li=lagInfo(p);
     return li.overdue || li.lag>=LAG_THRESHOLD;
   }).sort((a,b)=>{
@@ -898,7 +906,7 @@ function renderPriority(){
   });
 
   const payGroup=list.filter(p=>getRow(p.id).status==="待收款");
-  const execGroup=list.filter(p=>{const s=getRow(p.id).status; return s==="未開始"||s==="進行中";});
+  const execGroup=list.filter(p=>{const s=getRow(p.id).status; return s==="未開始"||s==="提案中"||s==="進行中";});
   const rowWithLag=p=>projRowHtml(p, lagBadge(lagInfo(p)));
   const urgentBody=execGroup.length? paginatedBody('urgent-exec',execGroup.map(rowWithLag),'') : `<div class="small">✓ 目前沒有已逾期或進度明顯落後、還在執行中的案子</div>`;
   const payBody=payGroup.length? paginatedBody('urgent-pay',payGroup.map(rowWithLag),'') : `<div class="small">✓ 目前沒有已逾期或進度明顯落後的待收款案子</div>`;
@@ -906,7 +914,7 @@ function renderPriority(){
   // 任務層級急迫（不管專案本身狀態），含負責人與前後步驟
   const taskUrgent=[];
   ALLP.forEach(p=>{
-    if(getRow(p.id).status==="已完成") return;
+    if(isClosed(p)) return;
     const topList=taskList(p);
     topList.forEach((tn)=>{
       const subs=materializedSubs(p.id,tn);
@@ -940,7 +948,7 @@ function renderPriority(){
   // 尚未指派的任務項目（不管專案狀態，只看單一任務項目本身）
   const unassignedTasks=[];
   ALLP.forEach(p=>{
-    if(getRow(p.id).status==="已完成") return;
+    if(isClosed(p)) return;
     taskList(p).forEach(tn=>{
       const subs=materializedSubs(p.id,tn);
       if(subs.length){ subs.forEach(s=>{ if(!s.done && !s.assignee) unassignedTasks.push({p,label:`${tn}／${s.name}`,end:s.end}); }); }
@@ -1249,6 +1257,8 @@ function quarterCost(){
 }
 function renderStats(){
   const mt=monthlyTotals();
+  const proposals=FINP().filter(p=>getRow(p.id).status==="提案中");
+  const proposalHtml=proposals.length?`<div class="stat clickable" ${uiEvent('click','gotoStatus',['提案中'])}><b>${fmt(proposals.reduce((a,p)=>a+Number(getEstRev(p)||0),0))}</b><span>提案中 ${proposals.length} 案（未計入營收預估）</span><span class="small">成案後改成「進行中」就會算進去</span></div>`:'';
   const {q4Cost, q1Cost}=quarterCost();
   const q4Margin=mt.q4Total-q4Cost, q1Margin=mt.q1Total-q1Cost;
   let tDone=0,tAll=0; ALLP.forEach(p=>{const t=taskProgress(p); tDone+=t.done; tAll+=t.total;});
@@ -1268,7 +1278,8 @@ function renderStats(){
         ${anyFin()?`        <div class="stat"><b>${fmt(mt.q4Total)}</b><span>2026Q4 認列營收（未稅，預估＋已開發票）</span><span class="small">核心 ${fmt(mt.q4Core)}／關係人 ${fmt(mt.q4Rel)}／營業外 ${fmt(mt.q4NonOp)}</span></div>
         <div class="stat"><b style="color:${q4Margin<0?'var(--warn)':'var(--ink)'}">${mt.q4Total?Math.round(q4Margin/mt.q4Total*100)+'%':'—'}</b><span>2026Q4 毛利率估算</span><span class="small">毛利 ${fmt(q4Margin)}</span></div>
         <div class="stat"><b>${fmt(mt.q1Total)}</b><span>2027Q1 認列營收（未稅，預估＋已開發票）</span><span class="small">核心 ${fmt(mt.q1Core)}／關係人 ${fmt(mt.q1Rel)}／營業外 ${fmt(mt.q1NonOp)}</span></div>
-        <div class="stat"><b style="color:${q1Margin<0?'var(--warn)':'var(--ink)'}">${mt.q1Total?Math.round(q1Margin/mt.q1Total*100)+'%':'—'}</b><span>2027Q1 毛利率估算</span><span class="small">毛利 ${fmt(q1Margin)}</span></div>`:''}
+        <div class="stat"><b style="color:${q1Margin<0?'var(--warn)':'var(--ink)'}">${mt.q1Total?Math.round(q1Margin/mt.q1Total*100)+'%':'—'}</b><span>2027Q1 毛利率估算</span><span class="small">毛利 ${fmt(q1Margin)}</span></div>
+        ${proposalHtml}`:''}
       </div>
     </div>`;
 }
@@ -1412,6 +1423,13 @@ window.addProject=async function(){
   render(); await persist();
 };
 
+// 母項目／子項目共用：「備註」與「連結」分開兩格，連結只接受 https，有效時顯示 🔗 可直接點開。
+function noteLinkHtml(noteVal,linkVal,noteAct,linkAct,args,legacyNote){
+  const url=safeHttpsUrl(linkVal) || (/^https:\/\/\S+$/i.test((legacyNote||'').trim())?safeHttpsUrl(legacyNote):'');
+  return `<span class="tlinks"><input type="text" class="subnote" placeholder="備註" value="${esc(noteVal||'')}" ${uiEvent('change',noteAct,args,'value')}>
+    <input type="url" class="sublink" placeholder="連結 https://" value="${esc(linkVal||'')}" ${uiEvent('change',linkAct,args,'value')}>
+    ${url?`<a href="${esc(url)}" target="_blank" rel="noopener" class="mini" style="text-decoration:none;" title="開啟連結">🔗</a>`:''}</span>`;
+}
 function taskItemHtml(p,idx){
   const t=taskList(p)[idx];
   const subs=materializedSubs(p.id,t);
@@ -1432,9 +1450,9 @@ function taskItemHtml(p,idx){
       <select style="${selStyle(info.assignee)}" ${uiEvent('change','setTaskAssignee',[String(p.id),idx],'value')}>${personOptsWithVendor(info.assignee)}</select>
       <input type="text" class="mddate" placeholder="月/日" value="${esc(shortDate(info.end))}" ${uiEvent('change','setTaskDeadline',[String(p.id),idx],'value')} title="截止日（例如9/15，跨年可打2027/1/15）">`;
   }
+  head+=noteLinkHtml(info.note,info.link,'setTaskNote','setTaskLink',[String(p.id),idx]);
   const ctrl=`<button class="mini" ${uiEvent('click','moveTopTask',[String(p.id),idx,-1])}>▲</button><button class="mini" ${uiEvent('click','moveTopTask',[String(p.id),idx,1])}>▼</button><button class="mini danger" ${uiEvent('click','deleteTopTask',[String(p.id),idx])}>✕</button>`;
   const children=subs.map((s,si)=>{
-    const noteUrl=/^https:\/\//i.test((s.note||'').trim())?safeHttpsUrl(s.note):'';
     return `<div class="subitem" draggable="true" ${uiEvent('dragstart','handleSubtaskDragStart',[String(p.id),jsStr(t),si])} ${uiEvent('dragover','dragOverRow',[],null,true)} ${uiEvent('dragleave','dragLeaveRow',[])} ${uiEvent('drop','dropSubtaskAt',[String(p.id),jsStr(t),si],null,true)}>
       <span class="draghandle" title="拖曳調整順序或移到其他母項目">⠿</span>
       <input type="checkbox" ${s.done?'checked':''} ${uiEvent('change','toggleSubtask',[String(p.id),idx,si],'checked')}>
@@ -1445,8 +1463,7 @@ function taskItemHtml(p,idx){
       <input type="text" class="subname" value="${esc(s.name)}" ${uiEvent('change','renameSubtask',[String(p.id),idx,si],'value')}>
       <select style="${selStyle(s.assignee)}" ${uiEvent('change','setSubtaskAssignee',[String(p.id),idx,si],'value')}>${personOptsWithVendor(s.assignee)}</select>
       <input type="text" class="mddate" placeholder="月/日" value="${shortDate(s.end)}" ${uiEvent('change','setSubtaskDeadline',[String(p.id),idx,si],'value')} title="截止日（例如9/15，跨年可打2027/1/15）">
-      <input type="text" class="subnote" placeholder="備註或連結" value="${esc(s.note||'')}" ${uiEvent('change','setSubtaskNote',[String(p.id),idx,si],'value')}>
-      ${noteUrl?`<a href="${esc(noteUrl)}" target="_blank" rel="noopener" class="mini" style="text-decoration:none;">🔗</a>`:''}
+      ${noteLinkHtml(s.note,s.link,'setSubtaskNote','setSubtaskLink',[String(p.id),idx,si],s.note)}
       <button class="mini danger" ${uiEvent('click','deleteSubtask',[String(p.id),idx,si])}>✕</button>
     </div>`;
   }).join("");
@@ -1760,7 +1777,7 @@ function personInvolved(t){
   return [...ids].map(getProject);
 }
 function personTop(t){
-  const unfinished=personInvolved(t).filter(p=>getRow(p.id).status!=="已完成");
+  const unfinished=personInvolved(t).filter(p=>!isClosed(p));
   if(!unfinished.length) return null;
   unfinished.sort((a,b)=>URG_RANK[urgency(a)]-URG_RANK[urgency(b)] || new Date(getRange(a).end)-new Date(getRange(b).end));
   return unfinished[0];
@@ -1785,8 +1802,8 @@ function capacityOverviewHtml(){
   const isActive=p=>{ const r=getRange(p); return today>=new Date(r.start+"T00:00:00") && today<=new Date(r.end+"T23:59:59"); };
   const names=[...TEAM_STAFF, ...TEAM_PARTNER].filter((n,i,arr)=>arr.indexOf(n)===i);
   const groups=names.map(name=>{
-    const owned=ALLP.filter(p=>getRow(p.id).status!=="已完成" && getRow(p.id).assignee===name);
-    const collab=ALLP.filter(p=>getRow(p.id).status!=="已完成" && getRow(p.id).assignee!==name && collaboratorsOf(p).includes(name));
+    const owned=ALLP.filter(p=>!isClosed(p) && getRow(p.id).assignee===name);
+    const collab=ALLP.filter(p=>!isClosed(p) && getRow(p.id).assignee!==name && collaboratorsOf(p).includes(name));
     if(!owned.length && !collab.length) return null;
     const activeNow=owned.filter(isActive);
     const activeCollab=collab.filter(isActive);
@@ -1973,7 +1990,7 @@ function personCard(t){
   const group=isStaff(t)?'staff':'partner';
   const owned=ALLP.filter(p=>getRow(p.id).assignee===t);
   const collabOn=ALLP.filter(p=>collaboratorsOf(p).includes(t));
-  const activeOwned=owned.filter(p=>getRow(p.id).status!=="已完成");
+  const activeOwned=owned.filter(p=>!isClosed(p));
   let taskCount=0;
   ALLP.forEach(p=>taskList(p).forEach((tn)=>{
     const subs=materializedSubs(p.id,tn);
@@ -2959,6 +2976,26 @@ window.renameSubtask=async function(pid,idx,si,val){
   arr[si]=Object.assign({},arr[si],{name}); subtasks[t]=arr;
   state[pid]=Object.assign({},cur,{subtasks}); touch(pid); render(); await persist();
 };
+// 連結格：空白＝清除；不是 https 就提示並恢復原值（伺服器也只收 https）。
+function linkInput(val){ const v=String(val||'').trim(); if(!v) return {ok:true,url:''}; const u=safeHttpsUrl(v); return u?{ok:true,url:u}:{ok:false}; }
+window.setTaskNote=async function(pid,idx,val){
+  const p=getProject(pid); const t=taskList(p)[idx]; const cur=getRow(pid);
+  const tasks=Object.assign({},cur.tasks,{[t]:Object.assign({},typeof cur.tasks[t]==='object'?cur.tasks[t]:{done:!!cur.tasks[t]},{note:String(val||'')})});
+  state[pid]=Object.assign({},cur,{tasks}); touch(pid); render(); await persist();
+};
+window.setTaskLink=async function(pid,idx,val){
+  const l=linkInput(val); if(!l.ok){ alert('連結需以 https:// 開頭'); render(); return; }
+  const p=getProject(pid); const t=taskList(p)[idx]; const cur=getRow(pid);
+  const tasks=Object.assign({},cur.tasks,{[t]:Object.assign({},typeof cur.tasks[t]==='object'?cur.tasks[t]:{done:!!cur.tasks[t]},{link:l.url})});
+  state[pid]=Object.assign({},cur,{tasks}); touch(pid); render(); await persist();
+};
+window.setSubtaskLink=async function(pid,idx,si,val){
+  const l=linkInput(val); if(!l.ok){ alert('連結需以 https:// 開頭'); render(); return; }
+  const p=getProject(pid); const t=taskList(p)[idx]; const cur=getRow(pid);
+  const subtasks=Object.assign({},cur.subtasks); const arr=materializedSubs(pid,t);
+  arr[si]=Object.assign({},arr[si],{link:l.url}); subtasks[t]=arr;
+  state[pid]=Object.assign({},cur,{subtasks}); touch(pid); render(); await persist();
+};
 window.setSubtaskNote=async function(pid,idx,si,val){
   const p=getProject(pid); const t=taskList(p)[idx]; const cur=getRow(pid);
   const subtasks=Object.assign({},cur.subtasks); const arr=materializedSubs(pid,t);
@@ -3292,6 +3329,7 @@ const UI_ACTIONS=Object.freeze({
   change:Object.freeze(uiCalls(['inboxSet','renameSubtask','renameTopTask','saveName','saveRev','schedSet',
     'setEstSlot','setExpField','setExpPaid','setField','setInvField','setInvPaid','setOwnerFilter','setProjectCat',
     'setReceiptField','setRelated','setSubtaskAssignee','setSubtaskAudience','setSubtaskDeadline','setSubtaskNote',
+    'setSubtaskLink','setTaskNote','setTaskLink',
     'setTaskAssignee','setTaskDeadline','toggleSubtask','toggleTask'])),
   input:Object.freeze(uiCalls(['inboxType'])),
   keydown:Object.freeze({
