@@ -1220,7 +1220,7 @@ window.exportMonthlyExcel=async function(){
   const ws5=X.utils.aoa_to_sheet(ex); fmtCells(ws5,Array.from({length:ex.length},(_,i)=>i),[4]);
   ws5['!cols']=[{wch:10},{wch:30},{wch:10},{wch:10},{wch:12},{wch:28},{wch:12},{wch:8},{wch:12}];
   // --- 發票明細 ---
-  const inv=[['類別','專案','負責人','期別','實際開立發票日','發票號碼','發票金額','預計收款日','已收款','實際收款日']];
+  const inv=[['類別','專案','負責人','期別','實際開立發票日','發票號碼/收據/其他憑證','發票金額','預計收款日','已收款','實際收款日']];
   FINP().slice().sort((a,b)=>a.cat.localeCompare(b.cat)||getName(a).localeCompare(getName(b))).forEach(p=>{
     const r=getRow(p.id);
     getInvSlots(p).forEach((v,i)=>{ if(!isIssued(v) && !v.dueDate && !v.no) return;
@@ -1695,7 +1695,7 @@ function detailRow(p){
     <div style="margin-top:6px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;"><button class="mini" ${uiEvent('click','addExpense',[String(p.id)])}>＋ 新增一筆支出</button>
       <span class="small">支出合計 ${fmt(expTot)}・已付款 <b style="color:#a0522d;">${fmt(totalExpensePaid(p))}</b>／預估成本 ${costEst?fmt(costEst):'未填'}</span></div>
     ${sec('發票開立與現金入帳','發票資料專案人員可填・「已收款」由財務勾選')}
-    <table class="slottable"><thead><tr><th>期別</th><th>實際開立發票日</th><th>發票號碼</th><th>發票金額</th><th>預計收款日</th><th>實際收款</th></tr></thead><tbody>
+    <table class="slottable"><thead><tr><th>期別</th><th>實際開立發票日</th><th>發票號碼/收據/其他憑證</th><th>發票金額</th><th>預計收款日</th><th>實際收款</th></tr></thead><tbody>
       ${invSlots.map((v,i)=>`<tr class="${v.paid?'paidrow':''}"><td>${slotName(r,i)}</td>
         <td><input type="date" id="invd-${p.id}-${i}" value="${esc(v.date||'')}" ${uiEvent('change','setInvField',[String(p.id),i,'date'],'value')}></td>
         <td><input type="text" id="invn-${p.id}-${i}" value="${esc(v.no||'')}" placeholder="例：AB12345678" ${uiEvent('change','setInvField',[String(p.id),i,'no'],'trimmed')}></td>
