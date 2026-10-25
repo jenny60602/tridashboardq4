@@ -14,6 +14,19 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { createFixture } = require('../tests/fixtures/dashboard-fixture.cjs');
+const vm = require('node:vm');
+
+// Load the real GAS finance-summary module so the stand-in uses the same allow-list and row checks.
+function loadExecModule() {
+  const sandbox = { JSON, Math, Number, String, Object, Array, Date, isFinite, console };
+  vm.createContext(sandbox);
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'gas', 'ExecSummary.gs'), 'utf8'), sandbox);
+  return sandbox;
+}
+// Optional private seed for screenshots: EXEC_SEED_CSV=<path outside Git>. Never commit real figures.
+function readSeedCsv(file) {
+  return fs.readFileSync(file, 'utf8').trim().split(/\r?\n/).map(line => line.split(','));
+}
 
 const ROOT = path.resolve(__dirname, '..');
 const API_PATH = '/__test_api__';
@@ -38,7 +51,8 @@ function preparePreviewHtml(html) {
   const banner = `<aside data-synthetic-preview style="position:sticky;top:0;z-index:10000;background:#7f1d1d;color:#fff;padding:12px 16px;border:4px solid #fbbf24;font:15px/1.5 sans-serif;">
     <strong>離線合成測試｜127.0.0.1｜不是正式 GAS</strong><br>
     只操作本機程序記憶體，重啟即重設；所有專案、人名、金額、密碼均為虛構。<br>
-    假密碼：admin <code>fake-admin</code> · finance <code>fake-finance</code> · owner <code>fake-owner</code> · member <code>fake-member</code>
+    假密碼：admin <code>fake-admin</code> · finance <code>fake-finance</code> · owner <code>fake-owner</code> · member <code>fake-member</code><br>
+    經營檢視白名單（虛構）：head <code>fake-head</code> · ops <code>fake-ops</code>
   </aside>`;
   out = out.replace(/<body(?:\s[^>]*)?>/i, m => m + banner);
   // Block any cross-origin connection and any inline event attribute in the preview.
@@ -95,6 +109,10 @@ function applyWrite(stored, incoming, user) {
 
 function createSyntheticApi() {
   const fixture = createFixture();
+  const gasExec = loadExecModule();
+  const execSheet = process.env.EXEC_SEED_CSV ? readSeedCsv(process.env.EXEC_SEED_CSV) : fixture.execSheet;
+  const execDecisions = process.env.EXEC_SEED_DECISIONS_CSV ? readSeedCsv(process.env.EXEC_SEED_DECISIONS_CSV) : fixture.execDecisions;
+  const execLog = [];
   let state = fixture.state;
   const sessions = new Map();
   const log = [];
@@ -120,9 +138,21 @@ function createSyntheticApi() {
       state = applyWrite(state, body.data, user);
       return { ok: true, me, state: redact(state, user) };
     }
+    if (body.action === 'execRead') {
+      // Same decision as gas/ExecSummary.gs: name from the server session, checked against the allow-list.
+      if (!gasExec.execCanView_(me, fixture.execViewers)) { execLog.push([me.name, 'denied']); return { ok: false, error: 'forbidden' }; }
+      const parsed = gasExec.execParseRows_(clone(execSheet));
+      if (!parsed.headerOk) return { ok: false, error: 'exec_bad_header' };
+      execLog.push([me.name, 'ok']);
+      const decisions = gasExec.execParseDecisions_(clone(execDecisions));
+      return { ok: true, me, exec: JSON.parse(JSON.stringify({
+        rows: parsed.rows, invalidRows: parsed.invalid,
+        decisions: decisions.headerOk ? decisions.rows : [], decisionsStatus: decisions.headerOk ? 'ok' : 'bad_header',
+        invalidDecisions: decisions.invalid, readAt: new Date().toISOString() })) };
+    }
     return { ok: false, error: 'unknown_action' };
   }
-  return { handle, log, getState: () => clone(state), expire: () => sessions.clear() };
+  return { handle, log, execLog, getState: () => clone(state), expire: () => sessions.clear() };
 }
 
 function createServer() {
