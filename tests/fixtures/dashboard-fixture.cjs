@@ -15,8 +15,24 @@ const USERS = [
 // Stand-in for the EXEC_VIEWERS script property and the separate finance-summary sheet.
 // Every number below is invented for tests and has no relation to any real company figure.
 const EXEC_VIEWERS = ['Synthetic Head', 'Synthetic Ops Lead'];
+// Stand-in for the OPP_SCORERS script property (admins may always score).
+const OPP_SCORERS = ['Synthetic Finance', 'Synthetic Owner', 'Synthetic Head'];
+// Monthly budget/actual rows (all invented): company level and two business lines.
+const MONTHLY_ROWS = [];
+for (let m = 1; m <= 12; m++) {
+  const a = (v) => (m <= 9 ? v : '');
+  const row = (metric, name, budget, actual, line = '') =>
+    MONTHLY_ROWS.push([2026, m, metric, name, 'month', budget, actual, '合成月報', 'TEST-MONTHLY', '2026/10/02', '', '否', '', line]);
+  row('revenue', '營收', 1000000, m <= 8 ? 900000 : '');            // month 9 actual comes from the older row above
+  row('gross_profit', '毛利', 400000, a(300000));
+  row('opex', '營業費用', 350000, a(320000));
+  row('nonop_income', '營業外收入', 50000, a(75000));
+  row('pretax', '稅前損益', 100000, a(55000));
+  row('revenue', '營收', 600000, a(500000), '2B 專案');
+  row('revenue', '營收', 400000, a(450000), '2C 零售');
+}
 const EXEC_SHEET = [
-  ['會計年度', '截至月份', '指標代碼', '指標名稱', '期間', '預算金額', '實際金額', '資料來源', '資料版本', '更新日期', '確認人', '是否已結帳', '備註'],
+  ['會計年度', '截至月份', '指標代碼', '指標名稱', '期間', '預算金額', '實際金額', '資料來源', '資料版本', '更新日期', '確認人', '是否已結帳', '備註', '業務線'],
   [2026, 12, 'revenue', '營收', 'annual', 12000000.5, '', '合成年度預算', 'TEST-BUDGET-v1', '2026/06/01', '', '否', ''],
   [2026, 12, 'net_income', '稅後淨利', 'annual', 800000.25, '', '合成年度預算', 'TEST-BUDGET-v1', '2026/06/01', '', '否', ''],
   [2026, 9, 'revenue', '營收', 'month', '', 1500000, '合成月報', 'TEST-2026-09', '2026/10/02', '', '否', ''],
@@ -25,6 +41,10 @@ const EXEC_SHEET = [
   [2026, 8, 'net_income', '稅後淨利', 'ytd', '', 200000, '合成月報', 'TEST-2026-08', '2026/09/02', '', '否', 'older row, must not be picked'],
   [2026, 13, 'revenue', '營收', 'month', '', 1, '壞資料', 'TEST-BAD', '2026/10/02', '', '否', 'invalid month'],
   ['x', 9, 'unknown_metric', '?', 'month', '', 1, '壞資料', 'TEST-BAD', '2026/10/02', '', '否', 'invalid row'],
+  [2026, 12, 'pretax', '稅前損益', 'annual', 1000000, '', '合成年度預算', 'TEST-BUDGET-v1', '2026/06/01', '', '否', ''],
+  [2026, 12, 'cogs', '銷貨成本', 'annual', 4320000, '', '合成年度預算', 'TEST-BUDGET-v1', '2026/06/01', '', '否', '', '2B 專案'],
+  [2026, 5, 'revenue', '營收', 'month', 1, 1, '壞資料', 'TEST-BAD', '2026/10/02', '', '否', 'unknown line', '不存在的線'],
+  ...MONTHLY_ROWS,
 ];
 const EXEC_DECISIONS = [
   ['討論日期', '議題', '相關專案／業務', '待決策問題', '決策結果', '負責人', '完成期限', '追蹤狀態'],
@@ -39,6 +59,7 @@ const CONFIG = {
   projects: [
     { id: 'test-project-1', cat: 'Test', name: 'Synthetic Project One', months: [10, 11] },
     { id: 'test-project-2', cat: 'Synthetic', name: 'Synthetic Project Two <b>"quoted"</b>', months: [11, 12] },
+    { id: 'test-opportunity', cat: '企業', name: 'Synthetic Opportunity', months: [12] },
   ],
   team: {
     staffG1: ['Synthetic Admin', 'Synthetic Finance'],
@@ -77,6 +98,17 @@ const STATE = {
     custom: ['Synthetic preparation'], audienceOptions: ['Test'],
     estPlan: [{ month: 11, amount: 4000 }, { month: 12, amount: 4000 }],
   },
+  'test-opportunity': {
+    status: '提案中', assignee: 'Synthetic Owner', notes: 'Synthetic new opportunity.',
+    startDate: '2026-12-01', endDate: '2026-12-31', estOverride: 5000, custom: ['Synthetic pitch'],
+  },
+  // Invented scores for the opportunity scorecard.
+  _opp: {
+    'test-opportunity': {
+      scores: { 'Synthetic Finance': { fin: 4, value: 2, impact: 5, capacity: 1, certainty: 3, note: 'Synthetic reason', at: 1 } },
+      decision: null,
+    },
+  },
   _fin: {
     'test-project-1': { rev: 12000, plan: [6000, 6000, 0, 0] },
     'test-project-2': { rev: 8000, plan: [0, 0, 4000, 4000] },
@@ -84,6 +116,6 @@ const STATE = {
 };
 
 const clone = value => JSON.parse(JSON.stringify(value));
-function createFixture() { return clone({ config: CONFIG, state: STATE, users: USERS, execViewers: EXEC_VIEWERS, execSheet: EXEC_SHEET, execDecisions: EXEC_DECISIONS }); }
+function createFixture() { return clone({ config: CONFIG, state: STATE, users: USERS, execViewers: EXEC_VIEWERS, execSheet: EXEC_SHEET, execDecisions: EXEC_DECISIONS, oppScorers: OPP_SCORERS }); }
 
 module.exports = { createFixture };

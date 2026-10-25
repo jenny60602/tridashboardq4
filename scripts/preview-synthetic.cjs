@@ -17,12 +17,13 @@ const { createFixture } = require('../tests/fixtures/dashboard-fixture.cjs');
 const vm = require('node:vm');
 
 // Load the real GAS finance-summary module so the stand-in uses the same allow-list and row checks.
-function loadExecModule() {
+function loadGasModule(file) {
   const sandbox = { JSON, Math, Number, String, Object, Array, Date, isFinite, console };
   vm.createContext(sandbox);
-  vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'gas', 'ExecSummary.gs'), 'utf8'), sandbox);
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'gas', file), 'utf8'), sandbox);
   return sandbox;
 }
+const loadExecModule = () => loadGasModule('ExecSummary.gs');
 // Optional private seed for screenshots: EXEC_SEED_CSV=<path outside Git>. Never commit real figures.
 function readSeedCsv(file) {
   return fs.readFileSync(file, 'utf8').trim().split(/\r?\n/).map(line => line.split(','));
@@ -34,7 +35,7 @@ const HOST = '127.0.0.1';
 const MAX_BODY_BYTES = 512 * 1024;
 const FIN_FIELDS = ['estOverride', 'actual', 'cost', 'receipts', 'estPlan', 'revMonth', 'invoiceMonth',
   'paymentMethod', 'installmentCount', 'invoices', 'costLink', 'relatedParty', 'expenses'];
-const ADMIN_FIELDS = ['assignee', 'catOverride', 'deleted', 'deletedAt', 'deletedBy'];
+const ADMIN_FIELDS = ['assignee', 'catOverride', 'deleted', 'deletedAt', 'deletedBy', 'bizLine'];
 const FORBIDDEN = new Set(['__proto__', 'constructor', 'prototype']);
 const clone = value => JSON.parse(JSON.stringify(value));
 const isObject = value => !!value && typeof value === 'object' && !Array.isArray(value);
@@ -52,7 +53,8 @@ function preparePreviewHtml(html) {
     <strong>離線合成測試｜127.0.0.1｜不是正式 GAS</strong><br>
     只操作本機程序記憶體，重啟即重設；所有專案、人名、金額、密碼均為虛構。<br>
     假密碼：admin <code>fake-admin</code> · finance <code>fake-finance</code> · owner <code>fake-owner</code> · member <code>fake-member</code><br>
-    經營檢視白名單（虛構）：head <code>fake-head</code> · ops <code>fake-ops</code>
+    經營檢視白名單（虛構）：head <code>fake-head</code> · ops <code>fake-ops</code><br>
+    機會評估名單（虛構）：admin、finance、owner、head；member、ops 不在名單
   </aside>`;
   out = out.replace(/<body(?:\s[^>]*)?>/i, m => m + banner);
   // Block any cross-origin connection and any inline event attribute in the preview.
@@ -63,8 +65,9 @@ function preparePreviewHtml(html) {
 const canSeeFin = (user, row) => user.level === 'admin' || user.level === 'finance' ||
   (user.level === 'owner' && !!row && row.assignee === user.name);
 
-function redact(state, user) {
+function redact(state, user, opp) {
   const out = clone(state);
+  if (opp) opp.gas.oppRedact_(out, clone(state), user, opp.scorers); else delete out._opp;
   for (const [id, row] of Object.entries(out)) {
     if (!id.startsWith('_') && isObject(row) && !canSeeFin(user, state[id])) FIN_FIELDS.forEach(f => delete row[f]);
   }
@@ -89,17 +92,25 @@ function cleanRow(row, prev) {
   return row;
 }
 // Simplified stand-in: last writer wins per row, protected fields keep the stored value.
-function applyWrite(stored, incoming, user) {
+function applyWrite(stored, incoming, user, opp) {
   const out = clone(stored);
+  if (incoming._opp !== undefined && opp) {
+    const known = Object.fromEntries([...opp.projectIds(), ...(stored._customProjects || []).map(c => c.id)].map(id => [id, 1]));
+    out._opp = clone(opp.gas.oppMerge_(clone(stored._opp), clone(incoming._opp), user, known, opp.scorers, Date.now()));
+    if (!Object.keys(out._opp).length) delete out._opp;
+  }
   for (const [id, value] of Object.entries(incoming)) {
     if (!id.startsWith('_') && isObject(value)) {
       const prev = stored[id] || {};
       const row = { ...prev, ...clone(value) };
       const keep = [...(canSeeFin(user, prev) ? [] : FIN_FIELDS), ...(user.level === 'admin' ? [] : ADMIN_FIELDS)];
       for (const f of keep) { if (Object.hasOwn(prev, f)) row[f] = clone(prev[f]); else delete row[f]; }
+      if (user.level === 'admin' && 'bizLine' in value && opp) { const b = opp.gas.cleanBizLine_(value.bizLine); if (b === undefined) { if (Object.hasOwn(prev, 'bizLine')) row.bizLine = prev.bizLine; else delete row.bizLine; } else row.bizLine = b; }
       out[id] = cleanRow(row, prev);
     } else if (id === '_fin') {
       if (user.level === 'admin' || user.level === 'finance') out._fin = clone(value);
+    } else if (id === '_opp') {
+      // handled above by the real GAS module
     } else if (id.startsWith('_')) {
       out[id] = clone(value);
     }
@@ -110,6 +121,7 @@ function applyWrite(stored, incoming, user) {
 function createSyntheticApi() {
   const fixture = createFixture();
   const gasExec = loadExecModule();
+  const opp = { gas: loadGasModule('OppScore.gs'), scorers: fixture.oppScorers, projectIds: () => fixture.config.projects.map(p => p.id) };
   const execSheet = process.env.EXEC_SEED_CSV ? readSeedCsv(process.env.EXEC_SEED_CSV) : fixture.execSheet;
   const execDecisions = process.env.EXEC_SEED_DECISIONS_CSV ? readSeedCsv(process.env.EXEC_SEED_DECISIONS_CSV) : fixture.execDecisions;
   const execLog = [];
@@ -131,12 +143,12 @@ function createSyntheticApi() {
     const user = name && fixture.users.find(u => u.name === name);
     if (!user) return { ok: false, error: body.token ? 'session_expired' : 'login_required' };
     const me = { name: user.name, level: user.level };
-    if (body.action === 'read') return { ok: true, me, state: redact(state, user), config: clone(fixture.config) };
+    if (body.action === 'read') return { ok: true, me, state: redact(state, user, opp), config: clone(fixture.config) };
     if (body.action === 'write') {
       if (!isObject(body.data) || !safeData(body.data) || body.data.action !== undefined ||
           body.data.code !== undefined || body.data.token !== undefined) return { ok: false, error: 'no_data' };
-      state = applyWrite(state, body.data, user);
-      return { ok: true, me, state: redact(state, user) };
+      state = applyWrite(state, body.data, user, opp);
+      return { ok: true, me, state: redact(state, user, opp) };
     }
     if (body.action === 'execRead') {
       // Same decision as gas/ExecSummary.gs: name from the server session, checked against the allow-list.

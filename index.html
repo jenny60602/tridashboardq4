@@ -232,6 +232,9 @@ tr.rowopen td:first-child{box-shadow:inset 4px 0 0 var(--accent2);}
 .execcard{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 12px;}
 .execcard b{display:block;font-size:1.25rem;margin:2px 0;}
 .execcard .small{color:var(--sub);}
+.oppform{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin:12px 0;}
+.oppdims{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;}
+.oppdims label{display:flex;flex-direction:column;gap:2px;}
 .execbar{height:10px;border-radius:5px;background:var(--line);overflow:hidden;margin-top:6px;}
 .execbar span{display:block;height:100%;background:var(--accent);}
 .execwarn{border-left:4px solid var(--warn);background:rgba(155,44,29,.06);padding:8px 10px;border-radius:6px;margin:8px 0;font-size:.82rem;}
@@ -482,7 +485,7 @@ function rowDefaults(r0){
     tasks:r.tasks||{}, subtasks:r.subtasks||{}, custom:r.custom||[], receipts:r.receipts||[],
     audienceOptions:(r.audienceOptions&&r.audienceOptions.length)?r.audienceOptions:["攤商","消費者","客戶","內部"],
     catOverride:r.catOverride||null, deleted:!!r.deleted,
-    invoices:r.invoices||[], costLink:r.costLink||"", relatedParty:!!r.relatedParty, expenses:r.expenses||[]};
+    invoices:r.invoices||[], costLink:r.costLink||"", relatedParty:!!r.relatedParty, expenses:r.expenses||[], bizLine:r.bizLine||null};
 }
 function isStaff(n){return TEAM_STAFF.includes(n);}
 function isVendor(n){ return !!n && !TEAM.includes(n); }
@@ -1640,6 +1643,7 @@ function detailRow(p){
       <label style="max-width:420px;">專案名稱<input type="text" value="${esc(getName(p))}" ${uiEvent('change','saveName',[String(p.id)],'value')}></label>
       ${isAdmin()?`<label>類別<select ${uiEvent('change','setProjectCat',[String(p.id)],'value')}>${[...new Set([...allCats(),p.cat])].map(c=>`<option value="${esc(c)}" ${c===p.cat?'selected':''}>${esc(c)}</option>`).join('')}<option value="__new__">＋ 新增類別…</option></select></label>
       <label>&nbsp;<button class="mini danger" ${uiEvent('click','deleteProject',[String(p.id)])} style="white-space:nowrap;">🗑 刪除專案</button></label>`:''}
+      ${isAdmin()?`<label title="看「錢從哪裡來」的分類；預設依專案分類推得">業務線<select ${uiEvent('change','setBizLine',[String(p.id)],'value')}><option value="" ${r.bizLine?'':'selected'}>自動：${esc(CAT_TO_LINE[p.cat]||BIZ_LINE_PENDING)}</option>${BIZ_LINE_OPTIONS.map(b=>`<option ${r.bizLine===b?'selected':''}>${esc(b)}</option>`).join('')}</select></label>`:`<label>業務線<div class="calcbox">${esc(bizLineTag(p))}</div></label>`}
     </div>
     ${sec('專案時程','專案人員填寫')}
     <div class="basicgrid">
@@ -1749,9 +1753,10 @@ function detailRow(p){
 
   const notesPane=`<textarea class="notesbox" placeholder="在這裡自由記錄，例如：9/25中秋公司休假、10/9雙十連假影響交件…" ${uiEvent('change','setField',[String(p.id),'notes'],'value')}>${esc(r.notes)}</textarea>`;
 
-  const pane = tab==='tasks' ? taskPane : tab==='notes' ? notesPane : basicPane;
+  const oppOn=showOppTab(p);
+  const pane = tab==='tasks' ? taskPane : tab==='notes' ? notesPane : (tab==='opp'&&oppOn) ? oppPane(p) : basicPane;
   return `<tr class="detail"><td colspan="10"><div class="detailwrap">
-    <div class="dtabs">${tabBtn('basic','基本資料')}${tabBtn('tasks','任務與甘特圖')}${tabBtn('notes','備註')}</div>
+    <div class="dtabs">${tabBtn('basic','基本資料')}${tabBtn('tasks','任務與甘特圖')}${tabBtn('notes','備註')}${oppOn?tabBtn('opp','機會評估'):''}</div>
     ${pane}
   </div></td></tr>`;
 }
@@ -1777,7 +1782,7 @@ function renderProjectView(){
       <td class="rev"><b style="color:${marginOf(p)<0?'var(--warn)':'var(--ok)'}">${fmt(marginOf(p))}</b></td>`:`<td class="rev small" colspan="4" style="text-align:center;color:var(--sub);">🔒 僅負責人與財務可見</td>`)}
       <td>${shortDate(range.start)}–${shortDate(range.end)}<br>${taskCountBadge(p)}</td>
       <td><div class="progwrap"><div class="bar"><i style="width:${pct}%"></i></div><span class="progtxt">${tp.done}/${tp.total}</span></div></td>
-      <td><select class="status-${esc(r.status)}" ${uiEvent('change','setField',[String(p.id),'status'],'value')}>${opts}</select></td>
+      <td><select class="status-${esc(r.status)}" ${uiEvent('change','setField',[String(p.id),'status'],'value')}>${opts}</select>${oppRowBadge(p)}</td>
       <td><select style="${selStyle(r.assignee)}" ${canEditAssignee()?'':'disabled title="只有管理者可以更換負責人"'} ${uiEvent('change','setField',[String(p.id),'assignee'],'value')}>${personOpts(r.assignee)}</select></td>
     </tr>`;
     if(open) html+=detailRow(p);
@@ -2244,15 +2249,16 @@ function clearExec(){
     document.querySelectorAll('.tabs button').forEach(b=>b.classList.toggle('active',b.dataset.v==='project'));
   }
 }
-const EXEC_METRIC_KEYS=['revenue','net_income'], EXEC_PERIOD_KEYS=['annual','month','ytd'];
+const EXEC_METRIC_KEYS=['revenue','net_income','cogs','gross_profit','opex','op_income','nonop_income','pretax'], EXEC_PERIOD_KEYS=['annual','month','ytd'];
 function cleanExecRows(rows){
   const num=v=>v===null?null:(typeof v==='number'&&isFinite(v)?v:undefined);
   return (Array.isArray(rows)?rows:[]).filter(r=>isObj(r)&&Number.isInteger(r.fiscalYear)&&Number.isInteger(r.asOfMonth)&&
     r.asOfMonth>=1&&r.asOfMonth<=12&&EXEC_METRIC_KEYS.includes(r.metric)&&EXEC_PERIOD_KEYS.includes(r.period)&&
-    num(r.budget)!==undefined&&num(r.actual)!==undefined&&isISODate(r.updatedAt)&&typeof r.closed==='boolean')
+    num(r.budget)!==undefined&&num(r.actual)!==undefined&&isISODate(r.updatedAt)&&typeof r.closed==='boolean'&&
+    (r.line===undefined||r.line===''||BIZ_LINES.includes(r.line)))
     .map(r=>({fiscalYear:r.fiscalYear,asOfMonth:r.asOfMonth,metric:r.metric,metricName:String(r.metricName||''),
       period:r.period,budget:r.budget,actual:r.actual,source:String(r.source||''),version:String(r.version||''),
-      updatedAt:r.updatedAt,confirmedBy:String(r.confirmedBy||''),closed:r.closed,note:String(r.note||'')}));
+      updatedAt:r.updatedAt,confirmedBy:String(r.confirmedBy||''),closed:r.closed,note:String(r.note||''),line:String(r.line||'')}));
 }
 const EXEC_DECISION_STATUS_KEYS=['待決策','已決策','執行中','已完成','暫緩'];
 function cleanExecDecisions(rows){
@@ -2296,8 +2302,8 @@ async function loadExec(ctx=authContext()){
   }
 }
 window.refreshExec=function(){ if(execAllowed) loadExec(); };
-function execPick(rows,metric,period){
-  return rows.filter(r=>r.metric===metric&&r.period===period)
+function execPick(rows,metric,period,needActual){
+  return rows.filter(r=>r.metric===metric&&r.period===period&&!r.line&&(!needActual||r.actual!==null))
     .sort((a,b)=>b.asOfMonth-a.asOfMonth||b.updatedAt.localeCompare(a.updatedAt))[0]||null;
 }
 function execMoney(v){ return v===null||v===undefined?'未提供':Number(v).toLocaleString('zh-TW',{minimumFractionDigits:0,maximumFractionDigits:2}); }
@@ -2308,11 +2314,14 @@ function execNetProgress(target,ytd){
   return {rate:ytd/target, gap:Math.round((target-ytd)*100)/100};
 }
 // 經營分析類別（候選）：只是分析用的分組，不是組織部門，也不改原本的專案分類。
-const BIZ_CATS=['2C 零售','2B 企業禮盒與商品採購','2B 企業專案與永續服務','政府／公共服務與補助計畫','其他收入或待分類業務'];
-// 現有專案分類 → 候選經營分類；沒列在這裡、或意思有歧義的分類一律「待確認」，不自行決定。
-const BIZ_CAT_CANDIDATE={'2C零售':0,'禮盒':1,'企業':2,'政府':3};
-const BIZ_CAT_PENDING_NOTE={'好田':'可能屬企業永續專案或其他，待確認','中介':'可能屬企業專案或其他收入，待確認','委外':'性質不明，待確認'};
-const DEPTS=['營運部','行銷業務部','品質保證部'];
+// 業務線：與年度預算的通路一致（2C／2B 禮盒／2B 專案／2G），用來對照目標；不是組織部門。
+// 預設依專案分類推得，管理者可逐案調整（bizLine）。
+const BIZ_LINES=['2C 零售','2B 禮盒','2B 專案','2G 政府／補助'];
+const BIZ_LINE_OPTIONS=BIZ_LINES;
+const CAT_TO_LINE={'2C零售':'2C 零售','禮盒':'2B 禮盒','企業':'2B 專案','好田':'2B 專案','中介':'2B 專案','委外':'2B 專案','政府':'2G 政府／補助'};
+const BIZ_LINE_PENDING='待分類';
+function bizLineTag(p){ const r=getRow(p.id); return BIZ_LINES.includes(r.bizLine)?r.bizLine:(CAT_TO_LINE[p.cat]||BIZ_LINE_PENDING); }
+function bizLineOf(p){ return bizLineTag(p); }
 const EXEC_KIND={confirmed:['已確認數據','ok'],budget:['預算版本','budget'],unverified:['未確認數據','warn'],missing:['尚未取得','missing'],analysis:['管理分析','analysis']};
 function execBadge(kind){ const k=EXEC_KIND[kind]; return `<span class="execbadge ${k[1]}">${k[0]}</span>`; }
 function execRowKind(r){ return r.period==='annual'&&r.budget!==null&&r.actual===null ? 'budget' : (r.closed&&r.confirmedBy ? 'confirmed' : 'unverified'); }
@@ -2329,7 +2338,7 @@ function execGoalsHtml(){
   const y=years[0]||new Date().getFullYear(), rows=EXEC.rows.filter(r=>r.fiscalYear===y);
   const revBudget=execPick(rows,'revenue','annual'), target=execPick(rows,'net_income','annual');
   const ytdRev=execPick(rows,'revenue','ytd'), ytdNet=execPick(rows,'net_income','ytd');
-  const mRev=execPick(rows,'revenue','month'), mNet=execPick(rows,'net_income','month');
+  const mRev=execPick(rows,'revenue','month',true), mNet=execPick(rows,'net_income','month',true);
   const prog=execNetProgress(target&&target.budget, ytdNet&&ytdNet.actual);
   const pct=prog?Math.max(0,Math.min(100,prog.rate*100)):0;
   const unverified=[ytdRev,ytdNet,mRev,mNet].filter(r=>r&&execRowKind(r)==='unverified');
@@ -2353,26 +2362,7 @@ function execGoalsHtml(){
     ${execAmountCard(`${mRev?mRev.asOfMonth+' 月':'當月'}營收`,mRev,'actual')}
     ${execAmountCard(`${mNet?mNet.asOfMonth+' 月':'當月'}稅後淨利`,mNet,'actual')}
   </div>
-  <div class="small">金額均為會計口徑的摘要（每月人工匯入）。本頁不加總專案預估收入、不推算專案毛利，也不混用預估銷售額、實際收款、營業外收入。</div>`;
-}
-function execCategoryHtml(){
-  const counts={};
-  ALLP.forEach(p=>{ const c=p.cat||'（未分類）'; counts[c]=counts[c]||{all:0,open:0}; counts[c].all++; if(!isClosed(p)) counts[c].open++; });
-  const rowsHtml=Object.keys(counts).sort().map(c=>{
-    const idx=BIZ_CAT_CANDIDATE[c];
-    const cand=idx===undefined?`<span class="execbadge warn">待確認</span> <span class="small">${esc(BIZ_CAT_PENDING_NOTE[c]||'現有分類無法明確對應')}</span>`:`${esc(BIZ_CATS[idx])} <span class="execbadge analysis">建議對應</span>`;
-    return `<tr><td>${esc(c)}</td><td class="num">${counts[c].open} / ${counts[c].all}</td><td>${cand}</td></tr>`;
-  }).join('');
-  return `<div class="small">候選經營分類：${BIZ_CATS.map((b,i)=>`${i+1}. ${esc(b)}`).join('、')}。這是分析用的分類，不是組織部門，也不更改原本的專案分類。</div>
-    <div style="overflow-x:auto;"><table class="exectable"><thead><tr><th>現有專案分類</th><th>進行中／全部（案）</th><th>候選經營分類</th></tr></thead><tbody>${rowsHtml||'<tr><td colspan="3">目前沒有專案</td></tr>'}</tbody></table></div>
-    <div class="small" style="margin-top:4px;">只統計案數，不計算各分類收入；分類收入需待財務資料依經營分類整理後再匯入。</div>`;
-}
-function execMatrixHtml(){
-  return `<div class="small">部門管理人員、職責、流程與資源；業務管理客群、收入、成本與經營成果；專案是實際執行的工作。同一業務可能涉及多個部門，收入不直接歸屬單一部門。</div>
-    <div style="overflow-x:auto;"><table class="exectable"><thead><tr><th>部門＼業務</th>${BIZ_CATS.map(b=>`<th>${esc(b)}</th>`).join('')}</tr></thead><tbody>
-    ${DEPTS.map(d=>`<tr><td><b>${esc(d)}</b></td>${BIZ_CATS.map(()=>`<td class="small" style="color:var(--sub);">待定義</td>`).join('')}</tr>`).join('')}
-    </tbody></table></div>
-    <div class="small" style="margin-top:4px;">示意：每格未來可標「主責／協作／不參與」與負責窗口；目前沒有部門資料，不新增同事填報欄位。</div>`;
+  <div class="small">金額均為會計口徑的摘要（每月人工匯入）。這一區不加總專案預估收入、不推算專案毛利，也不混用預估銷售額、實際收款、營業外收入。</div>`;
 }
 function execRiskHtml(){
   const today=new Date(); today.setHours(0,0,0,0);
@@ -2395,7 +2385,7 @@ function execRiskHtml(){
   const isActive=p=>{ const r=getRange(p); return today>=new Date(r.start+"T00:00:00") && today<=new Date(r.end+"T23:59:59"); };
   const loads=[...new Set([...TEAM_STAFF,...TEAM_PARTNER])].map(n=>({n,c:open.filter(p=>isActive(p)&&(getRow(p.id).assignee===n||collaboratorsOf(p).includes(n))).length}))
     .filter(x=>x.c>0).sort((a,b)=>b.c-a.c);
-  const pending=(EXEC&&EXEC.decisions||[]).filter(d=>d.status==='待決策');
+  const pending=oppEnabled()?ALLP.filter(p=>getRow(p.id).status==='提案中'&&!oppOf(p.id).decision):[];
   const list=(arr,fn,empty,max=5)=>arr.length?`<ul class="execlist">${arr.slice(0,max).map(fn).join('')}</ul>${arr.length>max?`<div class="small">還有 ${arr.length-max} 項</div>`:''}`:`<div class="small">${empty}</div>`;
   const pj=p=>`<a href="#" ${uiEvent('click','goToProject',[String(p.id)])}>${esc(getName(p))}</a>`;
   return `<div class="execgrid">
@@ -2410,22 +2400,148 @@ function execRiskHtml(){
     <div class="execcard"><span class="small">人力負荷（目前進行中的負責＋協作案數）</span><b>${loads.length?esc(loads[0].n)+' '+loads[0].c+' 案':'—'}</b>
       ${list(loads,x=>`<li>${esc(x.n)}：${x.c} 案</li>`,'目前沒有進行中的專案')}
       <div class="small"><span class="execbadge warn">待人工確認</span> 系統沒有工時或負荷上限資料，是否過載與資源衝突需主管判斷。</div></div>
-    <div class="execcard"><span class="small">需要主管決策</span><b>${pending.length} 項</b>
-      ${list(pending,d=>`<li>${esc(d.topic)}${d.due?` <span class="small">期限 ${esc(d.due.replace(/-/g,'/'))}</span>`:''}</li>`,EXEC?'週會決策紀錄中沒有待決策事項':'尚未讀取週會決策紀錄')}</div>
+    <div class="execcard"><span class="small">提案中、尚未決定的新機會</span><b>${pending.length} 案</b>
+      ${list(pending,p=>`<li>${pj(p)} <span class="small">${Object.keys(oppOf(p.id).scores||{}).length} 人評分</span></li>`,oppEnabled()?'目前沒有':'你不在評分名單內')}</div>
   </div>`;
 }
-function execDecisionsHtml(){
+function execOppHtml(){
+  if(!oppEnabled()) return `<div class="small">${NOT_LINKED}（你不在機會評估名單內）</div>`;
+  const ps=ALLP.filter(p=>getRow(p.id).status==='提案中'||oppOf(p.id).decision||Object.keys(oppOf(p.id).scores||{}).length);
+  if(!ps.length) return `<div class="small">目前沒有提案中的新機會。專案狀態設為「提案中」後，大家就能在專案的「機會評估」分頁評分。</div>`;
+  const rows=ps.map(p=>{ const s=oppSummary(p.id), st=getRow(p.id).status;
+    const flags=[...s.low.map(d=>`<span class="execbadge warn">${esc(d.label)}偏低</span>`),...s.split.map(d=>`<span class="execbadge analysis">${esc(d.label)}意見分歧</span>`)].join(' ');
+    const dec=s.o.decision?`<span class="execbadge ${s.o.decision.result==='不接'?'warn':(s.o.decision.result==='接'?'ok':'budget')}">${esc(s.o.decision.result)}</span>`:'<span class="small">未決定</span>';
+    return `<tr><td>${`<a href="#" ${uiEvent('click','goToOpp',[String(p.id)])}>${esc(getName(p))}</a>`}<div class="small">${esc(bizLineTag(p))}・${esc(st)}</div></td><td class="num">${s.names.length} 人</td><td class="num">${s.total===null?'—':s.total.toFixed(1)+' / 25'}</td><td>${flags||'<span class="small">—</span>'}</td><td>${dec}</td></tr>`; }).join('');
+  return `<div class="small">每人依五個面向各打 1–5 分；這裡只整理結果，不自動決定。「偏低」＝平均 ≤ 1.5，「意見分歧」＝最高與最低差 2 分以上，週會優先討論這些。</div>
+    <div style="overflow-x:auto;"><table class="exectable"><thead><tr><th>機會</th><th>評分</th><th>平均總分</th><th>需要討論</th><th>決定</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+}
+// ---- 月份資料：同一指標、同一業務線、同一月份，預算與實際各取更新日期最新的一列 ----
+function execYear(){ const ys=[...new Set((EXEC?EXEC.rows:[]).map(r=>r.fiscalYear))].sort((a,b)=>b-a); return ys[0]||new Date().getFullYear(); }
+function execMonthly(metric,line=''){
+  const y=execYear(), out={};
+  for(let m=1;m<=12;m++) out[m]={budget:null,actual:null};
+  const rows=(EXEC?EXEC.rows:[]).filter(r=>r.fiscalYear===y&&r.period==='month'&&r.metric===metric&&(r.line||'')===line)
+    .sort((a,b)=>a.updatedAt.localeCompare(b.updatedAt));
+  rows.forEach(r=>{ const o=out[r.asOfMonth]; if(r.budget!==null) o.budget=r.budget; if(r.actual!==null) o.actual=r.actual; });
+  return out;
+}
+function execHasMonthly(metric,line=''){ const s=execMonthly(metric,line); return Object.values(s).some(o=>o.budget!==null||o.actual!==null); }
+function execLastActualMonth(){ const s=execMonthly('revenue'); let last=0; for(let m=1;m<=12;m++) if(s[m].actual!==null) last=m; return last; }
+const sumMonths=(series,ms,field)=>{ let t=0, any=false; ms.forEach(m=>{ const v=series[m][field]; if(v!==null){ t+=v; any=true; } }); return any?t:null; };
+const rangeM=(a,b)=>{ const o=[]; for(let m=a;m<=b;m++) o.push(m); return o; };
+const QUARTERS=[[1,3],[4,6],[7,9],[10,12]];
+const pctTxt=v=>v===null||!isFinite(v)?'—':(v*100).toFixed(1)+'%';
+const kTh=v=>v===null||v===undefined?'—':Math.round(v/1000).toLocaleString('zh-TW');
+function execQuarterHtml(){
   if(!EXEC) return `<div class="small">${NOT_LINKED}</div>`;
-  const st=EXEC.decisionsStatus;
-  if(st==='missing') return `<div class="execwarn">財務摘要資料來源中尚未建立「週會決策紀錄」分頁。</div>`;
-  if(st==='bad_header') return `<div class="execwarn">「週會決策紀錄」表頭與範本不符，已拒絕讀取。</div>`;
-  const rows=EXEC.decisions.slice().sort((a,b)=>b.date.localeCompare(a.date));
-  const d=v=>v?esc(v.replace(/-/g,'/')):'—';
-  return `<div class="small">這裡追蹤「經營決策」，與上方及其他頁籤的「專案執行進度」分開。第一階段唯讀，由確認人於受保護的資料來源維護。</div>
-    ${EXEC.invalidDecisions?`<div class="execwarn">有 ${EXEC.invalidDecisions} 列格式不符，已略過。</div>`:''}
-    <div style="overflow-x:auto;"><table class="exectable"><thead><tr><th>討論日期</th><th>議題</th><th>相關專案／業務</th><th>待決策問題</th><th>決策結果</th><th>負責人</th><th>完成期限</th><th>追蹤狀態</th></tr></thead><tbody>
-    ${rows.length?rows.map(r=>`<tr><td>${d(r.date)}</td><td>${esc(r.topic)}</td><td>${esc(r.related)}</td><td>${esc(r.question)}</td><td>${r.decision?esc(r.decision):'<span class="small" style="color:var(--sub);">—</span>'}</td><td>${esc(r.owner)}</td><td>${d(r.due)}</td><td><span class="execbadge ${r.status==='待決策'?'warn':(r.status==='已完成'?'ok':'analysis')}">${esc(r.status)}</span></td></tr>`).join(''):'<tr><td colspan="8">尚無紀錄</td></tr>'}
-    </tbody></table></div>`;
+  if(!execHasMonthly('revenue')) return `<div class="small">${NOT_LINKED}：財務摘要尚未匯入每月的預算與實際數（期間 month）。</div>`;
+  const last=execLastActualMonth();
+  const metrics=[['revenue','營業收入'],['gross_profit','毛利'],['gm','毛利率'],['opex','營業費用'],['nonop_income','營業外收入（補助）'],['pretax','稅前損益']];
+  const S=Object.fromEntries(['revenue','gross_profit','opex','nonop_income','pretax'].map(m=>[m,execMonthly(m)]));
+  const cell=(m,ms)=>{
+    const actMs=ms.filter(x=>x<=last);
+    if(m==='gm'){
+      const bt=sumMonths(S.revenue,ms,'budget'), bg=sumMonths(S.gross_profit,ms,'budget');
+      const at=sumMonths(S.revenue,actMs,'actual'), ag=sumMonths(S.gross_profit,actMs,'actual');
+      const b=bt&&bg!==null?bg/bt:null, a=at&&ag!==null&&actMs.length?ag/at:null;
+      return `<td class="num">${pctTxt(b)}</td><td class="num">${actMs.length?`<b style="color:${a!==null&&b!==null&&a<b?'var(--warn)':'var(--ink)'}">${pctTxt(a)}</b>`:'—'}</td>`;
+    }
+    const b=sumMonths(S[m],ms,'budget'), a=actMs.length?sumMonths(S[m],actMs,'actual'):null;
+    const bPart=actMs.length&&actMs.length<ms.length?sumMonths(S[m],actMs,'budget'):b;
+    const good=m==='opex'?(a!==null&&bPart!==null&&a<=bPart):(a!==null&&bPart!==null&&a>=bPart);
+    const rate=a!==null&&bPart?a/bPart:null;
+    return `<td class="num">${kTh(b)}</td><td class="num">${a===null?'—':`<b style="color:${good?'var(--ok)':'var(--warn)'}">${kTh(a)}</b>${rate!==null&&bPart>0?`<div class="small">${Math.round(rate*100)}%</div>`:''}`}</td>`;
+  };
+  const cols=[...QUARTERS.map(([a,b],i)=>[`Q${i+1}`,rangeM(a,b)]),[`1–${last||12} 月累計`,rangeM(1,last||12)],['全年',rangeM(1,12)]];
+  return `<div class="small">單位：仟元。每格左邊是<b>目標</b>、右邊是<b>實際</b>（綠色＝達標、紅色＝未達；費用則是低於目標為綠）。季度未過完時，達成率只和已過月份的目標比。資料截至 ${last?last+' 月':'—'}。</div>
+    <div style="overflow-x:auto;"><table class="exectable"><thead><tr><th rowspan="2">項目</th>${cols.map(c=>`<th colspan="2" style="text-align:center;">${c[0]}${c[1].some(m=>m>last)&&c[1].some(m=>m<=last)?'<span class="small">（進行中）</span>':''}</th>`).join('')}</tr>
+      <tr>${cols.map(()=>`<th class="num">目標</th><th class="num">實際</th>`).join('')}</tr></thead>
+    <tbody>${metrics.map(([m,l])=>`<tr><td><b>${l}</b></td>${cols.map(c=>cell(m,c[1])).join('')}</tr>`).join('')}</tbody></table></div>
+    <div class="small" style="margin-top:4px;">${execBadge('budget')} 目標＝匯入的年度預算按月拆分　${execBadge('unverified')} 實際數未結帳或未填確認人前僅供參考</div>`;
+}
+// ---- 剩餘月份營收門檻試算 ----
+let execCalc={};
+function execCalcDefaults(){
+  const last=execLastActualMonth(), rest=rangeM(last+1,12), done=rangeM(1,last);
+  const rev=execMonthly('revenue'), gp=execMonthly('gross_profit'), op=execMonthly('opex'), pt=execMonthly('pretax'), no=execMonthly('nonop_income');
+  const rows=EXEC.rows.filter(r=>r.fiscalYear===execYear());
+  const net=execPick(rows,'net_income','annual'), pre=execPick(rows,'pretax','annual');
+  const netTarget=net&&net.budget!==null?net.budget:null;
+  const taxFromBudget=netTarget!==null&&pre&&pre.budget?1-netTarget/pre.budget:null;
+  const ytdRev=sumMonths(rev,done,'actual'), ytdGp=sumMonths(gp,done,'actual'), ytdOp=sumMonths(op,done,'actual'), ytdPt=sumMonths(pt,done,'actual');
+  return {last,rest,netTarget,taxFromBudget,ytdPt,
+    tax:taxFromBudget!==null&&taxFromBudget>=0&&taxFromBudget<0.5?taxFromBudget:0.2,
+    gm:ytdRev&&ytdGp!==null?ytdGp/ytdRev:null,
+    opex:ytdOp!==null&&last?ytdOp/last*rest.length:null,
+    opexBudget:sumMonths(op,rest,'budget'), nonopBudget:sumMonths(no,rest,'budget'), revBudget:sumMonths(rev,rest,'budget'),
+    nonop:0};
+}
+// 純計算：剩餘月份稅前要賺多少，以及需要的營收。缺任何一個就不算。
+function execRequiredRevenue({netTarget,tax,ytdPt,gm,opex,nonop}){
+  if([netTarget,tax,ytdPt,gm,opex,nonop].some(v=>typeof v!=='number'||!isFinite(v))||!(gm>0)||!(tax<1)) return null;
+  const pretaxNeeded=netTarget/(1-tax), restPretax=pretaxNeeded-ytdPt;
+  return {pretaxNeeded,restPretax,revenue:Math.max(0,(restPretax+opex-nonop)/gm)};
+}
+function execPipeline(ms,line){
+  let t=0; FINP().forEach(p=>{ if(line&&bizLineOf(p)!==line) return; if(!line&&revGroup(p)==='nonop') return;
+    projectEntries(p,'rev').forEach(e=>{ if(ms.includes(e.m)) t+=e.amount; }); });
+  return t;
+}
+function execCalcHtml(){
+  if(!EXEC||!execHasMonthly('revenue')) return `<div class="small">${NOT_LINKED}：需要每月的實際數與年度淨利目標。</div>`;
+  const d=execCalcDefaults();
+  if(!d.rest.length) return `<div class="small">全年實際數都已匯入，不需要試算。</div>`;
+  const v={...d,...execCalc};
+  const r=execRequiredRevenue(v);
+  const pipe=execPipeline(d.rest,'');
+  const inp=(key,val,step,suffix,hint)=>`<label>${hint}<span style="display:flex;gap:4px;align-items:center;"><input type="number" step="${step}" value="${val===null?'':esc(String(val))}" ${uiEvent('change','setExecCalc',[key],'numberOrNull')} style="width:130px;">${suffix}</span></label>`;
+  const restLabel=`${d.rest[0]}–${d.rest[d.rest.length-1]} 月`;
+  return `<div class="small">用 1–${d.last} 月的實際數回推：要達到全年稅後淨利目標，${restLabel}至少要做多少營收。下面三個假設可以自己改，改完立刻重算；不會存檔，也不會影響其他人。</div>
+    <div class="execgrid">
+      <div class="execcard"><span class="small">全年稅後淨利目標</span><b>${execMoney(v.netTarget)}</b><span class="small">換算稅前 ${r?execMoney(Math.round(r.pretaxNeeded)):'—'}（稅率 ${pctTxt(v.tax)}${d.taxFromBudget!==null?'，依預算':'，假設'}）</span></div>
+      <div class="execcard"><span class="small">1–${d.last} 月稅前損益（實際）</span><b>${execMoney(v.ytdPt)}</b>${execBadge('unverified')}</div>
+      <div class="execcard"><span class="small">${restLabel}稅前還要賺</span><b>${r?execMoney(Math.round(r.restPretax)):NOT_LINKED}</b>${execBadge('analysis')}</div>
+    </div>
+    <div class="basicgrid">
+      ${inp('gm',v.gm===null?null:Math.round(v.gm*1000)/10,'0.1','%',`毛利率（1–${d.last} 月平均 ${pctTxt(d.gm)}）`)}
+      ${inp('opex',v.opex===null?null:Math.round(v.opex),'1000','元',`${restLabel}營業費用（照 1–${d.last} 月平均；原預算 ${kTh(d.opexBudget)} 仟）`)}
+      ${inp('nonop',v.nonop,'1000','元',`${restLabel}確定入帳的補助（原預算 ${kTh(d.nonopBudget)} 仟）`)}
+      <label>&nbsp;<button class="mini" ${uiEvent('click','resetExecCalc',[])}>回到預設</button></label>
+    </div>
+    <div class="execgrid">
+      <div class="execcard" style="border-color:var(--accent);"><span class="small">${restLabel}營收至少要</span><b>${r?execMoney(Math.round(r.revenue)):NOT_LINKED}</b>
+        <span class="small">${r?`每月約 ${execMoney(Math.round(r.revenue/d.rest.length))}・原預算 ${execMoney(d.revBudget)}`:'請填毛利率、費用與補助'}</span>${execBadge('analysis')}</div>
+      <div class="execcard"><span class="small">儀表板上${restLabel}的專案預估營收</span><b>${execMoney(Math.round(pipe))}</b><span class="small">不含政府補助類、未成案；含提案中以外的預估</span></div>
+      <div class="execcard"><span class="small">缺口</span><b style="color:${r&&pipe>=r.revenue?'var(--ok)':'var(--warn)'}">${r?execMoney(Math.round(Math.max(0,r.revenue-pipe))):'—'}</b><span class="small">${r?(pipe>=r.revenue?'目前的專案預估已足夠':'還要再找的營收'):''}</span></div>
+    </div>
+    <div class="small">${r&&v.gm>0?`規則：補助少 10 萬或費用多 10 萬，營收就要多做約 ${execMoney(Math.round(100000/v.gm))}；毛利率每高 1 個百分點，需要的營收約少 ${execMoney(Math.round(r.revenue-(r.restPretax+v.opex-v.nonop)/(v.gm+0.01)))}。`:''}算法：營收 × 毛利率 − 費用 ＋ 補助 ＝ 剩餘月份要賺的稅前損益。</div>`;
+}
+window.setExecCalc=function(key,val){
+  if(!['gm','opex','nonop'].includes(key)) return;
+  if(val===null||!isFinite(val)) delete execCalc[key]; else execCalc[key]=key==='gm'?val/100:val;
+  renderExecView();
+};
+window.resetExecCalc=function(){ execCalc={}; renderExecView(); };
+function execBizLineHtml(){
+  const last=EXEC?execLastActualMonth():0, done=rangeM(1,last), rest=rangeM(last+1,12);
+  const groups=[...BIZ_LINES,BIZ_LINE_PENDING];
+  const stat=Object.fromEntries(groups.map(g=>[g,{prop:0,open:0,all:0}]));
+  ALLP.forEach(p=>{ const g=stat[bizLineOf(p)]||stat[BIZ_LINE_PENDING], st=getRow(p.id).status; g.all++;
+    if(st==='提案中') g.prop++; else if(!CLOSED_STATUSES.includes(st)) g.open++; });
+  const yr=EXEC?EXEC.rows.filter(r=>r.fiscalYear===execYear()):[];
+  const rows=groups.filter(g=>g!==BIZ_LINE_PENDING||stat[g].all).map(g=>{
+    const x=stat[g], s=g===BIZ_LINE_PENDING?null:execMonthly('revenue',g), has=s&&Object.values(s).some(o=>o.budget!==null||o.actual!==null);
+    const annual=has?sumMonths(s,rangeM(1,12),'budget'):null, ytd=has&&last?sumMonths(s,done,'actual'):null, ytdB=has&&last?sumMonths(s,done,'budget'):null;
+    const restB=has?sumMonths(s,rest,'budget'):null, pipe=g===BIZ_LINE_PENDING?null:execPipeline(rest,g);
+    const cogs=yr.find(r=>r.metric==='cogs'&&r.period==='annual'&&r.line===g&&r.budget!==null);
+    const gmT=cogs&&annual?1-cogs.budget/annual:null;
+    return `<tr><td><b>${esc(g)}</b></td><td class="num">${kTh(annual)}</td>
+      <td class="num">${ytd===null?'—':`<b style="color:${ytdB!==null&&ytd>=ytdB?'var(--ok)':'var(--warn)'}">${kTh(ytd)}</b>${ytdB?`<div class="small">${Math.round(ytd/ytdB*100)}%</div>`:''}`}</td>
+      <td class="num">${kTh(restB)}</td><td class="num">${pipe===null?'—':`<b style="color:${restB!==null&&pipe>=restB?'var(--ok)':'var(--warn)'}">${kTh(pipe)}</b>`}</td>
+      <td class="num">${pctTxt(gmT)}</td><td class="num">${x.prop} / ${x.open}</td></tr>`; }).join('');
+  return `<div class="small">業務線與年度預算的通路相同：2C 零售（店舖、市集、電商、活動）、2B 禮盒、2B 專案（企業、好田、中介、委外）、2G 政府／補助。單位：仟元。預設依專案分類推得，管理者可在專案「基本資料」逐案調整。</div>
+    <div style="overflow-x:auto;"><table class="exectable"><thead><tr><th>業務線</th><th class="num">全年營收目標</th><th class="num">1–${last||'?'} 月實際</th><th class="num">${rest.length?`${rest[0]}–12 月目標`:'剩餘目標'}</th><th class="num">儀表板預估（同期間）</th><th class="num">毛利率目標</th><th class="num">提案中／執行中</th></tr></thead><tbody>${rows}</tbody></table></div>
+    <div class="small" style="margin-top:4px;">${execBadge('analysis')} 「儀表板預估」是各專案自填、預計在這段期間認列的收入（只含你看得到財務欄位的專案），<b>不是</b>已認列營收。2G 的會計目標多半列在營業外收入。除了營收，也請一起看這條線有沒有在帶動其他線（例如市集是研發試驗場）。</div>`;
 }
 function renderExecView(){
   const box=document.getElementById('view');
@@ -2436,12 +2552,124 @@ function renderExecView(){
       <button class="mini" ${uiEvent('click','refreshExec',[])}>${execLoading?'讀取中…':'重新讀取'}</button></div>
     ${execMsg?`<div class="execwarn">${esc(execMsg)}</div>`:''}
     ${sec('A. 年度經營目標','財務數字來自受保護的財務摘要',execGoalsHtml())}
-    ${sec('B. 經營風險與待決策事項','由現有專案資料自動整理；無法可靠判斷的標示待人工確認',execRiskHtml())}
-    ${sec('C. 業務經營分類','候選分類，尚未定案',execCategoryHtml())}
-    ${sec('D. 部門 × 業務','資料模型示意',execMatrixHtml())}
-    ${sec('E. 週會決策紀錄','唯讀',execDecisionsHtml())}
+    ${sec('B. 季度目標對照','目標 vs 實際',execQuarterHtml())}
+    ${sec('C. 剩餘月份營收門檻','要達到淨利目標，還要做多少營收',execCalcHtml())}
+    ${sec('D. 業務線 × 目標','依預算通路看營收進度',execBizLineHtml())}
+    ${sec('E. 經營風險與待決策事項','由現有專案資料自動整理；無法可靠判斷的標示待人工確認',execRiskHtml())}
+    ${sec('F. 新機會評估','同事一起評分，由你決定',execOppHtml())}
     ${EXEC?`<div class="small">讀取時間 ${esc(EXEC.readAt.replace('T',' ').slice(0,19))}</div>`:''}`;
 }
+
+// ================= 機會評估分數卡 =================
+// 資料在 state._opp（後端只回給評分名單內的人；每人只能改自己的分數，只有管理者能記錄決定）。
+const OPP_DIMS=[
+  {k:'fin',label:'財務貢獻',hint:'毛利與現金回收能力',who:'營運管理部'},
+  {k:'value',label:'長期商業價值',hint:'回購、續約與可複製性',who:'行銷業務部'},
+  {k:'impact',label:'社會影響力',hint:'對生產者及地方的實質效益',who:'負責人'},
+  {k:'capacity',label:'人力可負擔性',hint:'越不擠壓核心營運，分數越高',who:'實際接手的人＋營運經理'},
+  {k:'certainty',label:'成果確定性',hint:'成交、交付及收款把握度',who:'預計的專案負責人'}];
+const OPP_RESULTS=['接','不接','先驗證'];
+const OPP_LOW=1.5, OPP_SPLIT=2;
+let oppDraft={}, oppDecisionDraft={};
+function oppEnabled(){ return isObj(state._opp); }
+function oppOf(pid){ const o=oppEnabled()?state._opp[pid]:null; return isObj(o)?{scores:isObj(o.scores)?o.scores:{},decision:isObj(o.decision)?o.decision:null}:{scores:{},decision:null}; }
+function oppValid(sc){ return isObj(sc)&&OPP_DIMS.every(d=>{ const n=Number(sc[d.k]); return n>=1&&n<=5&&Math.floor(n)===n; }); }
+function oppSummary(pid){
+  const o=oppOf(pid); const names=Object.keys(o.scores).filter(n=>oppValid(o.scores[n])).sort();
+  const dims=OPP_DIMS.map(d=>{ const vals=names.map(n=>Number(o.scores[n][d.k]));
+    const avg=vals.length?vals.reduce((a,b)=>a+b,0)/vals.length:null;
+    return {...d,vals,avg,spread:vals.length?Math.max(...vals)-Math.min(...vals):0}; });
+  const total=names.length?dims.reduce((t,d)=>t+d.avg,0):null;
+  return {o,names,dims,total,low:dims.filter(d=>d.avg!==null&&d.avg<=OPP_LOW),split:dims.filter(d=>d.spread>=OPP_SPLIT)};
+}
+function showOppTab(p){ const o=oppOf(p.id); return oppEnabled()&&(getRow(p.id).status==='提案中'||!!o.decision||Object.keys(o.scores).length>0); }
+function oppRowBadge(p){
+  if(!showOppTab(p)) return '';
+  const s=oppSummary(p.id);
+  if(s.o.decision) return `<div class="small">評估：${esc(s.o.decision.result)}</div>`;
+  return `<div class="small">${s.names.length?`${s.names.length} 人評分${s.split.length||s.low.length?'・需討論':''}`:'待評分'}</div>`;
+}
+function oppPane(p){
+  const pid=String(p.id), s=oppSummary(pid), me=myName(), mine=s.o.scores[me];
+  const draft=oppDraft[pid]||(oppValid(mine)?{...mine}:{note:''});
+  const avgTxt=v=>v===null?'—':v.toFixed(1);
+  const opt=(v,cur)=>`<option value="${v}" ${Number(cur)===v?'selected':''}>${v}</option>`;
+  const table=`<div style="overflow-x:auto;"><table class="exectable"><thead><tr><th>面向</th><th>建議評分人</th><th>平均</th>${s.names.map(n=>`<th>${esc(n)}</th>`).join('')}<th></th></tr></thead><tbody>
+    ${s.dims.map(d=>`<tr><td><b>${esc(d.label)}</b><div class="small">${esc(d.hint)}</div></td><td class="small">${esc(d.who)}</td><td class="num"><b>${avgTxt(d.avg)}</b></td>${d.vals.map(v=>`<td class="num">${v}</td>`).join('')}
+      <td>${d.avg!==null&&d.avg<=OPP_LOW?'<span class="execbadge warn">偏低</span>':''}${d.spread>=OPP_SPLIT?'<span class="execbadge analysis">意見分歧</span>':''}</td></tr>`).join('')}
+    </tbody></table></div>`;
+  const notes=s.names.filter(n=>s.o.scores[n].note).map(n=>`<li><b>${esc(n)}</b>：${esc(s.o.scores[n].note)}</li>`).join('');
+  const form=`<div class="oppform">
+    <div class="secthead"><span>我的評分（${esc(me)}）</span><span class="small">1 分最不利、5 分最有利${oppValid(mine)?'・已送出，可修改':''}</span></div>
+    <div class="oppdims">${OPP_DIMS.map(d=>`<label>${esc(d.label)}<span class="small">${esc(d.hint)}</span>
+      <select ${uiEvent('change','setOppDraft',[pid,d.k],'value')}><option value="">選分數</option>${[1,2,3,4,5].map(v=>opt(v,draft[d.k])).join('')}</select></label>`).join('')}</div>
+    <label style="display:block;margin-top:8px;">一句理由（選填）<input type="text" maxlength="300" value="${esc(draft.note||'')}" placeholder="例如：客戶預算已確認，但 12 月人力很滿" ${uiEvent('change','setOppDraft',[pid,'note'],'value')} style="width:100%;"></label>
+    <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;"><button class="mini" ${uiEvent('click','saveOppScore',[pid])} ${oppValid(draft)?'':'disabled title="五個面向都要選分數"'}>${oppValid(mine)?'更新我的評分':'送出我的評分'}</button>
+      ${oppValid(mine)?`<button class="mini danger" ${uiEvent('click','withdrawOppScore',[pid])}>撤回我的評分</button>`:''}</div></div>`;
+  const dec=s.o.decision;
+  const dd=oppDecisionDraft[pid]||{result:dec?dec.result:'',reason:dec?dec.reason:''};
+  const decisionHtml=`<div class="secthead"><span>決定</span><span class="small">由管理者記錄；分數只是討論依據</span></div>
+    ${dec?`<div><span class="execbadge ${dec.result==='不接'?'warn':(dec.result==='接'?'ok':'budget')}">${esc(dec.result)}</span> ${esc(dec.reason||'')} <span class="small">— ${esc(dec.by||'')}・${relTime(dec.at)}</span></div>`:'<div class="small">尚未決定</div>'}
+    ${dec&&dec.result==='不接'&&getRow(pid).status!=='未成案'&&isAdmin()?`<div style="margin-top:6px;"><button class="mini" ${uiEvent('click','closeOppAsLost',[pid])}>把專案狀態改成「未成案」</button></div>`:''}
+    ${isAdmin()?`<div class="basicgrid" style="margin-top:8px;"><label>結果<select ${uiEvent('change','setOppDecisionDraft',[pid,'result'],'value')}><option value="">選擇</option>${OPP_RESULTS.map(r=>`<option ${dd.result===r?'selected':''}>${r}</option>`).join('')}</select></label>
+      <label style="min-width:260px;flex:1;">理由<input type="text" maxlength="500" value="${esc(dd.reason||'')}" placeholder="例如：先做一場小規模試辦，驗證需求" ${uiEvent('change','setOppDecisionDraft',[pid,'reason'],'value')}></label>
+      <label>&nbsp;<span style="display:flex;gap:6px;"><button class="mini" ${uiEvent('click','saveOppDecision',[pid])} ${OPP_RESULTS.includes(dd.result)?'':'disabled'}>記錄決定</button>${dec?`<button class="mini danger" ${uiEvent('click','clearOppDecision',[pid])}>清除</button>`:''}</span></label></div>`:''}`;
+  return `<div class="small" style="margin-bottom:8px;">每個新機會都用同樣五個問題評估，方便比較、也方便說明為什麼接或不接。這是管理討論工具，<b>不會自動決定</b>；分數「偏低」（平均 ≤ ${OPP_LOW}）或「意見分歧」（差 ${OPP_SPLIT} 分以上）的面向，週會優先討論。</div>
+    <div class="execgrid"><div class="execcard"><span class="small">評分人數</span><b>${s.names.length} 人</b></div>
+      <div class="execcard"><span class="small">平均總分</span><b>${s.total===null?'—':s.total.toFixed(1)+' / 25'}</b></div>
+      <div class="execcard"><span class="small">需要討論</span><b>${s.low.length+s.split.length} 項</b><span class="small">${[...s.low.map(d=>d.label+'偏低'),...s.split.map(d=>d.label+'意見分歧')].map(esc).join('、')||'—'}</span></div></div>
+    ${table}${notes?`<ul class="execlist" style="margin-top:6px;">${notes}</ul>`:''}
+    ${form}${decisionHtml}`;
+}
+async function writeOpp(pid,fn){
+  if(!oppEnabled()) return;
+  const all=clone(state._opp)||{}; const cur=oppOf(pid); const next={scores:{...cur.scores},decision:cur.decision};
+  fn(next);
+  if(!Object.keys(next.scores).length&&!next.decision) delete all[pid]; else all[pid]=next;
+  state._opp=all; render(); await persist();
+}
+window.setOppDraft=function(pid,k,v){
+  const mine=oppOf(pid).scores[myName()];
+  const d=oppDraft[pid]||(oppValid(mine)?{...mine}:{note:''});
+  if(k==='note') d.note=String(v||'').slice(0,300); else if(OPP_DIMS.some(x=>x.k===k)) d[k]=v===''?undefined:Number(v);
+  oppDraft[pid]=d; renderProjectView();
+};
+window.saveOppScore=async function(pid){
+  const d=oppDraft[pid]; if(!oppValid(d)) return;
+  const sc={note:String(d.note||'').slice(0,300)}; OPP_DIMS.forEach(x=>{ sc[x.k]=Number(d[x.k]); });
+  delete oppDraft[pid];
+  await writeOpp(pid,o=>{ o.scores[myName()]={...sc,at:Date.now()}; });
+};
+window.withdrawOppScore=async function(pid){
+  if(!confirm('確定撤回你的評分？')) return;
+  delete oppDraft[pid];
+  await writeOpp(pid,o=>{ delete o.scores[myName()]; });
+};
+window.setOppDecisionDraft=function(pid,k,v){
+  const dec=oppOf(pid).decision;
+  const d=oppDecisionDraft[pid]||{result:dec?dec.result:'',reason:dec?dec.reason:''};
+  d[k]=String(v||''); oppDecisionDraft[pid]=d; renderProjectView();
+};
+window.saveOppDecision=async function(pid){
+  if(!isAdmin()) return;
+  const d=oppDecisionDraft[pid]; if(!d||!OPP_RESULTS.includes(d.result)) return;
+  delete oppDecisionDraft[pid];
+  await writeOpp(pid,o=>{ o.decision={result:d.result,reason:String(d.reason||'').slice(0,500),by:myName(),at:Date.now()}; });
+};
+window.clearOppDecision=async function(pid){
+  if(!isAdmin()||!confirm('確定清除這個決定？')) return;
+  delete oppDecisionDraft[pid];
+  await writeOpp(pid,o=>{ o.decision=null; });
+};
+window.closeOppAsLost=async function(pid){
+  if(!isAdmin()) return;
+  const cur=getRow(pid); state[pid]=Object.assign({},cur,{status:'未成案'}); touch(pid); render(); await persist();
+};
+window.goToOpp=function(pid){ detailTab[pid]='opp'; window.goToProject(pid); };
+window.setBizLine=async function(pid,v){
+  if(!isAdmin()) return;
+  const cur=getRow(pid); state[pid]=Object.assign({},cur,{bizLine:BIZ_LINE_OPTIONS.includes(v)?v:null}); touch(pid); render(); await persist();
+};
 
 let oldBackend=false;
 function setHint(msg,isWarn){
@@ -2498,7 +2726,7 @@ function lockUI(preserveDraft=false){
   if(window._pendingBackup||document.getElementById('dashboardcontent').inert) clearRestoreBanner();
   backupWarning('');
   if(!preserveDraft) try{ sessionStorage.removeItem(DRAFT_KEY); }catch(e){}
-  clearExec();
+  clearExec(); oppDraft={}; oppDecisionDraft={}; execCalc={};
   ME=null; state={}; lastSynced={}; applyConfig(null); setToken('');
   expanded=new Set(); document.body.classList.add('locked'); renderLogin();
 }
@@ -3550,7 +3778,8 @@ const UI_ACTIONS=Object.freeze({
       'restoreProject','sendInbox','setDetailTab','setFilter','setFinMode','setOwnerFilter','setPriorityTab',
       'setStatusFilter','syncPaymentSubtasks','toggleAddForm','toggleAllMonths','toggleCapacityGroup',
       'toggleExpand','toggleGanttGroup','toggleInbox','toggleMonthCatTable','toggleOwnedCollab','togglePerson',
-      'toggleShowDeleted','toggleTodoExpand','undoLastDelete','withdrawInbox','refreshExec']),
+      'toggleShowDeleted','toggleTodoExpand','undoLastDelete','withdrawInbox','refreshExec',
+      'saveOppScore','withdrawOppScore','saveOppDecision','clearOppDecision','closeOppAsLost','goToOpp','resetExecCalc']),
     clearUndoToast:()=>{ document.getElementById('undotoast').innerHTML=''; },
     ignoreBackup:uiCall('ignoreBackup'),
     toggleInboxShowDone:()=>{ inboxShowDone=!inboxShowDone; renderInbox(); },
@@ -3560,7 +3789,7 @@ const UI_ACTIONS=Object.freeze({
     'setEstSlot','setExpField','setExpPaid','setField','setInvField','setInvPaid','setOwnerFilter','setProjectCat',
     'setReceiptField','setRelated','setSubtaskAssignee','setSubtaskAudience','setSubtaskDeadline','setSubtaskNote',
     'setSubtaskLink','setTaskNote','setTaskLink',
-    'setTaskAssignee','setTaskDeadline','toggleSubtask','toggleTask'])),
+    'setTaskAssignee','setTaskDeadline','toggleSubtask','toggleTask','setOppDraft','setOppDecisionDraft','setBizLine','setExecCalc'])),
   input:Object.freeze(uiCalls(['inboxType'])),
   keydown:Object.freeze({
     loginEnter:(el,ev)=>{ if(ev.key==='Enter') return window.login(); },

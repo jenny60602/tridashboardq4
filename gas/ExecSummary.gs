@@ -23,9 +23,13 @@ var EXEC_SHEET_NAME = '財務摘要';
 var EXEC_LOG_SHEET_NAME = '存取紀錄';
 var EXEC_HEADERS = ['會計年度', '截至月份', '指標代碼', '指標名稱', '期間', '預算金額', '實際金額',
   '資料來源', '資料版本', '更新日期', '確認人', '是否已結帳', '備註'];
-var EXEC_METRICS = { revenue: '營收', net_income: '稅後淨利' };
+var EXEC_METRICS = { revenue: '營收', net_income: '稅後淨利', cogs: '銷貨成本', gross_profit: '毛利', opex: '營業費用',
+  op_income: '營業淨利', nonop_income: '營業外收入', pretax: '稅前損益' };
+// 選填的第 14 欄「業務線」：空白＝全公司；其餘只接受下列名稱（與儀表板的業務線一致）。
+var EXEC_LINE_HEADER = '業務線';
+var EXEC_LINES = ['2C 零售', '2B 禮盒', '2B 專案', '2G 政府／補助'];
 var EXEC_PERIODS = { annual: '年度', month: '當月', ytd: '年初至今累計' };
-var EXEC_MAX_ROWS = 500;
+var EXEC_MAX_ROWS = 800;
 var EXEC_DECISION_SHEET_NAME = '週會決策紀錄';
 var EXEC_DECISION_HEADERS = ['討論日期', '議題', '相關專案／業務', '待決策問題', '決策結果', '負責人', '完成期限', '追蹤狀態'];
 var EXEC_DECISION_STATUSES = ['待決策', '已決策', '執行中', '已完成', '暫緩'];
@@ -89,8 +93,10 @@ function execBool_(v) {
 function execParseRows_(values) {
   if (!Array.isArray(values) || !values.length) return { rows: [], invalid: 0, headerOk: false };
   var header = values[0].map(function (h) { return String(h || '').trim(); });
-  var headerOk = EXEC_HEADERS.every(function (h, i) { return header[i] === h; });
+  var headerOk = EXEC_HEADERS.every(function (h, i) { return header[i] === h; }) &&
+    (header.length <= EXEC_HEADERS.length || header[EXEC_HEADERS.length] === '' || header[EXEC_HEADERS.length] === EXEC_LINE_HEADER);
   if (!headerOk) return { rows: [], invalid: 0, headerOk: false };
+  var hasLine = header[EXEC_HEADERS.length] === EXEC_LINE_HEADER;
   var rows = [], invalid = 0;
   values.slice(1, EXEC_MAX_ROWS + 1).forEach(function (r) {
     if (!r || r.every(function (c) { return c === '' || c === null || c === undefined; })) return;
@@ -98,17 +104,19 @@ function execParseRows_(values) {
     var metric = String(r[2] || '').trim(), period = String(r[4] || '').trim();
     var budget = execNum_(r[5]), actual = execNum_(r[6]);
     var updatedAt = execDate_(r[9]), closed = execBool_(r[11]);
+    var line = hasLine ? String(r[13] === null || r[13] === undefined ? '' : r[13]).trim() : '';
     var ok = year !== null && year !== undefined && Math.floor(year) === year && year >= 2000 && year <= 2100 &&
       month !== null && month !== undefined && Math.floor(month) === month && month >= 1 && month <= 12 &&
       Object.prototype.hasOwnProperty.call(EXEC_METRICS, metric) &&
       Object.prototype.hasOwnProperty.call(EXEC_PERIODS, period) &&
       budget !== undefined && actual !== undefined && (budget !== null || actual !== null) &&
-      updatedAt !== null && closed !== null && execText_(r[7]) !== '' && execText_(r[8]) !== '';
+      updatedAt !== null && closed !== null && execText_(r[7]) !== '' && execText_(r[8]) !== '' &&
+      (line === '' || EXEC_LINES.indexOf(line) >= 0);
     if (!ok) { invalid++; return; }
     rows.push({
       fiscalYear: year, asOfMonth: month, metric: metric, metricName: execText_(r[3], 50) || EXEC_METRICS[metric],
       period: period, budget: budget, actual: actual, source: execText_(r[7], 200), version: execText_(r[8], 100),
-      updatedAt: updatedAt, confirmedBy: execText_(r[10], 50), closed: closed, note: execText_(r[12], 300)
+      updatedAt: updatedAt, confirmedBy: execText_(r[10], 50), closed: closed, note: execText_(r[12], 300), line: line
     });
   });
   return { rows: rows, invalid: invalid, headerOk: true };
