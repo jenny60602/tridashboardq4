@@ -2249,15 +2249,16 @@ function clearExec(){
     document.querySelectorAll('.tabs button').forEach(b=>b.classList.toggle('active',b.dataset.v==='project'));
   }
 }
-const EXEC_METRIC_KEYS=['revenue','net_income'], EXEC_PERIOD_KEYS=['annual','month','ytd'];
+const EXEC_METRIC_KEYS=['revenue','net_income','cogs','gross_profit','opex','op_income','nonop_income','pretax'], EXEC_PERIOD_KEYS=['annual','month','ytd'];
 function cleanExecRows(rows){
   const num=v=>v===null?null:(typeof v==='number'&&isFinite(v)?v:undefined);
   return (Array.isArray(rows)?rows:[]).filter(r=>isObj(r)&&Number.isInteger(r.fiscalYear)&&Number.isInteger(r.asOfMonth)&&
     r.asOfMonth>=1&&r.asOfMonth<=12&&EXEC_METRIC_KEYS.includes(r.metric)&&EXEC_PERIOD_KEYS.includes(r.period)&&
-    num(r.budget)!==undefined&&num(r.actual)!==undefined&&isISODate(r.updatedAt)&&typeof r.closed==='boolean')
+    num(r.budget)!==undefined&&num(r.actual)!==undefined&&isISODate(r.updatedAt)&&typeof r.closed==='boolean'&&
+    (r.line===undefined||r.line===''||BIZ_LINES.includes(r.line)))
     .map(r=>({fiscalYear:r.fiscalYear,asOfMonth:r.asOfMonth,metric:r.metric,metricName:String(r.metricName||''),
       period:r.period,budget:r.budget,actual:r.actual,source:String(r.source||''),version:String(r.version||''),
-      updatedAt:r.updatedAt,confirmedBy:String(r.confirmedBy||''),closed:r.closed,note:String(r.note||'')}));
+      updatedAt:r.updatedAt,confirmedBy:String(r.confirmedBy||''),closed:r.closed,note:String(r.note||''),line:String(r.line||'')}));
 }
 const EXEC_DECISION_STATUS_KEYS=['待決策','已決策','執行中','已完成','暫緩'];
 function cleanExecDecisions(rows){
@@ -2301,8 +2302,8 @@ async function loadExec(ctx=authContext()){
   }
 }
 window.refreshExec=function(){ if(execAllowed) loadExec(); };
-function execPick(rows,metric,period){
-  return rows.filter(r=>r.metric===metric&&r.period===period)
+function execPick(rows,metric,period,needActual){
+  return rows.filter(r=>r.metric===metric&&r.period===period&&!r.line&&(!needActual||r.actual!==null))
     .sort((a,b)=>b.asOfMonth-a.asOfMonth||b.updatedAt.localeCompare(a.updatedAt))[0]||null;
 }
 function execMoney(v){ return v===null||v===undefined?'未提供':Number(v).toLocaleString('zh-TW',{minimumFractionDigits:0,maximumFractionDigits:2}); }
@@ -2313,13 +2314,14 @@ function execNetProgress(target,ytd){
   return {rate:ytd/target, gap:Math.round((target-ytd)*100)/100};
 }
 // 經營分析類別（候選）：只是分析用的分組，不是組織部門，也不改原本的專案分類。
-// 業務線：分析與訂目標用的標籤，不是組織部門。預設依專案分類推得，管理者可逐案調整（bizLine）。
-const BIZ_LINES=['企業與通路','零售與消費者','專案與公共服務'];
-const BIZ_LINE_OPTIONS=['企業與通路','零售與消費者','專案與公共服務','專案與公共服務・市集'];
-const CAT_TO_LINE={'2C零售':'零售與消費者','禮盒':'企業與通路','企業':'企業與通路','好田':'企業與通路','政府':'專案與公共服務','中介':'專案與公共服務','委外':'專案與公共服務'};
+// 業務線：與年度預算的通路一致（2C／2B 禮盒／2B 專案／2G），用來對照目標；不是組織部門。
+// 預設依專案分類推得，管理者可逐案調整（bizLine）。
+const BIZ_LINES=['2C 零售','2B 禮盒','2B 專案','2G 政府／補助'];
+const BIZ_LINE_OPTIONS=BIZ_LINES;
+const CAT_TO_LINE={'2C零售':'2C 零售','禮盒':'2B 禮盒','企業':'2B 專案','好田':'2B 專案','中介':'2B 專案','委外':'2B 專案','政府':'2G 政府／補助'};
 const BIZ_LINE_PENDING='待分類';
-function bizLineTag(p){ const r=getRow(p.id); return BIZ_LINE_OPTIONS.includes(r.bizLine)?r.bizLine:(CAT_TO_LINE[p.cat]||BIZ_LINE_PENDING); }
-function bizLineOf(p){ return bizLineTag(p).split('・')[0]; }
+function bizLineTag(p){ const r=getRow(p.id); return BIZ_LINES.includes(r.bizLine)?r.bizLine:(CAT_TO_LINE[p.cat]||BIZ_LINE_PENDING); }
+function bizLineOf(p){ return bizLineTag(p); }
 const EXEC_KIND={confirmed:['已確認數據','ok'],budget:['預算版本','budget'],unverified:['未確認數據','warn'],missing:['尚未取得','missing'],analysis:['管理分析','analysis']};
 function execBadge(kind){ const k=EXEC_KIND[kind]; return `<span class="execbadge ${k[1]}">${k[0]}</span>`; }
 function execRowKind(r){ return r.period==='annual'&&r.budget!==null&&r.actual===null ? 'budget' : (r.closed&&r.confirmedBy ? 'confirmed' : 'unverified'); }
@@ -2336,7 +2338,7 @@ function execGoalsHtml(){
   const y=years[0]||new Date().getFullYear(), rows=EXEC.rows.filter(r=>r.fiscalYear===y);
   const revBudget=execPick(rows,'revenue','annual'), target=execPick(rows,'net_income','annual');
   const ytdRev=execPick(rows,'revenue','ytd'), ytdNet=execPick(rows,'net_income','ytd');
-  const mRev=execPick(rows,'revenue','month'), mNet=execPick(rows,'net_income','month');
+  const mRev=execPick(rows,'revenue','month',true), mNet=execPick(rows,'net_income','month',true);
   const prog=execNetProgress(target&&target.budget, ytdNet&&ytdNet.actual);
   const pct=prog?Math.max(0,Math.min(100,prog.rate*100)):0;
   const unverified=[ytdRev,ytdNet,mRev,mNet].filter(r=>r&&execRowKind(r)==='unverified');
@@ -2413,18 +2415,133 @@ function execOppHtml(){
   return `<div class="small">每人依五個面向各打 1–5 分；這裡只整理結果，不自動決定。「偏低」＝平均 ≤ 1.5，「意見分歧」＝最高與最低差 2 分以上，週會優先討論這些。</div>
     <div style="overflow-x:auto;"><table class="exectable"><thead><tr><th>機會</th><th>評分</th><th>平均總分</th><th>需要討論</th><th>決定</th></tr></thead><tbody>${rows}</tbody></table></div>`;
 }
+// ---- 月份資料：同一指標、同一業務線、同一月份，預算與實際各取更新日期最新的一列 ----
+function execYear(){ const ys=[...new Set((EXEC?EXEC.rows:[]).map(r=>r.fiscalYear))].sort((a,b)=>b-a); return ys[0]||new Date().getFullYear(); }
+function execMonthly(metric,line=''){
+  const y=execYear(), out={};
+  for(let m=1;m<=12;m++) out[m]={budget:null,actual:null};
+  const rows=(EXEC?EXEC.rows:[]).filter(r=>r.fiscalYear===y&&r.period==='month'&&r.metric===metric&&(r.line||'')===line)
+    .sort((a,b)=>a.updatedAt.localeCompare(b.updatedAt));
+  rows.forEach(r=>{ const o=out[r.asOfMonth]; if(r.budget!==null) o.budget=r.budget; if(r.actual!==null) o.actual=r.actual; });
+  return out;
+}
+function execHasMonthly(metric,line=''){ const s=execMonthly(metric,line); return Object.values(s).some(o=>o.budget!==null||o.actual!==null); }
+function execLastActualMonth(){ const s=execMonthly('revenue'); let last=0; for(let m=1;m<=12;m++) if(s[m].actual!==null) last=m; return last; }
+const sumMonths=(series,ms,field)=>{ let t=0, any=false; ms.forEach(m=>{ const v=series[m][field]; if(v!==null){ t+=v; any=true; } }); return any?t:null; };
+const rangeM=(a,b)=>{ const o=[]; for(let m=a;m<=b;m++) o.push(m); return o; };
+const QUARTERS=[[1,3],[4,6],[7,9],[10,12]];
+const pctTxt=v=>v===null||!isFinite(v)?'—':(v*100).toFixed(1)+'%';
+const kTh=v=>v===null||v===undefined?'—':Math.round(v/1000).toLocaleString('zh-TW');
+function execQuarterHtml(){
+  if(!EXEC) return `<div class="small">${NOT_LINKED}</div>`;
+  if(!execHasMonthly('revenue')) return `<div class="small">${NOT_LINKED}：財務摘要尚未匯入每月的預算與實際數（期間 month）。</div>`;
+  const last=execLastActualMonth();
+  const metrics=[['revenue','營業收入'],['gross_profit','毛利'],['gm','毛利率'],['opex','營業費用'],['nonop_income','營業外收入（補助）'],['pretax','稅前損益']];
+  const S=Object.fromEntries(['revenue','gross_profit','opex','nonop_income','pretax'].map(m=>[m,execMonthly(m)]));
+  const cell=(m,ms)=>{
+    const actMs=ms.filter(x=>x<=last);
+    if(m==='gm'){
+      const bt=sumMonths(S.revenue,ms,'budget'), bg=sumMonths(S.gross_profit,ms,'budget');
+      const at=sumMonths(S.revenue,actMs,'actual'), ag=sumMonths(S.gross_profit,actMs,'actual');
+      const b=bt&&bg!==null?bg/bt:null, a=at&&ag!==null&&actMs.length?ag/at:null;
+      return `<td class="num">${pctTxt(b)}</td><td class="num">${actMs.length?`<b style="color:${a!==null&&b!==null&&a<b?'var(--warn)':'var(--ink)'}">${pctTxt(a)}</b>`:'—'}</td>`;
+    }
+    const b=sumMonths(S[m],ms,'budget'), a=actMs.length?sumMonths(S[m],actMs,'actual'):null;
+    const bPart=actMs.length&&actMs.length<ms.length?sumMonths(S[m],actMs,'budget'):b;
+    const good=m==='opex'?(a!==null&&bPart!==null&&a<=bPart):(a!==null&&bPart!==null&&a>=bPart);
+    const rate=a!==null&&bPart?a/bPart:null;
+    return `<td class="num">${kTh(b)}</td><td class="num">${a===null?'—':`<b style="color:${good?'var(--ok)':'var(--warn)'}">${kTh(a)}</b>${rate!==null&&bPart>0?`<div class="small">${Math.round(rate*100)}%</div>`:''}`}</td>`;
+  };
+  const cols=[...QUARTERS.map(([a,b],i)=>[`Q${i+1}`,rangeM(a,b)]),[`1–${last||12} 月累計`,rangeM(1,last||12)],['全年',rangeM(1,12)]];
+  return `<div class="small">單位：仟元。每格左邊是<b>目標</b>、右邊是<b>實際</b>（綠色＝達標、紅色＝未達；費用則是低於目標為綠）。季度未過完時，達成率只和已過月份的目標比。資料截至 ${last?last+' 月':'—'}。</div>
+    <div style="overflow-x:auto;"><table class="exectable"><thead><tr><th rowspan="2">項目</th>${cols.map(c=>`<th colspan="2" style="text-align:center;">${c[0]}${c[1].some(m=>m>last)&&c[1].some(m=>m<=last)?'<span class="small">（進行中）</span>':''}</th>`).join('')}</tr>
+      <tr>${cols.map(()=>`<th class="num">目標</th><th class="num">實際</th>`).join('')}</tr></thead>
+    <tbody>${metrics.map(([m,l])=>`<tr><td><b>${l}</b></td>${cols.map(c=>cell(m,c[1])).join('')}</tr>`).join('')}</tbody></table></div>
+    <div class="small" style="margin-top:4px;">${execBadge('budget')} 目標＝匯入的年度預算按月拆分　${execBadge('unverified')} 實際數未結帳或未填確認人前僅供參考</div>`;
+}
+// ---- 剩餘月份營收門檻試算 ----
+let execCalc={};
+function execCalcDefaults(){
+  const last=execLastActualMonth(), rest=rangeM(last+1,12), done=rangeM(1,last);
+  const rev=execMonthly('revenue'), gp=execMonthly('gross_profit'), op=execMonthly('opex'), pt=execMonthly('pretax'), no=execMonthly('nonop_income');
+  const rows=EXEC.rows.filter(r=>r.fiscalYear===execYear());
+  const net=execPick(rows,'net_income','annual'), pre=execPick(rows,'pretax','annual');
+  const netTarget=net&&net.budget!==null?net.budget:null;
+  const taxFromBudget=netTarget!==null&&pre&&pre.budget?1-netTarget/pre.budget:null;
+  const ytdRev=sumMonths(rev,done,'actual'), ytdGp=sumMonths(gp,done,'actual'), ytdOp=sumMonths(op,done,'actual'), ytdPt=sumMonths(pt,done,'actual');
+  return {last,rest,netTarget,taxFromBudget,ytdPt,
+    tax:taxFromBudget!==null&&taxFromBudget>=0&&taxFromBudget<0.5?taxFromBudget:0.2,
+    gm:ytdRev&&ytdGp!==null?ytdGp/ytdRev:null,
+    opex:ytdOp!==null&&last?ytdOp/last*rest.length:null,
+    opexBudget:sumMonths(op,rest,'budget'), nonopBudget:sumMonths(no,rest,'budget'), revBudget:sumMonths(rev,rest,'budget'),
+    nonop:0};
+}
+// 純計算：剩餘月份稅前要賺多少，以及需要的營收。缺任何一個就不算。
+function execRequiredRevenue({netTarget,tax,ytdPt,gm,opex,nonop}){
+  if([netTarget,tax,ytdPt,gm,opex,nonop].some(v=>typeof v!=='number'||!isFinite(v))||!(gm>0)||!(tax<1)) return null;
+  const pretaxNeeded=netTarget/(1-tax), restPretax=pretaxNeeded-ytdPt;
+  return {pretaxNeeded,restPretax,revenue:Math.max(0,(restPretax+opex-nonop)/gm)};
+}
+function execPipeline(ms,line){
+  let t=0; FINP().forEach(p=>{ if(line&&bizLineOf(p)!==line) return; if(!line&&revGroup(p)==='nonop') return;
+    projectEntries(p,'rev').forEach(e=>{ if(ms.includes(e.m)) t+=e.amount; }); });
+  return t;
+}
+function execCalcHtml(){
+  if(!EXEC||!execHasMonthly('revenue')) return `<div class="small">${NOT_LINKED}：需要每月的實際數與年度淨利目標。</div>`;
+  const d=execCalcDefaults();
+  if(!d.rest.length) return `<div class="small">全年實際數都已匯入，不需要試算。</div>`;
+  const v={...d,...execCalc};
+  const r=execRequiredRevenue(v);
+  const pipe=execPipeline(d.rest,'');
+  const inp=(key,val,step,suffix,hint)=>`<label>${hint}<span style="display:flex;gap:4px;align-items:center;"><input type="number" step="${step}" value="${val===null?'':esc(String(val))}" ${uiEvent('change','setExecCalc',[key],'numberOrNull')} style="width:130px;">${suffix}</span></label>`;
+  const restLabel=`${d.rest[0]}–${d.rest[d.rest.length-1]} 月`;
+  return `<div class="small">用 1–${d.last} 月的實際數回推：要達到全年稅後淨利目標，${restLabel}至少要做多少營收。下面三個假設可以自己改，改完立刻重算；不會存檔，也不會影響其他人。</div>
+    <div class="execgrid">
+      <div class="execcard"><span class="small">全年稅後淨利目標</span><b>${execMoney(v.netTarget)}</b><span class="small">換算稅前 ${r?execMoney(Math.round(r.pretaxNeeded)):'—'}（稅率 ${pctTxt(v.tax)}${d.taxFromBudget!==null?'，依預算':'，假設'}）</span></div>
+      <div class="execcard"><span class="small">1–${d.last} 月稅前損益（實際）</span><b>${execMoney(v.ytdPt)}</b>${execBadge('unverified')}</div>
+      <div class="execcard"><span class="small">${restLabel}稅前還要賺</span><b>${r?execMoney(Math.round(r.restPretax)):NOT_LINKED}</b>${execBadge('analysis')}</div>
+    </div>
+    <div class="basicgrid">
+      ${inp('gm',v.gm===null?null:Math.round(v.gm*1000)/10,'0.1','%',`毛利率（1–${d.last} 月平均 ${pctTxt(d.gm)}）`)}
+      ${inp('opex',v.opex===null?null:Math.round(v.opex),'1000','元',`${restLabel}營業費用（照 1–${d.last} 月平均；原預算 ${kTh(d.opexBudget)} 仟）`)}
+      ${inp('nonop',v.nonop,'1000','元',`${restLabel}確定入帳的補助（原預算 ${kTh(d.nonopBudget)} 仟）`)}
+      <label>&nbsp;<button class="mini" ${uiEvent('click','resetExecCalc',[])}>回到預設</button></label>
+    </div>
+    <div class="execgrid">
+      <div class="execcard" style="border-color:var(--accent);"><span class="small">${restLabel}營收至少要</span><b>${r?execMoney(Math.round(r.revenue)):NOT_LINKED}</b>
+        <span class="small">${r?`每月約 ${execMoney(Math.round(r.revenue/d.rest.length))}・原預算 ${execMoney(d.revBudget)}`:'請填毛利率、費用與補助'}</span>${execBadge('analysis')}</div>
+      <div class="execcard"><span class="small">儀表板上${restLabel}的專案預估營收</span><b>${execMoney(Math.round(pipe))}</b><span class="small">不含政府補助類、未成案；含提案中以外的預估</span></div>
+      <div class="execcard"><span class="small">缺口</span><b style="color:${r&&pipe>=r.revenue?'var(--ok)':'var(--warn)'}">${r?execMoney(Math.round(Math.max(0,r.revenue-pipe))):'—'}</b><span class="small">${r?(pipe>=r.revenue?'目前的專案預估已足夠':'還要再找的營收'):''}</span></div>
+    </div>
+    <div class="small">${r&&v.gm>0?`規則：補助少 10 萬或費用多 10 萬，營收就要多做約 ${execMoney(Math.round(100000/v.gm))}；毛利率每高 1 個百分點，需要的營收約少 ${execMoney(Math.round(r.revenue-(r.restPretax+v.opex-v.nonop)/(v.gm+0.01)))}。`:''}算法：營收 × 毛利率 − 費用 ＋ 補助 ＝ 剩餘月份要賺的稅前損益。</div>`;
+}
+window.setExecCalc=function(key,val){
+  if(!['gm','opex','nonop'].includes(key)) return;
+  if(val===null||!isFinite(val)) delete execCalc[key]; else execCalc[key]=key==='gm'?val/100:val;
+  renderExecView();
+};
+window.resetExecCalc=function(){ execCalc={}; renderExecView(); };
 function execBizLineHtml(){
+  const last=EXEC?execLastActualMonth():0, done=rangeM(1,last), rest=rangeM(last+1,12);
   const groups=[...BIZ_LINES,BIZ_LINE_PENDING];
-  const stat=Object.fromEntries(groups.map(g=>[g,{prop:0,open:0,done:0,lost:0,est:0,estN:0,all:0,market:0}]));
+  const stat=Object.fromEntries(groups.map(g=>[g,{prop:0,open:0,all:0}]));
   ALLP.forEach(p=>{ const g=stat[bizLineOf(p)]||stat[BIZ_LINE_PENDING], st=getRow(p.id).status; g.all++;
-    if(bizLineTag(p).includes('市集')) g.market++;
-    if(st==='提案中') g.prop++; else if(st==='已完成') g.done++; else if(st==='未成案') g.lost++; else g.open++;
-    if(finOK(p)&&countsForForecast(p)){ g.est+=Number(getEstRev(p)||0); g.estN++; } });
-  const rows=groups.filter(g=>g!==BIZ_LINE_PENDING||stat[g].all).map(g=>{ const x=stat[g];
-    return `<tr><td><b>${esc(g)}</b>${x.market?`<div class="small">含市集 ${x.market} 案</div>`:''}</td><td class="num">${x.prop}</td><td class="num">${x.open}</td><td class="num">${x.done}</td><td class="num">${x.lost}</td><td class="num">${x.estN?execMoney(x.est):'—'}</td></tr>`; }).join('');
-  return `<div class="small">業務線是看「錢從哪裡來」的分類：企業與通路、零售與消費者、專案與公共服務。預設依專案分類推得，管理者可在專案「基本資料」逐案調整。</div>
-    <div style="overflow-x:auto;"><table class="exectable"><thead><tr><th>業務線</th><th>提案中</th><th>執行中</th><th>已完成</th><th>未成案</th><th>專案預估收入</th></tr></thead><tbody>${rows}</tbody></table></div>
-    <div class="small" style="margin-top:4px;">${execBadge('analysis')} 「專案預估收入」是各專案自填的預估加總（不含未成案），<b>不是</b>已認列營收；會計口徑的業務線營收尚未匯入。除了營收，也請一起看這條線有沒有在帶動其他線（例如市集是研發試驗場）。</div>`;
+    if(st==='提案中') g.prop++; else if(!CLOSED_STATUSES.includes(st)) g.open++; });
+  const yr=EXEC?EXEC.rows.filter(r=>r.fiscalYear===execYear()):[];
+  const rows=groups.filter(g=>g!==BIZ_LINE_PENDING||stat[g].all).map(g=>{
+    const x=stat[g], s=g===BIZ_LINE_PENDING?null:execMonthly('revenue',g), has=s&&Object.values(s).some(o=>o.budget!==null||o.actual!==null);
+    const annual=has?sumMonths(s,rangeM(1,12),'budget'):null, ytd=has&&last?sumMonths(s,done,'actual'):null, ytdB=has&&last?sumMonths(s,done,'budget'):null;
+    const restB=has?sumMonths(s,rest,'budget'):null, pipe=g===BIZ_LINE_PENDING?null:execPipeline(rest,g);
+    const cogs=yr.find(r=>r.metric==='cogs'&&r.period==='annual'&&r.line===g&&r.budget!==null);
+    const gmT=cogs&&annual?1-cogs.budget/annual:null;
+    return `<tr><td><b>${esc(g)}</b></td><td class="num">${kTh(annual)}</td>
+      <td class="num">${ytd===null?'—':`<b style="color:${ytdB!==null&&ytd>=ytdB?'var(--ok)':'var(--warn)'}">${kTh(ytd)}</b>${ytdB?`<div class="small">${Math.round(ytd/ytdB*100)}%</div>`:''}`}</td>
+      <td class="num">${kTh(restB)}</td><td class="num">${pipe===null?'—':`<b style="color:${restB!==null&&pipe>=restB?'var(--ok)':'var(--warn)'}">${kTh(pipe)}</b>`}</td>
+      <td class="num">${pctTxt(gmT)}</td><td class="num">${x.prop} / ${x.open}</td></tr>`; }).join('');
+  return `<div class="small">業務線與年度預算的通路相同：2C 零售（店舖、市集、電商、活動）、2B 禮盒、2B 專案（企業、好田、中介、委外）、2G 政府／補助。單位：仟元。預設依專案分類推得，管理者可在專案「基本資料」逐案調整。</div>
+    <div style="overflow-x:auto;"><table class="exectable"><thead><tr><th>業務線</th><th class="num">全年營收目標</th><th class="num">1–${last||'?'} 月實際</th><th class="num">${rest.length?`${rest[0]}–12 月目標`:'剩餘目標'}</th><th class="num">儀表板預估（同期間）</th><th class="num">毛利率目標</th><th class="num">提案中／執行中</th></tr></thead><tbody>${rows}</tbody></table></div>
+    <div class="small" style="margin-top:4px;">${execBadge('analysis')} 「儀表板預估」是各專案自填、預計在這段期間認列的收入（只含你看得到財務欄位的專案），<b>不是</b>已認列營收。2G 的會計目標多半列在營業外收入。除了營收，也請一起看這條線有沒有在帶動其他線（例如市集是研發試驗場）。</div>`;
 }
 function renderExecView(){
   const box=document.getElementById('view');
@@ -2435,9 +2552,11 @@ function renderExecView(){
       <button class="mini" ${uiEvent('click','refreshExec',[])}>${execLoading?'讀取中…':'重新讀取'}</button></div>
     ${execMsg?`<div class="execwarn">${esc(execMsg)}</div>`:''}
     ${sec('A. 年度經營目標','財務數字來自受保護的財務摘要',execGoalsHtml())}
-    ${sec('B. 經營風險與待決策事項','由現有專案資料自動整理；無法可靠判斷的標示待人工確認',execRiskHtml())}
-    ${sec('C. 新機會評估','同事一起評分，由你決定',execOppHtml())}
-    ${sec('D. 業務線','依業務線看案量與預估',execBizLineHtml())}
+    ${sec('B. 季度目標對照','目標 vs 實際',execQuarterHtml())}
+    ${sec('C. 剩餘月份營收門檻','要達到淨利目標，還要做多少營收',execCalcHtml())}
+    ${sec('D. 業務線 × 目標','依預算通路看營收進度',execBizLineHtml())}
+    ${sec('E. 經營風險與待決策事項','由現有專案資料自動整理；無法可靠判斷的標示待人工確認',execRiskHtml())}
+    ${sec('F. 新機會評估','同事一起評分，由你決定',execOppHtml())}
     ${EXEC?`<div class="small">讀取時間 ${esc(EXEC.readAt.replace('T',' ').slice(0,19))}</div>`:''}`;
 }
 
@@ -2607,7 +2726,7 @@ function lockUI(preserveDraft=false){
   if(window._pendingBackup||document.getElementById('dashboardcontent').inert) clearRestoreBanner();
   backupWarning('');
   if(!preserveDraft) try{ sessionStorage.removeItem(DRAFT_KEY); }catch(e){}
-  clearExec(); oppDraft={}; oppDecisionDraft={};
+  clearExec(); oppDraft={}; oppDecisionDraft={}; execCalc={};
   ME=null; state={}; lastSynced={}; applyConfig(null); setToken('');
   expanded=new Set(); document.body.classList.add('locked'); renderLogin();
 }
@@ -3660,7 +3779,7 @@ const UI_ACTIONS=Object.freeze({
       'setStatusFilter','syncPaymentSubtasks','toggleAddForm','toggleAllMonths','toggleCapacityGroup',
       'toggleExpand','toggleGanttGroup','toggleInbox','toggleMonthCatTable','toggleOwnedCollab','togglePerson',
       'toggleShowDeleted','toggleTodoExpand','undoLastDelete','withdrawInbox','refreshExec',
-      'saveOppScore','withdrawOppScore','saveOppDecision','clearOppDecision','closeOppAsLost','goToOpp']),
+      'saveOppScore','withdrawOppScore','saveOppDecision','clearOppDecision','closeOppAsLost','goToOpp','resetExecCalc']),
     clearUndoToast:()=>{ document.getElementById('undotoast').innerHTML=''; },
     ignoreBackup:uiCall('ignoreBackup'),
     toggleInboxShowDone:()=>{ inboxShowDone=!inboxShowDone; renderInbox(); },
@@ -3670,7 +3789,7 @@ const UI_ACTIONS=Object.freeze({
     'setEstSlot','setExpField','setExpPaid','setField','setInvField','setInvPaid','setOwnerFilter','setProjectCat',
     'setReceiptField','setRelated','setSubtaskAssignee','setSubtaskAudience','setSubtaskDeadline','setSubtaskNote',
     'setSubtaskLink','setTaskNote','setTaskLink',
-    'setTaskAssignee','setTaskDeadline','toggleSubtask','toggleTask','setOppDraft','setOppDecisionDraft','setBizLine'])),
+    'setTaskAssignee','setTaskDeadline','toggleSubtask','toggleTask','setOppDraft','setOppDecisionDraft','setBizLine','setExecCalc'])),
   input:Object.freeze(uiCalls(['inboxType'])),
   keydown:Object.freeze({
     loginEnter:(el,ev)=>{ if(ev.key==='Enter') return window.login(); },

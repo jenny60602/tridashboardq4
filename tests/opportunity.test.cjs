@@ -84,8 +84,9 @@ test('GAS: people outside the list cannot write; admins record and clear decisio
 test('GAS: business line accepts only the listed values', () => {
   const g = gas();
   assert.equal(g.cleanBizLine_(''), null);
-  assert.equal(g.cleanBizLine_('企業與通路'), '企業與通路');
-  assert.equal(g.cleanBizLine_('專案與公共服務・市集'), '專案與公共服務・市集');
+  assert.equal(g.cleanBizLine_('2B 專案'), '2B 專案');
+  assert.equal(g.cleanBizLine_('2G 政府／補助'), '2G 政府／補助');
+  assert.equal(g.cleanBizLine_('企業與通路'), undefined, 'old line names are refused');
   assert.equal(g.cleanBizLine_('<script>'), undefined);
 });
 
@@ -180,11 +181,11 @@ test('browser: the admin records a decision, closes a declined opportunity and s
 
   await page.locator('[data-ui-click*="setDetailTab"][data-ui-click*="\\"basic\\""]').first().click();
   const sel = page.locator('select[data-ui-change*="setBizLine"]').first();
-  assert.match(await sel.locator('option').first().innerText(), /自動：企業與通路/, '企業 maps to 企業與通路');
-  await sel.selectOption('專案與公共服務・市集');
+  assert.match(await sel.locator('option').first().innerText(), /自動：2B 專案/, '企業 maps to 2B 專案');
+  await sel.selectOption('2B 禮盒');
   await synced(page);
-  assert.equal(api.getState()['test-opportunity'].bizLine, '專案與公共服務・市集');
-  assert.equal(await page.evaluate(() => bizLineOf(getProject('test-opportunity'))), '專案與公共服務');
+  assert.equal(api.getState()['test-opportunity'].bizLine, '2B 禮盒');
+  assert.equal(await page.evaluate(() => bizLineOf(getProject('test-opportunity'))), '2B 禮盒');
   assert.equal(await page.evaluate(() => bizLineOf(getProject('test-project-1'))), '待分類', 'unknown category stays unclassified');
   assert.deepEqual(problems, []);
 });
@@ -193,7 +194,7 @@ test('browser: a non-admin cannot change the business line even by forcing a wri
   const { page, api, problems } = await open(t, 'fake-finance');
   await page.locator('[data-ui-click*="toggleExpand"][data-ui-click*="test-opportunity"]').first().click();
   assert.equal(await page.locator('select[data-ui-change*="setBizLine"]').count(), 0);
-  await page.evaluate(async () => { state['test-opportunity'] = { ...state['test-opportunity'], bizLine: '零售與消費者' }; touch('test-opportunity'); await persist(); });
+  await page.evaluate(async () => { state['test-opportunity'] = { ...state['test-opportunity'], bizLine: '2C 零售' }; touch('test-opportunity'); await persist(); });
   assert.equal(api.getState()['test-opportunity'].bizLine, undefined);
   assert.deepEqual(problems, []);
 });
@@ -205,8 +206,8 @@ test('browser: the executive view lists opportunities and business lines (fits a
   await page.waitForSelector('.execgrid');
   const text = await page.locator('#view').innerText();
   assert.match(text, /提案中、尚未決定的新機會\s*1 案\s*Synthetic Opportunity\s*1 人評分/);
-  assert.match(text, /C\. 新機會評估[\s\S]*Synthetic Opportunity[\s\S]*15\.0 \/ 25[\s\S]*人力可負擔性偏低[\s\S]*未決定/);
-  assert.match(text, /D\. 業務線[\s\S]*企業與通路\s*1\s*0\s*0\s*0/);
+  assert.match(text, /F\. 新機會評估[\s\S]*Synthetic Opportunity[\s\S]*15\.0 \/ 25[\s\S]*人力可負擔性偏低[\s\S]*未決定/);
+  assert.match(text, /D\. 業務線 × 目標[\s\S]*2B 專案[\s\S]*1 \/ 0/);
   assert.match(text, /待分類/);
   assert.doesNotMatch(text, /部門＼業務|週會決策紀錄/);
   const w = await page.evaluate(() => [document.documentElement.scrollWidth, document.documentElement.clientWidth]);

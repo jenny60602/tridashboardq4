@@ -53,8 +53,11 @@ test('GAS: rows are validated strictly; bad header rejects the whole sheet', () 
   const sheet = createFixture().execSheet;
   const parsed = ctx.execParseRows_(sheet);
   assert.equal(parsed.headerOk, true);
-  assert.equal(parsed.rows.length, 6);
-  assert.equal(parsed.invalid, 2);
+  assert.equal(parsed.rows.length, 92);   // 6 summary rows + 2 annual extras + 84 monthly rows
+  assert.equal(parsed.invalid, 3);        // bad month, unknown metric, unknown business line
+  assert.equal(parsed.rows.filter(r => r.line === '2B 專案').length, 13);
+  assert.equal(ctx.execParseRows_([sheet[0].slice(0, 13), sheet[1]]).rows.length, 1, 'the 13-column header still works');
+  assert.equal(ctx.execParseRows_([[...sheet[0].slice(0, 13), '別的欄'], sheet[1]]).headerOk, false, 'an unknown 14th column is refused');
   const ytd = parsed.rows.find(r => r.metric === 'net_income' && r.period === 'ytd' && r.asOfMonth === 9);
   assert.equal(ytd.actual, 500000); assert.equal(ytd.budget, null);
   assert.equal(ytd.updatedAt, '2026-10-02'); assert.equal(ytd.closed, true); assert.equal(ytd.confirmedBy, 'Synthetic Head');
@@ -94,7 +97,7 @@ test('GAS: execRead_ denies non-viewers, refuses the shared dashboard sheet, log
   let { ctx, logs } = gasSandbox({ props, sheets: { 'fin-sheet': { '財務摘要': sheet } } });
   assert.deepEqual({ ...ctx.execRead_({ name: 'Admin', level: 'admin' }) }, { ok: false, error: 'forbidden' });
   const ok = ctx.execRead_({ name: 'Head', level: 'none' });
-  assert.equal(ok.ok, true); assert.equal(ok.exec.rows.length, 6);
+  assert.equal(ok.ok, true); assert.equal(ok.exec.rows.length, 92);
   assert.deepEqual(JSON.parse(JSON.stringify(logs.map(r => r.slice(1)))), [['Admin', 'execRead', 'denied'], ['Head', 'execRead', 'ok']]);
 
   ({ ctx } = gasSandbox({ props: { EXEC_VIEWERS: '["Head"]', EXEC_SHEET_ID: 'dashboard-sheet' }, sheets: { 'dashboard-sheet': { '財務摘要': sheet } } }));
@@ -184,12 +187,23 @@ test('browser: an allowed viewer sees the annual targets; nothing is inferred', 
   assert.match(text, /9 月稅後淨利\s*300,000\s*未確認數據/);
   assert.match(text, /資料截至 2026\/09\/30/);
   assert.match(text, /2 項實際數字尚未結帳或未填確認人/);
-  assert.match(text, /2 列格式不符/);
+  assert.match(text, /3 列格式不符/);
   assert.match(text, /沒有 P0／P1／P2 優先級欄位/);
   // Sections C/D: this viewer is not on the scorecard list, so no scores are shown; business lines still are.
   assert.match(text, /提案中、尚未決定的新機會\s*0 案\s*你不在評分名單內/);
-  assert.match(text, /C\. 新機會評估[\s\S]*不在機會評估名單內/);
-  assert.match(text, /D\. 業務線[\s\S]*企業與通路/);
+  assert.match(text, /F\. 新機會評估[\s\S]*不在機會評估名單內/);
+  // B: quarterly targets vs actuals (thousands). Q1 revenue target 3,000, actual 2,700 (90%).
+  assert.match(text, /B\. 季度目標對照[\s\S]*資料截至 9 月/);
+  assert.match(text, /營業收入\s*3,000\s*2,700\s*90%/);
+  assert.match(text, /毛利率\s*40\.0%\s*33\.3%/);
+  // C: remaining-months revenue threshold from Jan–Sep actuals.
+  const need = await page.evaluate(() => { const d = execCalcDefaults(); return [d.last, d.rest.join(','), Math.round(execRequiredRevenue(d).revenue)]; });
+  assert.deepEqual(need, [9, '10,11,12', 4720556]);
+  assert.match(text, /10–12 月營收至少要\s*4,720,556/);
+  assert.match(text, /1–9 月稅前損益（實際）\s*495,000/);
+  // D: business lines against their targets.
+  assert.match(text, /2B 專案\s*7,200\s*4,500\s*83%\s*1,800\s*[\d,—]+\s*40\.0%/);
+  assert.match(text, /2C 零售\s*4,800\s*4,050\s*113%/);
   assert.doesNotMatch(text, /部門＼業務|週會決策紀錄|Synthetic topic/, 'old sections C–E removed');
   // Finance-summary data only ever arrives in the execRead reply.
   const carriers = bodies.filter(b => MARKERS.some(m => b.includes(m)));

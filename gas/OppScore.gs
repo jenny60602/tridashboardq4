@@ -20,7 +20,7 @@
 var OPP_DIMS = ['fin', 'value', 'impact', 'capacity', 'certainty'];
 var OPP_RESULTS = ['接', '不接', '先驗證'];
 var OPP_SAFE_ID = /^[A-Za-z0-9_-]{1,64}$/;
-var BIZ_LINES = ['企業與通路', '零售與消費者', '專案與公共服務', '專案與公共服務・市集'];
+var BIZ_LINES = ['2C 零售', '2B 禮盒', '2B 專案', '2G 政府／補助']; // 與年度預算的通路一致
 
 function oppScorers_() {
   return oppParseScorers_(PropertiesService.getScriptProperties().getProperty('OPP_SCORERS'));
