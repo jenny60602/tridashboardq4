@@ -185,11 +185,12 @@ test('browser: an allowed viewer sees the annual targets; nothing is inferred', 
   assert.match(text, /資料截至 2026\/09\/30/);
   assert.match(text, /2 項實際數字尚未結帳或未填確認人/);
   assert.match(text, /2 列格式不符/);
-  assert.match(text, /需要主管決策\s*1 項\s*Synthetic topic A/);
   assert.match(text, /沒有 P0／P1／P2 優先級欄位/);
-  assert.match(text, /部門＼業務/);
-  assert.match(text, /Synthetic topic B[\s\S]*執行中/);
-  assert.match(text, /有 1 列格式不符，已略過/);
+  // Sections C/D: this viewer is not on the scorecard list, so no scores are shown; business lines still are.
+  assert.match(text, /提案中、尚未決定的新機會\s*0 案\s*你不在評分名單內/);
+  assert.match(text, /C\. 新機會評估[\s\S]*不在機會評估名單內/);
+  assert.match(text, /D\. 業務線[\s\S]*企業與通路/);
+  assert.doesNotMatch(text, /部門＼業務|週會決策紀錄|Synthetic topic/, 'old sections C–E removed');
   // Finance-summary data only ever arrives in the execRead reply.
   const carriers = bodies.filter(b => MARKERS.some(m => b.includes(m)));
   assert.ok(carriers.length >= 1 && carriers.every(b => b.includes('"exec"')));

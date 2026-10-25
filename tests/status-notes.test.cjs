@@ -41,7 +41,7 @@ test('browser: six statuses; 未成案 counts as closed, 提案中 is kept out o
   await synced(page);
   assert.equal(api.getState()['test-project-1'].status, '提案中', 'server accepted the new status');
   assert.ok(await q4() < before, 'proposal revenue left out of the Q4 forecast');
-  await page.waitForSelector('text=提案中 1 案（未計入營收預估）');
+  await page.waitForSelector('text=提案中 2 案（未計入營收預估）');
   assert.equal(await page.evaluate(() => isClosed(getProject('test-project-1'))), false, 'proposal still gets reminders');
 
   await page.locator('select[data-ui-change*="\\"status\\""][data-ui-change*="test-project-1"]').first().selectOption('未成案');

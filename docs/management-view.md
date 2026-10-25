@@ -2,6 +2,8 @@
 
 狀態：**開發預覽，未合併、未部署**。分支 `feature/management-dashboard-preview`，追蹤 Issue #22。
 
+> 2026/10 更新：「業務經營分類」「部門 × 業務」「週會決策紀錄」三區已移除，改為「新機會評估」與「業務線」，見 [opportunity-scorecard.md](opportunity-scorecard.md)。下文保留原設計供參考。
+
 本文件只描述程式與資料結構。白名單名稱、財務摘要試算表 ID、任何財務數字都不放在這個公開儲存庫。
 
 ## 1. 權限設計

@@ -232,6 +232,9 @@ tr.rowopen td:first-child{box-shadow:inset 4px 0 0 var(--accent2);}
 .execcard{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 12px;}
 .execcard b{display:block;font-size:1.25rem;margin:2px 0;}
 .execcard .small{color:var(--sub);}
+.oppform{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin:12px 0;}
+.oppdims{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;}
+.oppdims label{display:flex;flex-direction:column;gap:2px;}
 .execbar{height:10px;border-radius:5px;background:var(--line);overflow:hidden;margin-top:6px;}
 .execbar span{display:block;height:100%;background:var(--accent);}
 .execwarn{border-left:4px solid var(--warn);background:rgba(155,44,29,.06);padding:8px 10px;border-radius:6px;margin:8px 0;font-size:.82rem;}
@@ -482,7 +485,7 @@ function rowDefaults(r0){
     tasks:r.tasks||{}, subtasks:r.subtasks||{}, custom:r.custom||[], receipts:r.receipts||[],
     audienceOptions:(r.audienceOptions&&r.audienceOptions.length)?r.audienceOptions:["攤商","消費者","客戶","內部"],
     catOverride:r.catOverride||null, deleted:!!r.deleted,
-    invoices:r.invoices||[], costLink:r.costLink||"", relatedParty:!!r.relatedParty, expenses:r.expenses||[]};
+    invoices:r.invoices||[], costLink:r.costLink||"", relatedParty:!!r.relatedParty, expenses:r.expenses||[], bizLine:r.bizLine||null};
 }
 function isStaff(n){return TEAM_STAFF.includes(n);}
 function isVendor(n){ return !!n && !TEAM.includes(n); }
@@ -1640,6 +1643,7 @@ function detailRow(p){
       <label style="max-width:420px;">專案名稱<input type="text" value="${esc(getName(p))}" ${uiEvent('change','saveName',[String(p.id)],'value')}></label>
       ${isAdmin()?`<label>類別<select ${uiEvent('change','setProjectCat',[String(p.id)],'value')}>${[...new Set([...allCats(),p.cat])].map(c=>`<option value="${esc(c)}" ${c===p.cat?'selected':''}>${esc(c)}</option>`).join('')}<option value="__new__">＋ 新增類別…</option></select></label>
       <label>&nbsp;<button class="mini danger" ${uiEvent('click','deleteProject',[String(p.id)])} style="white-space:nowrap;">🗑 刪除專案</button></label>`:''}
+      ${isAdmin()?`<label title="看「錢從哪裡來」的分類；預設依專案分類推得">業務線<select ${uiEvent('change','setBizLine',[String(p.id)],'value')}><option value="" ${r.bizLine?'':'selected'}>自動：${esc(CAT_TO_LINE[p.cat]||BIZ_LINE_PENDING)}</option>${BIZ_LINE_OPTIONS.map(b=>`<option ${r.bizLine===b?'selected':''}>${esc(b)}</option>`).join('')}</select></label>`:`<label>業務線<div class="calcbox">${esc(bizLineTag(p))}</div></label>`}
     </div>
     ${sec('專案時程','專案人員填寫')}
     <div class="basicgrid">
@@ -1749,9 +1753,10 @@ function detailRow(p){
 
   const notesPane=`<textarea class="notesbox" placeholder="在這裡自由記錄，例如：9/25中秋公司休假、10/9雙十連假影響交件…" ${uiEvent('change','setField',[String(p.id),'notes'],'value')}>${esc(r.notes)}</textarea>`;
 
-  const pane = tab==='tasks' ? taskPane : tab==='notes' ? notesPane : basicPane;
+  const oppOn=showOppTab(p);
+  const pane = tab==='tasks' ? taskPane : tab==='notes' ? notesPane : (tab==='opp'&&oppOn) ? oppPane(p) : basicPane;
   return `<tr class="detail"><td colspan="10"><div class="detailwrap">
-    <div class="dtabs">${tabBtn('basic','基本資料')}${tabBtn('tasks','任務與甘特圖')}${tabBtn('notes','備註')}</div>
+    <div class="dtabs">${tabBtn('basic','基本資料')}${tabBtn('tasks','任務與甘特圖')}${tabBtn('notes','備註')}${oppOn?tabBtn('opp','機會評估'):''}</div>
     ${pane}
   </div></td></tr>`;
 }
@@ -1777,7 +1782,7 @@ function renderProjectView(){
       <td class="rev"><b style="color:${marginOf(p)<0?'var(--warn)':'var(--ok)'}">${fmt(marginOf(p))}</b></td>`:`<td class="rev small" colspan="4" style="text-align:center;color:var(--sub);">🔒 僅負責人與財務可見</td>`)}
       <td>${shortDate(range.start)}–${shortDate(range.end)}<br>${taskCountBadge(p)}</td>
       <td><div class="progwrap"><div class="bar"><i style="width:${pct}%"></i></div><span class="progtxt">${tp.done}/${tp.total}</span></div></td>
-      <td><select class="status-${esc(r.status)}" ${uiEvent('change','setField',[String(p.id),'status'],'value')}>${opts}</select></td>
+      <td><select class="status-${esc(r.status)}" ${uiEvent('change','setField',[String(p.id),'status'],'value')}>${opts}</select>${oppRowBadge(p)}</td>
       <td><select style="${selStyle(r.assignee)}" ${canEditAssignee()?'':'disabled title="只有管理者可以更換負責人"'} ${uiEvent('change','setField',[String(p.id),'assignee'],'value')}>${personOpts(r.assignee)}</select></td>
     </tr>`;
     if(open) html+=detailRow(p);
@@ -2308,11 +2313,13 @@ function execNetProgress(target,ytd){
   return {rate:ytd/target, gap:Math.round((target-ytd)*100)/100};
 }
 // 經營分析類別（候選）：只是分析用的分組，不是組織部門，也不改原本的專案分類。
-const BIZ_CATS=['2C 零售','2B 企業禮盒與商品採購','2B 企業專案與永續服務','政府／公共服務與補助計畫','其他收入或待分類業務'];
-// 現有專案分類 → 候選經營分類；沒列在這裡、或意思有歧義的分類一律「待確認」，不自行決定。
-const BIZ_CAT_CANDIDATE={'2C零售':0,'禮盒':1,'企業':2,'政府':3};
-const BIZ_CAT_PENDING_NOTE={'好田':'可能屬企業永續專案或其他，待確認','中介':'可能屬企業專案或其他收入，待確認','委外':'性質不明，待確認'};
-const DEPTS=['營運部','行銷業務部','品質保證部'];
+// 業務線：分析與訂目標用的標籤，不是組織部門。預設依專案分類推得，管理者可逐案調整（bizLine）。
+const BIZ_LINES=['企業與通路','零售與消費者','專案與公共服務'];
+const BIZ_LINE_OPTIONS=['企業與通路','零售與消費者','專案與公共服務','專案與公共服務・市集'];
+const CAT_TO_LINE={'2C零售':'零售與消費者','禮盒':'企業與通路','企業':'企業與通路','好田':'企業與通路','政府':'專案與公共服務','中介':'專案與公共服務','委外':'專案與公共服務'};
+const BIZ_LINE_PENDING='待分類';
+function bizLineTag(p){ const r=getRow(p.id); return BIZ_LINE_OPTIONS.includes(r.bizLine)?r.bizLine:(CAT_TO_LINE[p.cat]||BIZ_LINE_PENDING); }
+function bizLineOf(p){ return bizLineTag(p).split('・')[0]; }
 const EXEC_KIND={confirmed:['已確認數據','ok'],budget:['預算版本','budget'],unverified:['未確認數據','warn'],missing:['尚未取得','missing'],analysis:['管理分析','analysis']};
 function execBadge(kind){ const k=EXEC_KIND[kind]; return `<span class="execbadge ${k[1]}">${k[0]}</span>`; }
 function execRowKind(r){ return r.period==='annual'&&r.budget!==null&&r.actual===null ? 'budget' : (r.closed&&r.confirmedBy ? 'confirmed' : 'unverified'); }
@@ -2353,26 +2360,7 @@ function execGoalsHtml(){
     ${execAmountCard(`${mRev?mRev.asOfMonth+' 月':'當月'}營收`,mRev,'actual')}
     ${execAmountCard(`${mNet?mNet.asOfMonth+' 月':'當月'}稅後淨利`,mNet,'actual')}
   </div>
-  <div class="small">金額均為會計口徑的摘要（每月人工匯入）。本頁不加總專案預估收入、不推算專案毛利，也不混用預估銷售額、實際收款、營業外收入。</div>`;
-}
-function execCategoryHtml(){
-  const counts={};
-  ALLP.forEach(p=>{ const c=p.cat||'（未分類）'; counts[c]=counts[c]||{all:0,open:0}; counts[c].all++; if(!isClosed(p)) counts[c].open++; });
-  const rowsHtml=Object.keys(counts).sort().map(c=>{
-    const idx=BIZ_CAT_CANDIDATE[c];
-    const cand=idx===undefined?`<span class="execbadge warn">待確認</span> <span class="small">${esc(BIZ_CAT_PENDING_NOTE[c]||'現有分類無法明確對應')}</span>`:`${esc(BIZ_CATS[idx])} <span class="execbadge analysis">建議對應</span>`;
-    return `<tr><td>${esc(c)}</td><td class="num">${counts[c].open} / ${counts[c].all}</td><td>${cand}</td></tr>`;
-  }).join('');
-  return `<div class="small">候選經營分類：${BIZ_CATS.map((b,i)=>`${i+1}. ${esc(b)}`).join('、')}。這是分析用的分類，不是組織部門，也不更改原本的專案分類。</div>
-    <div style="overflow-x:auto;"><table class="exectable"><thead><tr><th>現有專案分類</th><th>進行中／全部（案）</th><th>候選經營分類</th></tr></thead><tbody>${rowsHtml||'<tr><td colspan="3">目前沒有專案</td></tr>'}</tbody></table></div>
-    <div class="small" style="margin-top:4px;">只統計案數，不計算各分類收入；分類收入需待財務資料依經營分類整理後再匯入。</div>`;
-}
-function execMatrixHtml(){
-  return `<div class="small">部門管理人員、職責、流程與資源；業務管理客群、收入、成本與經營成果；專案是實際執行的工作。同一業務可能涉及多個部門，收入不直接歸屬單一部門。</div>
-    <div style="overflow-x:auto;"><table class="exectable"><thead><tr><th>部門＼業務</th>${BIZ_CATS.map(b=>`<th>${esc(b)}</th>`).join('')}</tr></thead><tbody>
-    ${DEPTS.map(d=>`<tr><td><b>${esc(d)}</b></td>${BIZ_CATS.map(()=>`<td class="small" style="color:var(--sub);">待定義</td>`).join('')}</tr>`).join('')}
-    </tbody></table></div>
-    <div class="small" style="margin-top:4px;">示意：每格未來可標「主責／協作／不參與」與負責窗口；目前沒有部門資料，不新增同事填報欄位。</div>`;
+  <div class="small">金額均為會計口徑的摘要（每月人工匯入）。這一區不加總專案預估收入、不推算專案毛利，也不混用預估銷售額、實際收款、營業外收入。</div>`;
 }
 function execRiskHtml(){
   const today=new Date(); today.setHours(0,0,0,0);
@@ -2395,7 +2383,7 @@ function execRiskHtml(){
   const isActive=p=>{ const r=getRange(p); return today>=new Date(r.start+"T00:00:00") && today<=new Date(r.end+"T23:59:59"); };
   const loads=[...new Set([...TEAM_STAFF,...TEAM_PARTNER])].map(n=>({n,c:open.filter(p=>isActive(p)&&(getRow(p.id).assignee===n||collaboratorsOf(p).includes(n))).length}))
     .filter(x=>x.c>0).sort((a,b)=>b.c-a.c);
-  const pending=(EXEC&&EXEC.decisions||[]).filter(d=>d.status==='待決策');
+  const pending=oppEnabled()?ALLP.filter(p=>getRow(p.id).status==='提案中'&&!oppOf(p.id).decision):[];
   const list=(arr,fn,empty,max=5)=>arr.length?`<ul class="execlist">${arr.slice(0,max).map(fn).join('')}</ul>${arr.length>max?`<div class="small">還有 ${arr.length-max} 項</div>`:''}`:`<div class="small">${empty}</div>`;
   const pj=p=>`<a href="#" ${uiEvent('click','goToProject',[String(p.id)])}>${esc(getName(p))}</a>`;
   return `<div class="execgrid">
@@ -2410,22 +2398,33 @@ function execRiskHtml(){
     <div class="execcard"><span class="small">人力負荷（目前進行中的負責＋協作案數）</span><b>${loads.length?esc(loads[0].n)+' '+loads[0].c+' 案':'—'}</b>
       ${list(loads,x=>`<li>${esc(x.n)}：${x.c} 案</li>`,'目前沒有進行中的專案')}
       <div class="small"><span class="execbadge warn">待人工確認</span> 系統沒有工時或負荷上限資料，是否過載與資源衝突需主管判斷。</div></div>
-    <div class="execcard"><span class="small">需要主管決策</span><b>${pending.length} 項</b>
-      ${list(pending,d=>`<li>${esc(d.topic)}${d.due?` <span class="small">期限 ${esc(d.due.replace(/-/g,'/'))}</span>`:''}</li>`,EXEC?'週會決策紀錄中沒有待決策事項':'尚未讀取週會決策紀錄')}</div>
+    <div class="execcard"><span class="small">提案中、尚未決定的新機會</span><b>${pending.length} 案</b>
+      ${list(pending,p=>`<li>${pj(p)} <span class="small">${Object.keys(oppOf(p.id).scores||{}).length} 人評分</span></li>`,oppEnabled()?'目前沒有':'你不在評分名單內')}</div>
   </div>`;
 }
-function execDecisionsHtml(){
-  if(!EXEC) return `<div class="small">${NOT_LINKED}</div>`;
-  const st=EXEC.decisionsStatus;
-  if(st==='missing') return `<div class="execwarn">財務摘要資料來源中尚未建立「週會決策紀錄」分頁。</div>`;
-  if(st==='bad_header') return `<div class="execwarn">「週會決策紀錄」表頭與範本不符，已拒絕讀取。</div>`;
-  const rows=EXEC.decisions.slice().sort((a,b)=>b.date.localeCompare(a.date));
-  const d=v=>v?esc(v.replace(/-/g,'/')):'—';
-  return `<div class="small">這裡追蹤「經營決策」，與上方及其他頁籤的「專案執行進度」分開。第一階段唯讀，由確認人於受保護的資料來源維護。</div>
-    ${EXEC.invalidDecisions?`<div class="execwarn">有 ${EXEC.invalidDecisions} 列格式不符，已略過。</div>`:''}
-    <div style="overflow-x:auto;"><table class="exectable"><thead><tr><th>討論日期</th><th>議題</th><th>相關專案／業務</th><th>待決策問題</th><th>決策結果</th><th>負責人</th><th>完成期限</th><th>追蹤狀態</th></tr></thead><tbody>
-    ${rows.length?rows.map(r=>`<tr><td>${d(r.date)}</td><td>${esc(r.topic)}</td><td>${esc(r.related)}</td><td>${esc(r.question)}</td><td>${r.decision?esc(r.decision):'<span class="small" style="color:var(--sub);">—</span>'}</td><td>${esc(r.owner)}</td><td>${d(r.due)}</td><td><span class="execbadge ${r.status==='待決策'?'warn':(r.status==='已完成'?'ok':'analysis')}">${esc(r.status)}</span></td></tr>`).join(''):'<tr><td colspan="8">尚無紀錄</td></tr>'}
-    </tbody></table></div>`;
+function execOppHtml(){
+  if(!oppEnabled()) return `<div class="small">${NOT_LINKED}（你不在機會評估名單內）</div>`;
+  const ps=ALLP.filter(p=>getRow(p.id).status==='提案中'||oppOf(p.id).decision||Object.keys(oppOf(p.id).scores||{}).length);
+  if(!ps.length) return `<div class="small">目前沒有提案中的新機會。專案狀態設為「提案中」後，大家就能在專案的「機會評估」分頁評分。</div>`;
+  const rows=ps.map(p=>{ const s=oppSummary(p.id), st=getRow(p.id).status;
+    const flags=[...s.low.map(d=>`<span class="execbadge warn">${esc(d.label)}偏低</span>`),...s.split.map(d=>`<span class="execbadge analysis">${esc(d.label)}意見分歧</span>`)].join(' ');
+    const dec=s.o.decision?`<span class="execbadge ${s.o.decision.result==='不接'?'warn':(s.o.decision.result==='接'?'ok':'budget')}">${esc(s.o.decision.result)}</span>`:'<span class="small">未決定</span>';
+    return `<tr><td>${`<a href="#" ${uiEvent('click','goToOpp',[String(p.id)])}>${esc(getName(p))}</a>`}<div class="small">${esc(bizLineTag(p))}・${esc(st)}</div></td><td class="num">${s.names.length} 人</td><td class="num">${s.total===null?'—':s.total.toFixed(1)+' / 25'}</td><td>${flags||'<span class="small">—</span>'}</td><td>${dec}</td></tr>`; }).join('');
+  return `<div class="small">每人依五個面向各打 1–5 分；這裡只整理結果，不自動決定。「偏低」＝平均 ≤ 1.5，「意見分歧」＝最高與最低差 2 分以上，週會優先討論這些。</div>
+    <div style="overflow-x:auto;"><table class="exectable"><thead><tr><th>機會</th><th>評分</th><th>平均總分</th><th>需要討論</th><th>決定</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+}
+function execBizLineHtml(){
+  const groups=[...BIZ_LINES,BIZ_LINE_PENDING];
+  const stat=Object.fromEntries(groups.map(g=>[g,{prop:0,open:0,done:0,lost:0,est:0,estN:0,all:0,market:0}]));
+  ALLP.forEach(p=>{ const g=stat[bizLineOf(p)]||stat[BIZ_LINE_PENDING], st=getRow(p.id).status; g.all++;
+    if(bizLineTag(p).includes('市集')) g.market++;
+    if(st==='提案中') g.prop++; else if(st==='已完成') g.done++; else if(st==='未成案') g.lost++; else g.open++;
+    if(finOK(p)&&countsForForecast(p)){ g.est+=Number(getEstRev(p)||0); g.estN++; } });
+  const rows=groups.filter(g=>g!==BIZ_LINE_PENDING||stat[g].all).map(g=>{ const x=stat[g];
+    return `<tr><td><b>${esc(g)}</b>${x.market?`<div class="small">含市集 ${x.market} 案</div>`:''}</td><td class="num">${x.prop}</td><td class="num">${x.open}</td><td class="num">${x.done}</td><td class="num">${x.lost}</td><td class="num">${x.estN?execMoney(x.est):'—'}</td></tr>`; }).join('');
+  return `<div class="small">業務線是看「錢從哪裡來」的分類：企業與通路、零售與消費者、專案與公共服務。預設依專案分類推得，管理者可在專案「基本資料」逐案調整。</div>
+    <div style="overflow-x:auto;"><table class="exectable"><thead><tr><th>業務線</th><th>提案中</th><th>執行中</th><th>已完成</th><th>未成案</th><th>專案預估收入</th></tr></thead><tbody>${rows}</tbody></table></div>
+    <div class="small" style="margin-top:4px;">${execBadge('analysis')} 「專案預估收入」是各專案自填的預估加總（不含未成案），<b>不是</b>已認列營收；會計口徑的業務線營收尚未匯入。除了營收，也請一起看這條線有沒有在帶動其他線（例如市集是研發試驗場）。</div>`;
 }
 function renderExecView(){
   const box=document.getElementById('view');
@@ -2437,11 +2436,121 @@ function renderExecView(){
     ${execMsg?`<div class="execwarn">${esc(execMsg)}</div>`:''}
     ${sec('A. 年度經營目標','財務數字來自受保護的財務摘要',execGoalsHtml())}
     ${sec('B. 經營風險與待決策事項','由現有專案資料自動整理；無法可靠判斷的標示待人工確認',execRiskHtml())}
-    ${sec('C. 業務經營分類','候選分類，尚未定案',execCategoryHtml())}
-    ${sec('D. 部門 × 業務','資料模型示意',execMatrixHtml())}
-    ${sec('E. 週會決策紀錄','唯讀',execDecisionsHtml())}
+    ${sec('C. 新機會評估','同事一起評分，由你決定',execOppHtml())}
+    ${sec('D. 業務線','依業務線看案量與預估',execBizLineHtml())}
     ${EXEC?`<div class="small">讀取時間 ${esc(EXEC.readAt.replace('T',' ').slice(0,19))}</div>`:''}`;
 }
+
+// ================= 機會評估分數卡 =================
+// 資料在 state._opp（後端只回給評分名單內的人；每人只能改自己的分數，只有管理者能記錄決定）。
+const OPP_DIMS=[
+  {k:'fin',label:'財務貢獻',hint:'毛利與現金回收能力',who:'營運管理部'},
+  {k:'value',label:'長期商業價值',hint:'回購、續約與可複製性',who:'行銷業務部'},
+  {k:'impact',label:'社會影響力',hint:'對生產者及地方的實質效益',who:'負責人'},
+  {k:'capacity',label:'人力可負擔性',hint:'越不擠壓核心營運，分數越高',who:'實際接手的人＋營運經理'},
+  {k:'certainty',label:'成果確定性',hint:'成交、交付及收款把握度',who:'預計的專案負責人'}];
+const OPP_RESULTS=['接','不接','先驗證'];
+const OPP_LOW=1.5, OPP_SPLIT=2;
+let oppDraft={}, oppDecisionDraft={};
+function oppEnabled(){ return isObj(state._opp); }
+function oppOf(pid){ const o=oppEnabled()?state._opp[pid]:null; return isObj(o)?{scores:isObj(o.scores)?o.scores:{},decision:isObj(o.decision)?o.decision:null}:{scores:{},decision:null}; }
+function oppValid(sc){ return isObj(sc)&&OPP_DIMS.every(d=>{ const n=Number(sc[d.k]); return n>=1&&n<=5&&Math.floor(n)===n; }); }
+function oppSummary(pid){
+  const o=oppOf(pid); const names=Object.keys(o.scores).filter(n=>oppValid(o.scores[n])).sort();
+  const dims=OPP_DIMS.map(d=>{ const vals=names.map(n=>Number(o.scores[n][d.k]));
+    const avg=vals.length?vals.reduce((a,b)=>a+b,0)/vals.length:null;
+    return {...d,vals,avg,spread:vals.length?Math.max(...vals)-Math.min(...vals):0}; });
+  const total=names.length?dims.reduce((t,d)=>t+d.avg,0):null;
+  return {o,names,dims,total,low:dims.filter(d=>d.avg!==null&&d.avg<=OPP_LOW),split:dims.filter(d=>d.spread>=OPP_SPLIT)};
+}
+function showOppTab(p){ const o=oppOf(p.id); return oppEnabled()&&(getRow(p.id).status==='提案中'||!!o.decision||Object.keys(o.scores).length>0); }
+function oppRowBadge(p){
+  if(!showOppTab(p)) return '';
+  const s=oppSummary(p.id);
+  if(s.o.decision) return `<div class="small">評估：${esc(s.o.decision.result)}</div>`;
+  return `<div class="small">${s.names.length?`${s.names.length} 人評分${s.split.length||s.low.length?'・需討論':''}`:'待評分'}</div>`;
+}
+function oppPane(p){
+  const pid=String(p.id), s=oppSummary(pid), me=myName(), mine=s.o.scores[me];
+  const draft=oppDraft[pid]||(oppValid(mine)?{...mine}:{note:''});
+  const avgTxt=v=>v===null?'—':v.toFixed(1);
+  const opt=(v,cur)=>`<option value="${v}" ${Number(cur)===v?'selected':''}>${v}</option>`;
+  const table=`<div style="overflow-x:auto;"><table class="exectable"><thead><tr><th>面向</th><th>建議評分人</th><th>平均</th>${s.names.map(n=>`<th>${esc(n)}</th>`).join('')}<th></th></tr></thead><tbody>
+    ${s.dims.map(d=>`<tr><td><b>${esc(d.label)}</b><div class="small">${esc(d.hint)}</div></td><td class="small">${esc(d.who)}</td><td class="num"><b>${avgTxt(d.avg)}</b></td>${d.vals.map(v=>`<td class="num">${v}</td>`).join('')}
+      <td>${d.avg!==null&&d.avg<=OPP_LOW?'<span class="execbadge warn">偏低</span>':''}${d.spread>=OPP_SPLIT?'<span class="execbadge analysis">意見分歧</span>':''}</td></tr>`).join('')}
+    </tbody></table></div>`;
+  const notes=s.names.filter(n=>s.o.scores[n].note).map(n=>`<li><b>${esc(n)}</b>：${esc(s.o.scores[n].note)}</li>`).join('');
+  const form=`<div class="oppform">
+    <div class="secthead"><span>我的評分（${esc(me)}）</span><span class="small">1 分最不利、5 分最有利${oppValid(mine)?'・已送出，可修改':''}</span></div>
+    <div class="oppdims">${OPP_DIMS.map(d=>`<label>${esc(d.label)}<span class="small">${esc(d.hint)}</span>
+      <select ${uiEvent('change','setOppDraft',[pid,d.k],'value')}><option value="">選分數</option>${[1,2,3,4,5].map(v=>opt(v,draft[d.k])).join('')}</select></label>`).join('')}</div>
+    <label style="display:block;margin-top:8px;">一句理由（選填）<input type="text" maxlength="300" value="${esc(draft.note||'')}" placeholder="例如：客戶預算已確認，但 12 月人力很滿" ${uiEvent('change','setOppDraft',[pid,'note'],'value')} style="width:100%;"></label>
+    <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;"><button class="mini" ${uiEvent('click','saveOppScore',[pid])} ${oppValid(draft)?'':'disabled title="五個面向都要選分數"'}>${oppValid(mine)?'更新我的評分':'送出我的評分'}</button>
+      ${oppValid(mine)?`<button class="mini danger" ${uiEvent('click','withdrawOppScore',[pid])}>撤回我的評分</button>`:''}</div></div>`;
+  const dec=s.o.decision;
+  const dd=oppDecisionDraft[pid]||{result:dec?dec.result:'',reason:dec?dec.reason:''};
+  const decisionHtml=`<div class="secthead"><span>決定</span><span class="small">由管理者記錄；分數只是討論依據</span></div>
+    ${dec?`<div><span class="execbadge ${dec.result==='不接'?'warn':(dec.result==='接'?'ok':'budget')}">${esc(dec.result)}</span> ${esc(dec.reason||'')} <span class="small">— ${esc(dec.by||'')}・${relTime(dec.at)}</span></div>`:'<div class="small">尚未決定</div>'}
+    ${dec&&dec.result==='不接'&&getRow(pid).status!=='未成案'&&isAdmin()?`<div style="margin-top:6px;"><button class="mini" ${uiEvent('click','closeOppAsLost',[pid])}>把專案狀態改成「未成案」</button></div>`:''}
+    ${isAdmin()?`<div class="basicgrid" style="margin-top:8px;"><label>結果<select ${uiEvent('change','setOppDecisionDraft',[pid,'result'],'value')}><option value="">選擇</option>${OPP_RESULTS.map(r=>`<option ${dd.result===r?'selected':''}>${r}</option>`).join('')}</select></label>
+      <label style="min-width:260px;flex:1;">理由<input type="text" maxlength="500" value="${esc(dd.reason||'')}" placeholder="例如：先做一場小規模試辦，驗證需求" ${uiEvent('change','setOppDecisionDraft',[pid,'reason'],'value')}></label>
+      <label>&nbsp;<span style="display:flex;gap:6px;"><button class="mini" ${uiEvent('click','saveOppDecision',[pid])} ${OPP_RESULTS.includes(dd.result)?'':'disabled'}>記錄決定</button>${dec?`<button class="mini danger" ${uiEvent('click','clearOppDecision',[pid])}>清除</button>`:''}</span></label></div>`:''}`;
+  return `<div class="small" style="margin-bottom:8px;">每個新機會都用同樣五個問題評估，方便比較、也方便說明為什麼接或不接。這是管理討論工具，<b>不會自動決定</b>；分數「偏低」（平均 ≤ ${OPP_LOW}）或「意見分歧」（差 ${OPP_SPLIT} 分以上）的面向，週會優先討論。</div>
+    <div class="execgrid"><div class="execcard"><span class="small">評分人數</span><b>${s.names.length} 人</b></div>
+      <div class="execcard"><span class="small">平均總分</span><b>${s.total===null?'—':s.total.toFixed(1)+' / 25'}</b></div>
+      <div class="execcard"><span class="small">需要討論</span><b>${s.low.length+s.split.length} 項</b><span class="small">${[...s.low.map(d=>d.label+'偏低'),...s.split.map(d=>d.label+'意見分歧')].map(esc).join('、')||'—'}</span></div></div>
+    ${table}${notes?`<ul class="execlist" style="margin-top:6px;">${notes}</ul>`:''}
+    ${form}${decisionHtml}`;
+}
+async function writeOpp(pid,fn){
+  if(!oppEnabled()) return;
+  const all=clone(state._opp)||{}; const cur=oppOf(pid); const next={scores:{...cur.scores},decision:cur.decision};
+  fn(next);
+  if(!Object.keys(next.scores).length&&!next.decision) delete all[pid]; else all[pid]=next;
+  state._opp=all; render(); await persist();
+}
+window.setOppDraft=function(pid,k,v){
+  const mine=oppOf(pid).scores[myName()];
+  const d=oppDraft[pid]||(oppValid(mine)?{...mine}:{note:''});
+  if(k==='note') d.note=String(v||'').slice(0,300); else if(OPP_DIMS.some(x=>x.k===k)) d[k]=v===''?undefined:Number(v);
+  oppDraft[pid]=d; renderProjectView();
+};
+window.saveOppScore=async function(pid){
+  const d=oppDraft[pid]; if(!oppValid(d)) return;
+  const sc={note:String(d.note||'').slice(0,300)}; OPP_DIMS.forEach(x=>{ sc[x.k]=Number(d[x.k]); });
+  delete oppDraft[pid];
+  await writeOpp(pid,o=>{ o.scores[myName()]={...sc,at:Date.now()}; });
+};
+window.withdrawOppScore=async function(pid){
+  if(!confirm('確定撤回你的評分？')) return;
+  delete oppDraft[pid];
+  await writeOpp(pid,o=>{ delete o.scores[myName()]; });
+};
+window.setOppDecisionDraft=function(pid,k,v){
+  const dec=oppOf(pid).decision;
+  const d=oppDecisionDraft[pid]||{result:dec?dec.result:'',reason:dec?dec.reason:''};
+  d[k]=String(v||''); oppDecisionDraft[pid]=d; renderProjectView();
+};
+window.saveOppDecision=async function(pid){
+  if(!isAdmin()) return;
+  const d=oppDecisionDraft[pid]; if(!d||!OPP_RESULTS.includes(d.result)) return;
+  delete oppDecisionDraft[pid];
+  await writeOpp(pid,o=>{ o.decision={result:d.result,reason:String(d.reason||'').slice(0,500),by:myName(),at:Date.now()}; });
+};
+window.clearOppDecision=async function(pid){
+  if(!isAdmin()||!confirm('確定清除這個決定？')) return;
+  delete oppDecisionDraft[pid];
+  await writeOpp(pid,o=>{ o.decision=null; });
+};
+window.closeOppAsLost=async function(pid){
+  if(!isAdmin()) return;
+  const cur=getRow(pid); state[pid]=Object.assign({},cur,{status:'未成案'}); touch(pid); render(); await persist();
+};
+window.goToOpp=function(pid){ detailTab[pid]='opp'; window.goToProject(pid); };
+window.setBizLine=async function(pid,v){
+  if(!isAdmin()) return;
+  const cur=getRow(pid); state[pid]=Object.assign({},cur,{bizLine:BIZ_LINE_OPTIONS.includes(v)?v:null}); touch(pid); render(); await persist();
+};
 
 let oldBackend=false;
 function setHint(msg,isWarn){
@@ -2498,7 +2607,7 @@ function lockUI(preserveDraft=false){
   if(window._pendingBackup||document.getElementById('dashboardcontent').inert) clearRestoreBanner();
   backupWarning('');
   if(!preserveDraft) try{ sessionStorage.removeItem(DRAFT_KEY); }catch(e){}
-  clearExec();
+  clearExec(); oppDraft={}; oppDecisionDraft={};
   ME=null; state={}; lastSynced={}; applyConfig(null); setToken('');
   expanded=new Set(); document.body.classList.add('locked'); renderLogin();
 }
@@ -3550,7 +3659,8 @@ const UI_ACTIONS=Object.freeze({
       'restoreProject','sendInbox','setDetailTab','setFilter','setFinMode','setOwnerFilter','setPriorityTab',
       'setStatusFilter','syncPaymentSubtasks','toggleAddForm','toggleAllMonths','toggleCapacityGroup',
       'toggleExpand','toggleGanttGroup','toggleInbox','toggleMonthCatTable','toggleOwnedCollab','togglePerson',
-      'toggleShowDeleted','toggleTodoExpand','undoLastDelete','withdrawInbox','refreshExec']),
+      'toggleShowDeleted','toggleTodoExpand','undoLastDelete','withdrawInbox','refreshExec',
+      'saveOppScore','withdrawOppScore','saveOppDecision','clearOppDecision','closeOppAsLost','goToOpp']),
     clearUndoToast:()=>{ document.getElementById('undotoast').innerHTML=''; },
     ignoreBackup:uiCall('ignoreBackup'),
     toggleInboxShowDone:()=>{ inboxShowDone=!inboxShowDone; renderInbox(); },
@@ -3560,7 +3670,7 @@ const UI_ACTIONS=Object.freeze({
     'setEstSlot','setExpField','setExpPaid','setField','setInvField','setInvPaid','setOwnerFilter','setProjectCat',
     'setReceiptField','setRelated','setSubtaskAssignee','setSubtaskAudience','setSubtaskDeadline','setSubtaskNote',
     'setSubtaskLink','setTaskNote','setTaskLink',
-    'setTaskAssignee','setTaskDeadline','toggleSubtask','toggleTask'])),
+    'setTaskAssignee','setTaskDeadline','toggleSubtask','toggleTask','setOppDraft','setOppDecisionDraft','setBizLine'])),
   input:Object.freeze(uiCalls(['inboxType'])),
   keydown:Object.freeze({
     loginEnter:(el,ev)=>{ if(ev.key==='Enter') return window.login(); },

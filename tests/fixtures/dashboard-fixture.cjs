@@ -15,6 +15,8 @@ const USERS = [
 // Stand-in for the EXEC_VIEWERS script property and the separate finance-summary sheet.
 // Every number below is invented for tests and has no relation to any real company figure.
 const EXEC_VIEWERS = ['Synthetic Head', 'Synthetic Ops Lead'];
+// Stand-in for the OPP_SCORERS script property (admins may always score).
+const OPP_SCORERS = ['Synthetic Finance', 'Synthetic Owner', 'Synthetic Head'];
 const EXEC_SHEET = [
   ['會計年度', '截至月份', '指標代碼', '指標名稱', '期間', '預算金額', '實際金額', '資料來源', '資料版本', '更新日期', '確認人', '是否已結帳', '備註'],
   [2026, 12, 'revenue', '營收', 'annual', 12000000.5, '', '合成年度預算', 'TEST-BUDGET-v1', '2026/06/01', '', '否', ''],
@@ -39,6 +41,7 @@ const CONFIG = {
   projects: [
     { id: 'test-project-1', cat: 'Test', name: 'Synthetic Project One', months: [10, 11] },
     { id: 'test-project-2', cat: 'Synthetic', name: 'Synthetic Project Two <b>"quoted"</b>', months: [11, 12] },
+    { id: 'test-opportunity', cat: '企業', name: 'Synthetic Opportunity', months: [12] },
   ],
   team: {
     staffG1: ['Synthetic Admin', 'Synthetic Finance'],
@@ -77,6 +80,17 @@ const STATE = {
     custom: ['Synthetic preparation'], audienceOptions: ['Test'],
     estPlan: [{ month: 11, amount: 4000 }, { month: 12, amount: 4000 }],
   },
+  'test-opportunity': {
+    status: '提案中', assignee: 'Synthetic Owner', notes: 'Synthetic new opportunity.',
+    startDate: '2026-12-01', endDate: '2026-12-31', estOverride: 5000, custom: ['Synthetic pitch'],
+  },
+  // Invented scores for the opportunity scorecard.
+  _opp: {
+    'test-opportunity': {
+      scores: { 'Synthetic Finance': { fin: 4, value: 2, impact: 5, capacity: 1, certainty: 3, note: 'Synthetic reason', at: 1 } },
+      decision: null,
+    },
+  },
   _fin: {
     'test-project-1': { rev: 12000, plan: [6000, 6000, 0, 0] },
     'test-project-2': { rev: 8000, plan: [0, 0, 4000, 4000] },
@@ -84,6 +98,6 @@ const STATE = {
 };
 
 const clone = value => JSON.parse(JSON.stringify(value));
-function createFixture() { return clone({ config: CONFIG, state: STATE, users: USERS, execViewers: EXEC_VIEWERS, execSheet: EXEC_SHEET, execDecisions: EXEC_DECISIONS }); }
+function createFixture() { return clone({ config: CONFIG, state: STATE, users: USERS, execViewers: EXEC_VIEWERS, execSheet: EXEC_SHEET, execDecisions: EXEC_DECISIONS, oppScorers: OPP_SCORERS }); }
 
 module.exports = { createFixture };
