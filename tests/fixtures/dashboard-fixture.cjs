@@ -7,6 +7,31 @@ const USERS = [
   { name: 'Synthetic Finance', level: 'finance', code: 'fake-finance' },
   { name: 'Synthetic Owner', level: 'owner', code: 'fake-owner' },
   { name: 'Synthetic Member', level: 'none', code: 'fake-member' },
+  // Executive-view test users: an ordinary level each, access comes only from EXEC_VIEWERS below.
+  { name: 'Synthetic Head', level: 'owner', code: 'fake-head' },
+  { name: 'Synthetic Ops Lead', level: 'none', code: 'fake-ops' },
+];
+
+// Stand-in for the EXEC_VIEWERS script property and the separate finance-summary sheet.
+// Every number below is invented for tests and has no relation to any real company figure.
+const EXEC_VIEWERS = ['Synthetic Head', 'Synthetic Ops Lead'];
+const EXEC_SHEET = [
+  ['會計年度', '截至月份', '指標代碼', '指標名稱', '期間', '預算金額', '實際金額', '資料來源', '資料版本', '更新日期', '確認人', '是否已結帳', '備註'],
+  [2026, 12, 'revenue', '營收', 'annual', 12000000.5, '', '合成年度預算', 'TEST-BUDGET-v1', '2026/06/01', '', '否', ''],
+  [2026, 12, 'net_income', '稅後淨利', 'annual', 800000.25, '', '合成年度預算', 'TEST-BUDGET-v1', '2026/06/01', '', '否', ''],
+  [2026, 9, 'revenue', '營收', 'month', '', 1500000, '合成月報', 'TEST-2026-09', '2026/10/02', '', '否', ''],
+  [2026, 9, 'net_income', '稅後淨利', 'month', '', 300000, '合成月報', 'TEST-2026-09', '2026/10/02', '', '否', ''],
+  [2026, 9, 'net_income', '稅後淨利', 'ytd', '', 500000, '合成月報', 'TEST-2026-09', '2026/10/02', 'Synthetic Head', '是', ''],
+  [2026, 8, 'net_income', '稅後淨利', 'ytd', '', 200000, '合成月報', 'TEST-2026-08', '2026/09/02', '', '否', 'older row, must not be picked'],
+  [2026, 13, 'revenue', '營收', 'month', '', 1, '壞資料', 'TEST-BAD', '2026/10/02', '', '否', 'invalid month'],
+  ['x', 9, 'unknown_metric', '?', 'month', '', 1, '壞資料', 'TEST-BAD', '2026/10/02', '', '否', 'invalid row'],
+];
+const EXEC_DECISIONS = [
+  ['討論日期', '議題', '相關專案／業務', '待決策問題', '決策結果', '負責人', '完成期限', '追蹤狀態'],
+  ['2026/10/20', 'Synthetic topic A', 'Synthetic Project One', 'Synthetic question needing a call?', '', 'Synthetic Head', '2026/10/31', '待決策'],
+  ['2026/10/13', 'Synthetic topic B', '2B 企業專案與永續服務', 'Synthetic question B', 'Synthetic decision B', 'Synthetic Ops Lead', '2026/10/27', '執行中'],
+  ['2026/10/06', 'Synthetic topic C', '', 'Synthetic question C', 'Synthetic decision C', 'Synthetic Head', '', '已完成'],
+  ['not a date', 'Bad row', '', '', '', '', '', '待決策'],
 ];
 
 // Same shape as the GAS v10 `config` (projects, team, people).
@@ -59,6 +84,6 @@ const STATE = {
 };
 
 const clone = value => JSON.parse(JSON.stringify(value));
-function createFixture() { return clone({ config: CONFIG, state: STATE, users: USERS }); }
+function createFixture() { return clone({ config: CONFIG, state: STATE, users: USERS, execViewers: EXEC_VIEWERS, execSheet: EXEC_SHEET, execDecisions: EXEC_DECISIONS }); }
 
 module.exports = { createFixture };

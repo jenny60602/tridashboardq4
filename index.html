@@ -228,6 +228,21 @@ tr.rowopen td:first-child{box-shadow:inset 4px 0 0 var(--accent2);}
 .slottable tr.paidrow td{background:rgba(46,125,50,.07);}
 .paidcell{display:flex;align-items:center;gap:6px;white-space:nowrap;}
 .paidtag{color:#fff;background:var(--ok);padding:2px 8px;border-radius:10px;font-size:.75rem;}
+.execgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px;margin:8px 0 12px;}
+.execcard{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 12px;}
+.execcard b{display:block;font-size:1.25rem;margin:2px 0;}
+.execcard .small{color:var(--sub);}
+.execbar{height:10px;border-radius:5px;background:var(--line);overflow:hidden;margin-top:6px;}
+.execbar span{display:block;height:100%;background:var(--accent);}
+.execwarn{border-left:4px solid var(--warn);background:rgba(155,44,29,.06);padding:8px 10px;border-radius:6px;margin:8px 0;font-size:.82rem;}
+.exectable{border-collapse:collapse;width:100%;font-size:.76rem;margin-top:6px;}
+.exectable th,.exectable td{border-bottom:1px dashed var(--line);padding:4px 6px;text-align:left;vertical-align:top;}
+.exectable td.num{text-align:right;white-space:nowrap;}
+.execbadge{display:inline-block;padding:1px 7px;border-radius:9px;font-size:.68rem;margin:2px 2px 2px 0;background:#eceae4;color:#6b6b63;}
+.execbadge.ok{background:#dfe9df;color:#2e5d34;} .execbadge.budget{background:#d6e6f0;color:#24506e;}
+.execbadge.warn{background:#f6d5cf;color:#9b2c1d;} .execbadge.missing{background:#eceae4;color:#6b6b63;} .execbadge.analysis{background:#e6dcf0;color:#5b3f7a;}
+.execlist{margin:4px 0 4px 18px;padding:0;font-size:.8rem;} .execlist li{margin:2px 0;}
+@media (max-width:640px){ .execgrid{grid-template-columns:1fr;} }
 </style>
 </head>
 <body class="locked">
@@ -245,6 +260,7 @@ tr.rowopen td:first-child{box-shadow:inset 4px 0 0 var(--accent2);}
   <div class="tabs">
     <button data-v="project" class="active">依專案</button>
     <button data-v="person">依人員</button>
+    <button data-v="exec" id="exectab" hidden>經營檢視</button>
   </div>
   <div id="undotoast"></div>
   <div id="synctoast" style="position:fixed;left:14px;bottom:14px;z-index:60;"></div>
@@ -894,6 +910,7 @@ function paginatedBody(key, itemsHtml, emptyMsg){
 }
 function renderPriority(){
   const box=document.getElementById("priority");
+  if(view==="exec"){ box.innerHTML=''; return; }
   const LAG_THRESHOLD=0.2;
   const list=ALLP.filter(p=>{
     const r=getRow(p.id); if(isClosedStatus(r.status)) return false;
@@ -2063,6 +2080,7 @@ function renderInner(){
   refreshAll();
   renderStats(); renderInbox(); renderPriority(); renderFilters(); renderAddForm();
   if(view==="project"){ renderProjectView(); }
+  else if(view==="exec"){ renderExecView(); }
   else { renderPersonView(); }
 }
 function render(){
@@ -2214,6 +2232,217 @@ function offerDraftIfAny(){
   else writeBackup(null);
 }
 
+// ================= 經營檢視（主管限定）=================
+// 財務摘要由 GAS 的 execRead 動作另外回傳：只有伺服器白名單內的人拿得到，
+// 不放進 state、不進分頁草稿、不進 Excel 匯出、不在背景輪詢。登出或通行證失效立即清除。
+let EXEC=null, execAllowed=false, execMsg='', execLoading=false;
+function clearExec(){
+  EXEC=null; execAllowed=false; execMsg=''; execLoading=false;
+  const t=document.getElementById('exectab'); if(t){ t.hidden=true; t.classList.remove('active'); }
+  if(view==='exec'){
+    view='project';
+    document.querySelectorAll('.tabs button').forEach(b=>b.classList.toggle('active',b.dataset.v==='project'));
+  }
+}
+const EXEC_METRIC_KEYS=['revenue','net_income'], EXEC_PERIOD_KEYS=['annual','month','ytd'];
+function cleanExecRows(rows){
+  const num=v=>v===null?null:(typeof v==='number'&&isFinite(v)?v:undefined);
+  return (Array.isArray(rows)?rows:[]).filter(r=>isObj(r)&&Number.isInteger(r.fiscalYear)&&Number.isInteger(r.asOfMonth)&&
+    r.asOfMonth>=1&&r.asOfMonth<=12&&EXEC_METRIC_KEYS.includes(r.metric)&&EXEC_PERIOD_KEYS.includes(r.period)&&
+    num(r.budget)!==undefined&&num(r.actual)!==undefined&&isISODate(r.updatedAt)&&typeof r.closed==='boolean')
+    .map(r=>({fiscalYear:r.fiscalYear,asOfMonth:r.asOfMonth,metric:r.metric,metricName:String(r.metricName||''),
+      period:r.period,budget:r.budget,actual:r.actual,source:String(r.source||''),version:String(r.version||''),
+      updatedAt:r.updatedAt,confirmedBy:String(r.confirmedBy||''),closed:r.closed,note:String(r.note||'')}));
+}
+const EXEC_DECISION_STATUS_KEYS=['待決策','已決策','執行中','已完成','暫緩'];
+function cleanExecDecisions(rows){
+  const str=v=>typeof v==='string'?v:'';
+  return (Array.isArray(rows)?rows:[]).filter(r=>isObj(r)&&isISODate(r.date)&&(r.due===''||isISODate(r.due))&&EXEC_DECISION_STATUS_KEYS.includes(r.status)&&str(r.topic))
+    .map(r=>({date:r.date,topic:str(r.topic),related:str(r.related),question:str(r.question),decision:str(r.decision),owner:str(r.owner),due:r.due,status:r.status}));
+}
+async function loadExec(ctx=authContext()){
+  if(!ctx.token) return;
+  execLoading=true;
+  try{
+    const d=await apiPost({action:'execRead',token:ctx.token},ctx);
+    if(!isCurrent(ctx)) return;
+    if(d && d.ok===true && isObj(d.exec)){
+      execAllowed=true; EXEC={rows:cleanExecRows(d.exec.rows),invalidRows:Number(d.exec.invalidRows)||0,readAt:String(d.exec.readAt||''),
+        decisions:cleanExecDecisions(d.exec.decisions),decisionsStatus:['ok','missing','bad_header'].includes(d.exec.decisionsStatus)?d.exec.decisionsStatus:'missing',
+        invalidDecisions:Number(d.exec.invalidDecisions)||0};
+      execMsg='';
+    }else if(d && d.ok===false && d.error==='forbidden'){
+      EXEC=null; execAllowed=false; execMsg='';
+    }else if(d && d.ok===false && (d.error==='exec_not_configured'||d.error==='exec_bad_header')){
+      execAllowed=true; EXEC=null;
+      execMsg=d.error==='exec_bad_header'?'財務摘要的表頭與範本不符，已拒絕讀取，請聯絡管理者。':'財務摘要資料來源尚未設定。';
+    }else if(d && d.ok===false && (d.error==='login_required'||d.error==='session_expired')){
+      clearExec();
+    }else{
+      // 後端還沒有 execRead（舊版）或其他錯誤：不顯示頁籤。
+      if(!execAllowed){ EXEC=null; }
+      execMsg=execAllowed?'暫時無法讀取財務摘要，請稍後再試。':'';
+    }
+  }catch(e){
+    if(!isCurrent(ctx)) return;
+    if(execAllowed) execMsg='暫時連不到 Google，財務摘要未更新。';
+  }finally{
+    if(isCurrent(ctx)){
+      execLoading=false;
+      const t=document.getElementById('exectab'); if(t) t.hidden=!execAllowed;
+      if(!execAllowed && view==='exec') clearExec();
+      if(view==='exec') render();
+    }
+  }
+}
+window.refreshExec=function(){ if(execAllowed) loadExec(); };
+function execPick(rows,metric,period){
+  return rows.filter(r=>r.metric===metric&&r.period===period)
+    .sort((a,b)=>b.asOfMonth-a.asOfMonth||b.updatedAt.localeCompare(a.updatedAt))[0]||null;
+}
+function execMoney(v){ return v===null||v===undefined?'未提供':Number(v).toLocaleString('zh-TW',{minimumFractionDigits:0,maximumFractionDigits:2}); }
+function execMonthEnd(y,m){ const d=new Date(y,m,0); return `${y}/${String(m).padStart(2,'0')}/${String(d.getDate()).padStart(2,'0')}`; }
+// 純計算：達成率與剩餘差額只用「年度淨利目標」與「年初至今累積淨利」，缺任何一個就不算。
+function execNetProgress(target,ytd){
+  if(typeof target!=='number'||typeof ytd!=='number'||!(target>0)) return null;
+  return {rate:ytd/target, gap:Math.round((target-ytd)*100)/100};
+}
+// 經營分析類別（候選）：只是分析用的分組，不是組織部門，也不改原本的專案分類。
+const BIZ_CATS=['2C 零售','2B 企業禮盒與商品採購','2B 企業專案與永續服務','政府／公共服務與補助計畫','其他收入或待分類業務'];
+// 現有專案分類 → 候選經營分類；沒列在這裡、或意思有歧義的分類一律「待確認」，不自行決定。
+const BIZ_CAT_CANDIDATE={'2C零售':0,'禮盒':1,'企業':2,'政府':3};
+const BIZ_CAT_PENDING_NOTE={'好田':'可能屬企業永續專案或其他，待確認','中介':'可能屬企業專案或其他收入，待確認','委外':'性質不明，待確認'};
+const DEPTS=['營運部','行銷業務部','品質保證部'];
+const EXEC_KIND={confirmed:['已確認數據','ok'],budget:['預算版本','budget'],unverified:['未確認數據','warn'],missing:['尚未取得','missing'],analysis:['管理分析','analysis']};
+function execBadge(kind){ const k=EXEC_KIND[kind]; return `<span class="execbadge ${k[1]}">${k[0]}</span>`; }
+function execRowKind(r){ return r.period==='annual'&&r.budget!==null&&r.actual===null ? 'budget' : (r.closed&&r.confirmedBy ? 'confirmed' : 'unverified'); }
+const NOT_LINKED='尚未連結資料';
+function execAmountCard(label,row,field,extra){
+  const has=row && row[field]!==null && row[field]!==undefined;
+  return `<div class="execcard"><span class="small">${label}</span><b>${has?execMoney(row[field]):NOT_LINKED}</b>
+    <div>${has?execBadge(execRowKind(row)):execBadge('missing')}</div>
+    <span class="small">${has?`${esc(row.version)}・${row.period==='annual'?`${row.fiscalYear} 全年度`:`資料截至 ${execMonthEnd(row.fiscalYear,row.asOfMonth)}`}・更新 ${esc(row.updatedAt.replace(/-/g,'/'))}`:(extra||'未匯入經確認的數字，不以專案預估收入替代')}</span></div>`;
+}
+function execGoalsHtml(){
+  if(!EXEC) return `<div class="execwarn">${esc(execMsg||(execLoading?'讀取中…':'尚無財務摘要資料。'))}</div>`;
+  const years=[...new Set(EXEC.rows.map(r=>r.fiscalYear))].sort((a,b)=>b-a);
+  const y=years[0]||new Date().getFullYear(), rows=EXEC.rows.filter(r=>r.fiscalYear===y);
+  const revBudget=execPick(rows,'revenue','annual'), target=execPick(rows,'net_income','annual');
+  const ytdRev=execPick(rows,'revenue','ytd'), ytdNet=execPick(rows,'net_income','ytd');
+  const mRev=execPick(rows,'revenue','month'), mNet=execPick(rows,'net_income','month');
+  const prog=execNetProgress(target&&target.budget, ytdNet&&ytdNet.actual);
+  const pct=prog?Math.max(0,Math.min(100,prog.rate*100)):0;
+  const unverified=[ytdRev,ytdNet,mRev,mNet].filter(r=>r&&execRowKind(r)==='unverified');
+  return `${unverified.length?`<div class="execwarn">⚠ ${unverified.length} 項實際數字尚未結帳或未填確認人，僅供參考；正式採用前請與自結損益核對。</div>`:''}
+  ${EXEC.invalidRows?`<div class="execwarn">財務摘要有 ${EXEC.invalidRows} 列格式不符，已略過未顯示。</div>`:''}
+  <div class="execgrid">
+    ${execAmountCard(`${y} 年度營業收入預算`,revBudget,'budget','尚未匯入預算')}
+    ${execAmountCard(`${y} 年度稅後淨利目標`,target,'budget','尚未匯入預算')}
+  </div>
+  <div class="execgrid">
+    ${execAmountCard(`實際營收（年初至今）`,ytdRev,'actual')}
+    ${execAmountCard(`實際稅後淨利（年初至今）`,ytdNet,'actual')}
+    <div class="execcard"><span class="small">年度淨利目標達成率</span><b>${prog?(prog.rate*100).toFixed(1)+'%':NOT_LINKED}</b>
+      <div>${prog?execBadge('analysis'):execBadge('missing')}</div>
+      ${prog?`<div class="execbar"><span style="width:${pct.toFixed(1)}%"></span></div><span class="small">累積淨利 ÷ 年度淨利目標</span>`:'<span class="small">需年度目標與年初至今實際淨利</span>'}</div>
+    <div class="execcard"><span class="small">剩餘目標差額</span><b>${prog?execMoney(prog.gap):NOT_LINKED}</b>
+      <div>${prog?execBadge('analysis'):execBadge('missing')}</div>
+      <span class="small">${prog?(prog.gap<0?'已超過年度目標':'年度淨利目標 − 累積淨利'):'需年度目標與年初至今實際淨利'}</span></div>
+  </div>
+  <div class="execgrid">
+    ${execAmountCard(`${mRev?mRev.asOfMonth+' 月':'當月'}營收`,mRev,'actual')}
+    ${execAmountCard(`${mNet?mNet.asOfMonth+' 月':'當月'}稅後淨利`,mNet,'actual')}
+  </div>
+  <div class="small">金額均為會計口徑的摘要（每月人工匯入）。本頁不加總專案預估收入、不推算專案毛利，也不混用預估銷售額、實際收款、營業外收入。</div>`;
+}
+function execCategoryHtml(){
+  const counts={};
+  ALLP.forEach(p=>{ const c=p.cat||'（未分類）'; counts[c]=counts[c]||{all:0,open:0}; counts[c].all++; if(!isClosed(p)) counts[c].open++; });
+  const rowsHtml=Object.keys(counts).sort().map(c=>{
+    const idx=BIZ_CAT_CANDIDATE[c];
+    const cand=idx===undefined?`<span class="execbadge warn">待確認</span> <span class="small">${esc(BIZ_CAT_PENDING_NOTE[c]||'現有分類無法明確對應')}</span>`:`${esc(BIZ_CATS[idx])} <span class="execbadge analysis">建議對應</span>`;
+    return `<tr><td>${esc(c)}</td><td class="num">${counts[c].open} / ${counts[c].all}</td><td>${cand}</td></tr>`;
+  }).join('');
+  return `<div class="small">候選經營分類：${BIZ_CATS.map((b,i)=>`${i+1}. ${esc(b)}`).join('、')}。這是分析用的分類，不是組織部門，也不更改原本的專案分類。</div>
+    <div style="overflow-x:auto;"><table class="exectable"><thead><tr><th>現有專案分類</th><th>進行中／全部（案）</th><th>候選經營分類</th></tr></thead><tbody>${rowsHtml||'<tr><td colspan="3">目前沒有專案</td></tr>'}</tbody></table></div>
+    <div class="small" style="margin-top:4px;">只統計案數，不計算各分類收入；分類收入需待財務資料依經營分類整理後再匯入。</div>`;
+}
+function execMatrixHtml(){
+  return `<div class="small">部門管理人員、職責、流程與資源；業務管理客群、收入、成本與經營成果；專案是實際執行的工作。同一業務可能涉及多個部門，收入不直接歸屬單一部門。</div>
+    <div style="overflow-x:auto;"><table class="exectable"><thead><tr><th>部門＼業務</th>${BIZ_CATS.map(b=>`<th>${esc(b)}</th>`).join('')}</tr></thead><tbody>
+    ${DEPTS.map(d=>`<tr><td><b>${esc(d)}</b></td>${BIZ_CATS.map(()=>`<td class="small" style="color:var(--sub);">待定義</td>`).join('')}</tr>`).join('')}
+    </tbody></table></div>
+    <div class="small" style="margin-top:4px;">示意：每格未來可標「主責／協作／不參與」與負責窗口；目前沒有部門資料，不新增同事填報欄位。</div>`;
+}
+function execRiskHtml(){
+  const today=new Date(); today.setHours(0,0,0,0);
+  const open=ALLP.filter(p=>!isClosed(p));
+  const lagging=open.map(p=>({p,li:lagInfo(p)})).filter(x=>x.li.overdue||x.li.lag>=0.2)
+    .sort((a,b)=>(a.li.overdue===b.li.overdue?b.li.lag-a.li.lag:(a.li.overdue?-1:1)));
+  const soon=[];
+  open.forEach(p=>taskList(p).forEach(tn=>{
+    const subs=materializedSubs(p.id,tn);
+    const items=subs.length?subs.map(s=>({label:`${tn}／${s.name}`,done:s.done,end:s.end})):[(()=>{const i=taskInfo(p,tn);return {label:tn,done:i.done,end:i.end};})()];
+    items.forEach(x=>{ if(x.done||!isISODate(x.end)) return; const days=Math.ceil((new Date(x.end+"T23:59:59")-today)/86400000); if(days<=7) soon.push({p,label:x.label,end:x.end,days}); });
+  }));
+  soon.sort((a,b)=>a.days-b.days);
+  const visibleFin=FINP();
+  const payRisk=[];
+  visibleFin.forEach(p=>getInvSlots(p).forEach((v,i)=>{
+    if(isIssued(v)&&!v.paid&&isISODate(v.dueDate)&&new Date(v.dueDate+"T23:59:59")<today) payRisk.push({p,label:`第 ${i+1} 期已過預計收款日未收款（${shortDate(v.dueDate)}）`});
+  }));
+  open.filter(p=>getRow(p.id).status==="待收款"&&lagInfo(p).overdue&&!payRisk.some(x=>x.p===p)).forEach(p=>payRisk.push({p,label:'待收款且已過專案結束日'}));
+  const isActive=p=>{ const r=getRange(p); return today>=new Date(r.start+"T00:00:00") && today<=new Date(r.end+"T23:59:59"); };
+  const loads=[...new Set([...TEAM_STAFF,...TEAM_PARTNER])].map(n=>({n,c:open.filter(p=>isActive(p)&&(getRow(p.id).assignee===n||collaboratorsOf(p).includes(n))).length}))
+    .filter(x=>x.c>0).sort((a,b)=>b.c-a.c);
+  const pending=(EXEC&&EXEC.decisions||[]).filter(d=>d.status==='待決策');
+  const list=(arr,fn,empty,max=5)=>arr.length?`<ul class="execlist">${arr.slice(0,max).map(fn).join('')}</ul>${arr.length>max?`<div class="small">還有 ${arr.length-max} 項</div>`:''}`:`<div class="small">${empty}</div>`;
+  const pj=p=>`<a href="#" ${uiEvent('click','goToProject',[String(p.id)])}>${esc(getName(p))}</a>`;
+  return `<div class="execgrid">
+    <div class="execcard"><span class="small">進度落後或已逾期的專案</span><b>${lagging.length} 案</b>
+      ${list(lagging,x=>`<li>${pj(x.p)} ${x.li.overdue?'<span class="execbadge warn">已逾期</span>':`<span class="small">落後 ${Math.round(x.li.lag*100)}%</span>`}</li>`,'目前沒有')}
+      <div class="small"><span class="execbadge warn">待人工確認</span> 現有資料沒有 P0／P1／P2 優先級欄位，無法判斷哪些是「高優先級」。</div></div>
+    <div class="execcard"><span class="small">7 天內到期或已逾期的任務</span><b>${soon.length} 項</b>
+      ${list(soon,x=>`<li>${pj(x.p)}：${esc(x.label)} <span class="small">${x.days<0?'已逾期':x.days+' 天內'}（${shortDate(x.end)}）</span></li>`,'目前沒有')}</div>
+    <div class="execcard"><span class="small">可能影響請款／收款</span><b>${payRisk.length} 項</b>
+      ${list(payRisk,x=>`<li>${pj(x.p)}：${esc(x.label)}</li>`,'目前沒有')}
+      <div class="small">只含你的權限看得到財務欄位的 ${visibleFin.length} 案（共 ${ALLP.length} 案）。其他可能影響請款的情況（例如結案文件未完成）待人工確認。</div></div>
+    <div class="execcard"><span class="small">人力負荷（目前進行中的負責＋協作案數）</span><b>${loads.length?esc(loads[0].n)+' '+loads[0].c+' 案':'—'}</b>
+      ${list(loads,x=>`<li>${esc(x.n)}：${x.c} 案</li>`,'目前沒有進行中的專案')}
+      <div class="small"><span class="execbadge warn">待人工確認</span> 系統沒有工時或負荷上限資料，是否過載與資源衝突需主管判斷。</div></div>
+    <div class="execcard"><span class="small">需要主管決策</span><b>${pending.length} 項</b>
+      ${list(pending,d=>`<li>${esc(d.topic)}${d.due?` <span class="small">期限 ${esc(d.due.replace(/-/g,'/'))}</span>`:''}</li>`,EXEC?'週會決策紀錄中沒有待決策事項':'尚未讀取週會決策紀錄')}</div>
+  </div>`;
+}
+function execDecisionsHtml(){
+  if(!EXEC) return `<div class="small">${NOT_LINKED}</div>`;
+  const st=EXEC.decisionsStatus;
+  if(st==='missing') return `<div class="execwarn">財務摘要資料來源中尚未建立「週會決策紀錄」分頁。</div>`;
+  if(st==='bad_header') return `<div class="execwarn">「週會決策紀錄」表頭與範本不符，已拒絕讀取。</div>`;
+  const rows=EXEC.decisions.slice().sort((a,b)=>b.date.localeCompare(a.date));
+  const d=v=>v?esc(v.replace(/-/g,'/')):'—';
+  return `<div class="small">這裡追蹤「經營決策」，與上方及其他頁籤的「專案執行進度」分開。第一階段唯讀，由確認人於受保護的資料來源維護。</div>
+    ${EXEC.invalidDecisions?`<div class="execwarn">有 ${EXEC.invalidDecisions} 列格式不符，已略過。</div>`:''}
+    <div style="overflow-x:auto;"><table class="exectable"><thead><tr><th>討論日期</th><th>議題</th><th>相關專案／業務</th><th>待決策問題</th><th>決策結果</th><th>負責人</th><th>完成期限</th><th>追蹤狀態</th></tr></thead><tbody>
+    ${rows.length?rows.map(r=>`<tr><td>${d(r.date)}</td><td>${esc(r.topic)}</td><td>${esc(r.related)}</td><td>${esc(r.question)}</td><td>${r.decision?esc(r.decision):'<span class="small" style="color:var(--sub);">—</span>'}</td><td>${esc(r.owner)}</td><td>${d(r.due)}</td><td><span class="execbadge ${r.status==='待決策'?'warn':(r.status==='已完成'?'ok':'analysis')}">${esc(r.status)}</span></td></tr>`).join(''):'<tr><td colspan="8">尚無紀錄</td></tr>'}
+    </tbody></table></div>`;
+}
+function renderExecView(){
+  const box=document.getElementById('view');
+  if(!execAllowed){ box.innerHTML=''; return; }
+  const sec=(title,sub,body)=>`<div class="priority plain" style="margin-bottom:12px;"><div class="secthead">${title}${sub?` <span class="small">${sub}</span>`:''}</div>${body}</div>`;
+  box.innerHTML=`<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
+      <span class="small">經營檢視（主管限定）・資料分類：${['confirmed','budget','unverified','missing','analysis'].map(execBadge).join(' ')}</span>
+      <button class="mini" ${uiEvent('click','refreshExec',[])}>${execLoading?'讀取中…':'重新讀取'}</button></div>
+    ${execMsg?`<div class="execwarn">${esc(execMsg)}</div>`:''}
+    ${sec('A. 年度經營目標','財務數字來自受保護的財務摘要',execGoalsHtml())}
+    ${sec('B. 經營風險與待決策事項','由現有專案資料自動整理；無法可靠判斷的標示待人工確認',execRiskHtml())}
+    ${sec('C. 業務經營分類','候選分類，尚未定案',execCategoryHtml())}
+    ${sec('D. 部門 × 業務','資料模型示意',execMatrixHtml())}
+    ${sec('E. 週會決策紀錄','唯讀',execDecisionsHtml())}
+    ${EXEC?`<div class="small">讀取時間 ${esc(EXEC.readAt.replace('T',' ').slice(0,19))}</div>`:''}`;
+}
+
 let oldBackend=false;
 function setHint(msg,isWarn){
   if(oldBackend){ msg='⚠ 後端 Apps Script 還是舊版，為了保護資料，這個頁面暫停讀寫。請先部署新版 Apps Script。'; isWarn=true; }
@@ -2269,6 +2498,7 @@ function lockUI(preserveDraft=false){
   if(window._pendingBackup||document.getElementById('dashboardcontent').inert) clearRestoreBanner();
   backupWarning('');
   if(!preserveDraft) try{ sessionStorage.removeItem(DRAFT_KEY); }catch(e){}
+  clearExec();
   ME=null; state={}; lastSynced={}; applyConfig(null); setToken('');
   expanded=new Set(); document.body.classList.add('locked'); renderLogin();
 }
@@ -2332,7 +2562,7 @@ async function reloadAfterAuthChange(){
   try{
     const data=await fetchRemote(ctx);
     state=data; lastSynced=clone(data);
-    offerDraftIfAny(); setSyncStatus('ok');
+    offerDraftIfAny(); setSyncStatus('ok'); loadExec(ctx);
   }catch(e){ console.error(e); if(isCurrent(ctx)&&authToken) setSyncStatus('fail'); }
   if(isCurrent(ctx)){ renderLogin(); render(); }
 }
@@ -2566,7 +2796,7 @@ async function loadFromSheet(){
   try{
     const data=await fetchRemote(ctx);
     state=data; lastSynced=clone(data);
-    offerDraftIfAny();
+    offerDraftIfAny(); loadExec(ctx);
     setSyncStatus('ok');
     render();
   }catch(e){
@@ -3320,7 +3550,7 @@ const UI_ACTIONS=Object.freeze({
       'restoreProject','sendInbox','setDetailTab','setFilter','setFinMode','setOwnerFilter','setPriorityTab',
       'setStatusFilter','syncPaymentSubtasks','toggleAddForm','toggleAllMonths','toggleCapacityGroup',
       'toggleExpand','toggleGanttGroup','toggleInbox','toggleMonthCatTable','toggleOwnedCollab','togglePerson',
-      'toggleShowDeleted','toggleTodoExpand','undoLastDelete','withdrawInbox']),
+      'toggleShowDeleted','toggleTodoExpand','undoLastDelete','withdrawInbox','refreshExec']),
     clearUndoToast:()=>{ document.getElementById('undotoast').innerHTML=''; },
     ignoreBackup:uiCall('ignoreBackup'),
     toggleInboxShowDone:()=>{ inboxShowDone=!inboxShowDone; renderInbox(); },
@@ -3388,7 +3618,9 @@ Object.keys(UI_ACTIONS).forEach(type=>document.addEventListener(type,dispatchUiE
 document.querySelectorAll(".tabs button").forEach(b=>b.addEventListener("click",()=>{
   if(!isAuthenticated()||window._pendingBackup) return;
   document.querySelectorAll(".tabs button").forEach(x=>x.classList.remove("active"));
+  if(b.dataset.v==="exec" && !execAllowed) return;
   b.classList.add("active"); view=b.dataset.v; if(view==="person") priorityTab="capacity"; render();
+  if(view==="exec") loadExec();
   backState=null; document.getElementById("backbtn").innerHTML="";
 }));
 
