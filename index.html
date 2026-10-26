@@ -2338,10 +2338,10 @@ function execGoalsHtml(){
   const y=years[0]||new Date().getFullYear(), rows=EXEC.rows.filter(r=>r.fiscalYear===y);
   const revBudget=execPick(rows,'revenue','annual'), target=execPick(rows,'net_income','annual');
   const ytdRev=execPick(rows,'revenue','ytd'), ytdNet=execPick(rows,'net_income','ytd');
-  const mRev=execPick(rows,'revenue','month',true), mNet=execPick(rows,'net_income','month',true);
+  const mRev=execPick(rows,'revenue','month',true), mPre=execPick(rows,'pretax','month',true);
   const prog=execNetProgress(target&&target.budget, ytdNet&&ytdNet.actual);
   const pct=prog?Math.max(0,Math.min(100,prog.rate*100)):0;
-  const unverified=[ytdRev,ytdNet,mRev,mNet].filter(r=>r&&execRowKind(r)==='unverified');
+  const unverified=[ytdRev,ytdNet,mRev,mPre].filter(r=>r&&execRowKind(r)==='unverified');
   return `${unverified.length?`<div class="execwarn">⚠ ${unverified.length} 項實際數字尚未結帳或未填確認人，僅供參考；正式採用前請與自結損益核對。</div>`:''}
   ${EXEC.invalidRows?`<div class="execwarn">財務摘要有 ${EXEC.invalidRows} 列格式不符，已略過未顯示。</div>`:''}
   <div class="execgrid">
@@ -2360,8 +2360,9 @@ function execGoalsHtml(){
   </div>
   <div class="execgrid">
     ${execAmountCard(`${mRev?mRev.asOfMonth+' 月':'當月'}營收`,mRev,'actual')}
-    ${execAmountCard(`${mNet?mNet.asOfMonth+' 月':'當月'}稅後淨利`,mNet,'actual')}
+    ${execAmountCard(`${mPre?mPre.asOfMonth+' 月':'當月'}稅前損益`,mPre,'actual')}
   </div>
+  <div class="small">單月數字會受收入與成本認列月份影響（例如成本先入帳、收入後開票），判斷趨勢請以 B 區的季度與累計為準。所得稅只在累計數字計算，所以沒有單月稅後淨利。</div>
   <div class="small">金額均為會計口徑的摘要（每月人工匯入）。這一區不加總專案預估收入、不推算專案毛利，也不混用預估銷售額、實際收款、營業外收入。</div>`;
 }
 function execRiskHtml(){
