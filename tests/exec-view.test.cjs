@@ -184,7 +184,8 @@ test('browser: an allowed viewer sees the annual targets; nothing is inferred', 
   assert.match(text, /達成率\s*62\.5%\s*管理分析/);                          // 500000 / 800000.25
   assert.match(text, /剩餘目標差額\s*300,000\.25/);
   assert.match(text, /9 月營收\s*1,500,000\s*未確認數據/);
-  assert.match(text, /9 月稅後淨利\s*300,000\s*未確認數據/);
+  assert.match(text, /9 月稅前損益\s*55,000\s*未確認數據/);
+  assert.doesNotMatch(text, /(\d+|當) 月稅後淨利/, 'no monthly after-tax figure');
   assert.match(text, /資料截至 2026\/09\/30/);
   assert.match(text, /2 項實際數字尚未結帳或未填確認人/);
   assert.match(text, /3 列格式不符/);
@@ -213,7 +214,7 @@ test('browser: an allowed viewer sees the annual targets; nothing is inferred', 
   // Budget only (no actual P&L imported yet): every actual figure says 尚未連結資料.
   await page.evaluate(() => { EXEC.rows = EXEC.rows.filter(r => r.period === 'annual'); render(); });
   const budgetOnly = await page.locator('#view .priority').first().innerText(); // section A only
-  for (const label of ['實際營收（年初至今）', '實際稅後淨利（年初至今）', '年度淨利目標達成率', '剩餘目標差額', '當月營收', '當月稅後淨利']) {
+  for (const label of ['實際營收（年初至今）', '實際稅後淨利（年初至今）', '年度淨利目標達成率', '剩餘目標差額', '當月營收', '當月稅前損益']) {
     assert.match(budgetOnly, new RegExp(label + '\\s*尚未連結資料'), label);
   }
   assert.doesNotMatch(budgetOnly, /\d+(\.\d+)?%/, 'no rate without actual data');
