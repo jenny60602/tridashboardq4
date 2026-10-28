@@ -689,6 +689,24 @@ function personAlerts(t){
   return {overdue,soon,unsplit};
 }
 function needsBreakdown(p){ return !isClosed(p) && !hasTaskBreakdown(p); }
+// 提案中的專案還沒成交，預設不算進人員排程與負荷；需要時可切換顯示。
+let showProposals=false, compareSel=[];
+function isProposal(p){ return getRow(p.id).status==='提案中'; }
+function inPeopleView(p){ return showProposals || !isProposal(p); }
+window.toggleShowProposals=function(){ showProposals=!showProposals; render(); };
+function proposalToggleHtml(){
+  const n=ALLP.filter(isProposal).length;
+  return `<button class="mini" ${uiEvent('click','toggleShowProposals',[])} title="提案還沒成交，預設不算進排程">${showProposals?'隱藏':'顯示'}提案中（${n} 件）</button>`;
+}
+// 每人提案摘要：件數＋最近一個還沒完成、有截止日的提案任務
+function proposalSummary(t){
+  const ps=ALLP.filter(p=>isProposal(p)&&getRow(p.id).assignee===t);
+  if(!ps.length) return null;
+  let next=null;
+  ps.forEach(p=>taskList(p).forEach(tn=>{ const subs=materializedSubs(p.id,tn); (subs.length?subs:[taskInfo(p,tn)]).forEach(x=>{
+    if(!x.done&&isISODate(x.end)&&(!next||x.end<next.end)) next={end:x.end,p}; }); }));
+  return {count:ps.length,next};
+}
 function whoAmIOpts(sel){
   const label=n=>ROLES[n]?`${n}｜${ROLES[n]}`:n;
   const so=TEAM_STAFF.map(x=>`<option value="${esc(x)}" ${sel===x?'selected':''}>${esc(label(x))}</option>`).join('');
@@ -1824,8 +1842,8 @@ function capacityOverviewHtml(){
   const isActive=p=>{ const r=getRange(p); return today>=new Date(r.start+"T00:00:00") && today<=new Date(r.end+"T23:59:59"); };
   const names=[...TEAM_STAFF, ...TEAM_PARTNER].filter((n,i,arr)=>arr.indexOf(n)===i);
   const groups=names.map(name=>{
-    const owned=ALLP.filter(p=>!isClosed(p) && getRow(p.id).assignee===name);
-    const collab=ALLP.filter(p=>!isClosed(p) && getRow(p.id).assignee!==name && collaboratorsOf(p).includes(name));
+    const owned=ALLP.filter(p=>!isClosed(p) && inPeopleView(p) && getRow(p.id).assignee===name);
+    const collab=ALLP.filter(p=>!isClosed(p) && inPeopleView(p) && getRow(p.id).assignee!==name && collaboratorsOf(p).includes(name));
     if(!owned.length && !collab.length) return null;
     const activeNow=owned.filter(isActive);
     const activeCollab=collab.filter(isActive);
@@ -1899,7 +1917,7 @@ function capacityOverviewHtml(){
   const weekHeaderHtml=`<div class="ganttrow ganttweekrow"><div class="ganttlabel" style="${LBL}"></div><div class="ganttbararea">${weekLabels.map(w=>`<span class="ganttweeklabel" style="left:${w.pct}%;">${w.label}</span>`).join('')}</div></div>`;
   const minWidthPx=Math.max(560, Math.round(totalDays*8));
   const legend=`<div class="small" style="margin-bottom:4px;">顏色：<span style="color:#8fb28f;">●</span>正常　<span style="color:#d3a86a;">●</span>落後　<span style="color:var(--warn);">●</span>逾期　<span style="color:var(--line);">●</span>完成　｜　實心橫桿＝負責，虛線淺色＝協作　｜　活動日：<span style="color:#2c5f7c;">●</span>負責　<span style="color:#9b7cb6;">●</span>協作</div>`;
-  return `${legend}<div class="small" style="margin-bottom:2px;">起訖：${shortDate(minStart)}–${shortDate(maxEnd)}</div>
+  return `${legend}<div class="small" style="margin-bottom:2px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">起訖：${shortDate(minStart)}–${shortDate(maxEnd)} ${proposalToggleHtml()}</div>
     <div class="gantt"><div class="ganttscroll"><div class="ganttinner" style="min-width:${minWidthPx}px;">
     <div class="gantthead">${weekHeaderHtml}</div>
     <div class="ganttbody">${rowsHtml}</div>
@@ -1907,7 +1925,7 @@ function capacityOverviewHtml(){
 }
 function personMonthlyHtml(t){
   const items=[];
-  ALLP.forEach(p=>{
+  ALLP.filter(inPeopleView).forEach(p=>{
     taskList(p).forEach(tn=>{
       const subs=materializedSubs(p.id,tn);
       const pushIt=(name,info)=>{ if(info.assignee===t && info.end){ items.push({ym:info.end.slice(0,7), date:info.end, proj:getName(p), task:name, done:info.done}); } };
@@ -1928,12 +1946,12 @@ function personMonthlyHtml(t){
   return `<div class="monthgridscroll"><div class="monthgrid">${cols}</div></div>`;
 }
 function personDetailHtml(t){
-  const owned=ALLP.filter(p=>getRow(p.id).assignee===t)
+  const owned=ALLP.filter(p=>getRow(p.id).assignee===t&&inPeopleView(p))
     .sort((a,b)=>URG_RANK[urgency(a)]-URG_RANK[urgency(b)] || new Date(getRange(a).end)-new Date(getRange(b).end));
-  const collab=ALLP.filter(p=>collaboratorsOf(p).includes(t) && getRow(p.id).assignee!==t)
+  const collab=ALLP.filter(p=>collaboratorsOf(p).includes(t) && getRow(p.id).assignee!==t && inPeopleView(p))
     .sort((a,b)=>URG_RANK[urgency(a)]-URG_RANK[urgency(b)] || new Date(getRange(a).end)-new Date(getRange(b).end));
   let myTasks=[];
-  ALLP.forEach(p=>{
+  ALLP.filter(inPeopleView).forEach(p=>{
     taskList(p).forEach((tn,idx)=>{
       const subs=materializedSubs(p.id,tn);
       if(subs.length){ subs.forEach((s,si)=>{ if(s.assignee===t) myTasks.push({p,idx,si,parent:tn,name:s.name,done:s.done,end:s.end||''}); }); }
@@ -2012,7 +2030,8 @@ function personCard(t){
   const group=isStaff(t)?'staff':'partner';
   const owned=ALLP.filter(p=>getRow(p.id).assignee===t);
   const collabOn=ALLP.filter(p=>collaboratorsOf(p).includes(t));
-  const activeOwned=owned.filter(p=>!isClosed(p));
+  const activeOwned=owned.filter(p=>!isClosed(p)&&!isProposal(p));
+  const ps=proposalSummary(t);
   let taskCount=0;
   ALLP.forEach(p=>taskList(p).forEach((tn)=>{
     const subs=materializedSubs(p.id,tn);
@@ -2033,6 +2052,7 @@ function personCard(t){
   const inbN=inboxList().filter(it=>it.to===t && inboxVisibleNow(it) && it.status==='sent').length;
   return `<div class="pcard ${group}" id="pcard-${esc(t)}" ${uiEvent('click','togglePerson',[jsStr(t)])} style="cursor:pointer;">
       <b>${esc(t)}${role?` <span class="rolelabel">・${esc(role)}</span>`:''}${inbN?` <span class="ibadge ib-sent">📥 ${inbN} 件新交辦</span>`:''}</b><span>負責 ${activeOwned.length}/${owned.length} 案・協作 ${collabOn.length} 案・${taskCount} 項任務</span>${alertHtml}${topHtml}
+      ${ps?`<div class="small" style="margin-top:5px;">💡 提案中 ${ps.count} 件${ps.next?`・最近要交：${shortDate(ps.next.end)} ${esc(getName(ps.next.p))}`:''}</div>`:''}
     </div>${open?personDetailHtml(t):''}`;
 }
 
@@ -2051,8 +2071,54 @@ function vendorCard(v){
       <span>${taskCount} 項任務</span>
     </div>`;
 }
+// ---- 人員比較：勾選 2–3 人，同一張時間軸依週並排顯示還沒完成的任務 ----
+window.toggleCompare=function(n){ const i=compareSel.indexOf(n); if(i>=0) compareSel.splice(i,1); else { if(compareSel.length>=3) compareSel.shift(); compareSel.push(n); } renderPersonView(); };
+const COMPARE_WEEKS=8;
+function compareWeeks(){
+  const d=new Date(); d.setHours(0,0,0,0); d.setDate(d.getDate()-((d.getDay()+6)%7));
+  return Array.from({length:COMPARE_WEEKS},(_,i)=>{ const s=new Date(d); s.setDate(s.getDate()+i*7); const e=new Date(s); e.setDate(e.getDate()+6);
+    const iso=x=>`${x.getFullYear()}-${pad(x.getMonth()+1)}-${pad(x.getDate())}`; return {start:iso(s),end:iso(e),label:`${s.getMonth()+1}/${s.getDate()}`}; });
+}
+// 純計算：某人在各週有哪些還沒完成的任務（依起訖日落在該週，沒有起日就看截止日），以及他負責／協作專案的活動日。
+function personWeekLoad(t,weeks){
+  const out=weeks.map(()=>({tasks:[],events:[]}));
+  ALLP.filter(p=>!isClosed(p)&&inPeopleView(p)).forEach(p=>{
+    taskList(p).forEach(tn=>{ const subs=materializedSubs(p.id,tn);
+      (subs.length?subs.map(x=>({...x,label:x.name})):[{...taskInfo(p,tn),label:tn}]).forEach(x=>{
+        if(x.done||x.assignee!==t||!isISODate(x.end)) return;
+        const st=isISODate(x.start)?x.start:x.end;
+        weeks.forEach((w,i)=>{ if(st<=w.end&&x.end>=w.start) out[i].tasks.push({p,name:x.label,end:x.end,overdue:x.end<todayISO()}); });
+      }); });
+    if(getRow(p.id).assignee===t||collaboratorsOf(p).includes(t)) (getRow(p.id).eventDates||[]).forEach(e=>{
+      weeks.forEach((w,i)=>{ if(e.date>=w.start&&e.date<=w.end) out[i].events.push({p,date:e.date,label:e.label}); }); });
+  });
+  // 已逾期還沒完成的任務放在第一週
+  ALLP.filter(p=>!isClosed(p)&&inPeopleView(p)).forEach(p=>taskList(p).forEach(tn=>{ const subs=materializedSubs(p.id,tn);
+    (subs.length?subs.map(x=>({...x,label:x.name})):[{...taskInfo(p,tn),label:tn}]).forEach(x=>{
+      if(!x.done&&x.assignee===t&&isISODate(x.end)&&x.end<weeks[0].start) out[0].tasks.push({p,name:x.label,end:x.end,overdue:true}); }); }));
+  return out;
+}
+function personCompareHtml(){
+  const names=[...TEAM_STAFF,...TEAM_PARTNER].filter((n,i,a)=>a.indexOf(n)===i);
+  const chips=names.map(n=>`<button class="mini" style="${compareSel.includes(n)?'background:var(--accent);color:#fff;border-color:var(--accent);':''}" ${uiEvent('click','toggleCompare',[jsStr(n)])}>${esc(n)}</button>`).join(' ');
+  let grid='';
+  if(compareSel.length){
+    const weeks=compareWeeks();
+    const head=`<tr><th style="width:80px;">人員</th>${weeks.map(w=>`<th>${w.label} 週</th>`).join('')}</tr>`;
+    const rows=compareSel.map(n=>{ const load=personWeekLoad(n,weeks);
+      return `<tr><td><b>${esc(n)}</b></td>${load.map(c=>{ const k=c.tasks.length;
+        const bg=k>=10?'rgba(192,57,43,.14)':k>=6?'rgba(181,101,29,.12)':k?'':'rgba(46,125,50,.06)';
+        const items=c.tasks.slice().sort((a,b)=>a.end.localeCompare(b.end)).slice(0,4).map(x=>`<div class="small" style="${x.overdue?'color:var(--warn);':''}">${shortDate(x.end)} ${esc(getName(x.p))}｜${esc(x.name)}</div>`).join('');
+        const ev=c.events.map(e=>`<div class="small" style="color:#2c5f7c;">📅 ${shortDate(e.date)} ${esc(e.label||getName(e.p))}</div>`).join('');
+        return `<td style="background:${bg};vertical-align:top;min-width:120px;"><b>${k?k+' 項':'—'}</b>${ev}${items}${k>4?`<div class="small">…還有 ${k-4} 項</div>`:''}</td>`; }).join('')}</tr>`; }).join('');
+    grid=`<div style="overflow-x:auto;margin-top:6px;"><table class="exectable comparetable">${head}${rows}</table></div>
+      <div class="small">每格是該週要做的未完成任務（依子項目起訖日；只有截止日就看截止日）。紅字＝已逾期（放在第一週）。📅＝負責或協作專案的活動日。${showProposals?'':'不含提案中的專案。'}</div>`;
+  }
+  return `<div class="priority plain" style="margin-bottom:10px;"><div class="secthead"><span>人員比較</span><span class="small">勾選 2–3 人並排看接下來 ${COMPARE_WEEKS} 週</span></div>
+    <div style="display:flex;flex-wrap:wrap;gap:4px;align-items:center;">${chips} ${proposalToggleHtml()}</div>${grid}</div>`;
+}
 function renderPersonView(){
-  const legend=`<div style="display:flex;gap:10px;margin:6px 0 4px;"><span class="tag-staff">■ 三小文創</span><span class="tag-partner">■ 合作夥伴</span></div>`;
+  const legend=personCompareHtml()+`<div style="display:flex;gap:10px;margin:6px 0 4px;"><span class="tag-staff">■ 三小文創</span><span class="tag-partner">■ 合作夥伴</span></div>`;
   const staffCards=`<div class="small" style="margin:4px 0;">三小文創</div>
     <div class="people">${TEAM_STAFF_G1.map(personCard).join("")}</div>
     <div class="people" style="margin-top:10px;">${TEAM_STAFF_G2.map(personCard).join("")}</div>`;
@@ -3780,7 +3846,8 @@ const UI_ACTIONS=Object.freeze({
       'setStatusFilter','syncPaymentSubtasks','toggleAddForm','toggleAllMonths','toggleCapacityGroup',
       'toggleExpand','toggleGanttGroup','toggleInbox','toggleMonthCatTable','toggleOwnedCollab','togglePerson',
       'toggleShowDeleted','toggleTodoExpand','undoLastDelete','withdrawInbox','refreshExec',
-      'saveOppScore','withdrawOppScore','saveOppDecision','clearOppDecision','closeOppAsLost','goToOpp','resetExecCalc']),
+      'saveOppScore','withdrawOppScore','saveOppDecision','clearOppDecision','closeOppAsLost','goToOpp','resetExecCalc',
+      'toggleShowProposals','toggleCompare']),
     clearUndoToast:()=>{ document.getElementById('undotoast').innerHTML=''; },
     ignoreBackup:uiCall('ignoreBackup'),
     toggleInboxShowDone:()=>{ inboxShowDone=!inboxShowDone; renderInbox(); },
