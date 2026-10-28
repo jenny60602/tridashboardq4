@@ -118,7 +118,8 @@ test('browser: payloads in every editable field stay text across all views; CSP 
   await clickAll('[data-ui-click*="openSchedule"]'); await scan('schedule');
 
   // The payloads were really rendered (as text or form values), so the walk exercised them.
-  for (const tag of ['task', 'sub', 'vendor', 'notes', 'event', 'inv', 'exp', 'itext', 'rtext', 'cname', 'ccat', 'staff', 'nameov']) {
+  // Inbox payloads (itext, rtext) are no longer rendered: the inbox is switched off.
+  for (const tag of ['task', 'sub', 'vendor', 'notes', 'event', 'inv', 'exp', 'cname', 'ccat', 'staff', 'nameov']) {
     assert.ok(seenAsText.has(tag), `payload ${tag} was rendered as text (seen: ${[...seenAsText].join(',')})`);
   }
   assert.deepEqual([...injected], [], 'no payload became an element or executed');

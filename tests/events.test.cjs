@@ -126,16 +126,8 @@ test('browser: synthetic login, editing, drag-and-drop, inbox and logout work th
       assert.fail('subtask rows were not rendered, drag-and-drop not exercised');
     }
 
-    // Inbox: open the form, type (input event), close it.
-    const openInbox = page.locator('[data-ui-click*="openInboxForm"]').first();
-    const toggle = page.locator('[data-ui-click*="toggleInbox"]').first();
-    assert.ok(await openInbox.count() + await toggle.count() > 0, 'inbox controls rendered');
-    if (!(await openInbox.isVisible())) await toggle.click();
-    await openInbox.click();
-    await page.fill('#inboxtext', 'Synthetic request for Synthetic Owner');
-    await page.waitForTimeout(400);
-    await page.locator('[data-ui-click*="closeInboxForm"]').first().click();
-    assert.equal(await page.locator('#inboxtext').count(), 0, 'inbox form closed');
+    // Inbox is switched off: no controls are rendered (data is kept).
+    assert.equal(await page.locator('[data-ui-click*="openInboxForm"], [data-ui-click*="toggleInbox"]').count(), 0, 'inbox hidden');
 
     // Logout clears the page and stops further actions.
     await page.locator('[data-ui-click*="\\"logout\\""]').first().click();
