@@ -36,7 +36,7 @@ function withExtraProjects() {
   return () => { fixture.createFixture = original; };
 }
 
-test('browser: only projects with no breakdown at all are listed, soonest first, with a one-click action',
+test('browser: the not-broken-down and unassigned nag lists are gone; helpers still work',
   { skip, timeout: 90000 }, async t => {
     const restore = withExtraProjects();
     const { createServer, HOST } = require('../scripts/preview-synthetic.cjs');
@@ -52,22 +52,14 @@ test('browser: only projects with no breakdown at all are listed, soonest first,
     await page.goto(base);
     await page.fill('#logincode', 'fake-admin');
     await page.press('#logincode', 'Enter');
-    await page.waitForSelector('[data-ui-click*="gotoNoTaskList"]');
-
-    assert.match(await page.locator('[data-ui-click*="gotoNoTaskList"]').innerText(), /^2 個專案還沒拆解任務$/);
-    await page.locator('[data-ui-click*="gotoNoTaskList"]').click();
-    await page.waitForSelector('#notasklist');
-    const names = await page.locator('#notasklist .pname').evaluateAll(es => es.map(e => e.firstChild.textContent.trim()));
-    assert.deepEqual(names, ['Untouched Soon Project', 'Untouched Late Project'], 'sorted by start date; split, assigned and finished projects excluded');
-
-    // One click opens that project's task tab.
-    await page.locator('#notasklist [data-ui-click*="goToTaskList"][data-ui-click*="untouched-late"]').click();
-    await page.waitForSelector('#proj-untouched-late');
-    assert.equal(await page.evaluate(() => detailTab['untouched-late']), 'tasks');
-    assert.equal(await page.evaluate(() => view), 'project');
-
-    // Adding one subtask removes it from the list.
-    await page.evaluate(() => { state['untouched-late'].subtasks = { '企劃': [{ id: 'new1', name: 'First step', done: false }] }; render(); });
-    assert.match(await page.locator('[data-ui-click*="gotoNoTaskList"]').innerText(), /^1 個專案還沒拆解任務$/);
+    await page.waitForSelector('[data-ui-click*="toggleExpand"]');
+    assert.equal(await page.locator('[data-ui-click*="gotoNoTaskList"]').count(), 0, 'no "還沒拆解" link in the stats');
+    assert.equal(await page.locator('[data-ui-click*="setPriorityTab"][data-ui-click*="stagnant"]').count(), 0, 'no 未指派任務 tab');
+    await page.locator('.tabs button[data-v="person"]').click();
+    assert.equal(await page.locator('#notasklist').count(), 0, 'no not-broken-down list in the person view');
+    assert.doesNotMatch(await page.locator('#view').innerText(), /已開始未拆解|所有專案都已指派負責人/);
+    // The underlying rule is unchanged (the daily summary uses it): only projects with no breakdown at all.
+    const names = await page.evaluate(() => ALLP.filter(needsBreakdown).sort((a, b) => getRange(a).start.localeCompare(getRange(b).start)).map(getName));
+    assert.deepEqual(names, ['Untouched Soon Project', 'Untouched Late Project']);
     assert.deepEqual(problems, []);
   });

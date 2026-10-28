@@ -1007,7 +1007,6 @@ function renderPriority(){
     {key:'capacity', label:`執行總覽`, body:capacityOverviewHtml()},
     {key:'urgent', label:`急迫案件 (${execGroup.length})`, body:urgentBody},
     {key:'task', label:`任務急迫 (${taskUrgent.length})`, body:taskBody},
-    {key:'stagnant', label:`未指派任務 (${unassignedTasks.length})`, body:stagnantBody},
     ...(anyFin()?[{key:'cost', label:`成本壓力 (${overCost.length})`, body:costBody}]:[]),
     {key:'pay', label:`待收款 (${payGroup.length})`, body:payBody},
   ];
@@ -1312,7 +1311,7 @@ function renderStats(){
       <div class="statgrouplabel">${isFinAll()?"財務":(anyFin()?"總覽（金額只計算你負責的專案）":"總覽")}</div>
       <div class="stats">
         <div class="stat clickable" ${uiEvent('click','gotoStatus',['全部'])}><b>${ALLP.length}</b><span>專案總數</span></div>
-        <div class="stat"><b>${pct}%</b><span>全公司任務完成率</span>${noTaskCount?`<span class="small" style="color:var(--accent2);cursor:pointer;text-decoration:underline;text-decoration-style:dotted;" ${uiEvent('click','gotoNoTaskList',[])}>${noTaskScopeMine()?`你負責的 ${noTaskCount} 個專案還沒拆解任務`:`${noTaskCount} 個專案還沒拆解任務`}</span>`:''}</div>
+        <div class="stat"><b>${pct}%</b><span>全公司任務完成率</span></div>
         ${anyFin()?`        <div class="stat"><b>${fmt(mt.q4Total)}</b><span>2026Q4 認列營收（未稅，預估＋已開發票）</span><span class="small">核心 ${fmt(mt.q4Core)}／關係人 ${fmt(mt.q4Rel)}／營業外 ${fmt(mt.q4NonOp)}</span></div>
         <div class="stat"><b style="color:${q4Margin<0?'var(--warn)':'var(--ink)'}">${mt.q4Total?Math.round(q4Margin/mt.q4Total*100)+'%':'—'}</b><span>2026Q4 毛利率估算</span><span class="small">毛利 ${fmt(q4Margin)}</span></div>
         <div class="stat"><b>${fmt(mt.q1Total)}</b><span>2027Q1 認列營收（未稅，預估＋已開發票）</span><span class="small">核心 ${fmt(mt.q1Core)}／關係人 ${fmt(mt.q1Rel)}／營業外 ${fmt(mt.q1NonOp)}</span></div>
@@ -1746,7 +1745,7 @@ function detailRow(p){
     </tbody></table>
     <div class="small" style="margin:6px 0 12px;">已開發票 ${fmt(totalActual(p))}・已收款 <b style="color:var(--ok);">${fmt(totalPaid(p))}</b>／預估收入 ${fmt(rv)}</div>
     `:`<div class="small" style="margin:12px 0 4px;color:var(--sub);">🔒 收支、認列、支出與發票資料只有這個專案的負責人和財務看得到</div>`}`;
-  const projInbox=inboxList().filter(it=>it.pid===p.id && inboxVisibleNow(it) && (it.status==='sent'||it.status==='ack'));
+  const projInbox=INBOX_ENABLED?inboxList().filter(it=>it.pid===p.id && inboxVisibleNow(it) && (it.status==='sent'||it.status==='ack')):[];
   const taskPane=`
     ${projInbox.length?`<div class="inboxbox" style="margin-bottom:12px;"><b>📥 這個專案還沒排進甘特圖的交辦（${projInbox.length}）</b>${projInbox.map(it=>inboxItemHtml(it,it.from===myName()?'out':'in','t')).join('')}</div>`:''}
     <div style="margin-bottom:10px;"><button class="mini" ${uiEvent('click','applyMarketTemplate',[String(p.id)])}>🏪 套用市集工作模組</button></div>
@@ -2018,6 +2017,7 @@ function personDetailHtml(t){
 }
 
 function personInboxHtml(t){
+  if(!INBOX_ENABLED) return '';
   const list=inboxList().filter(it=>it.to===t && inboxVisibleNow(it) && it.status!=='done');
   if(!list.length) return '';
   const ord={urgent:0,normal:1,low:2};
@@ -2045,11 +2045,11 @@ function personCard(t){
   const al=personAlerts(t);
   const alertBits=[al.overdue?`<span style="color:var(--warn);font-weight:700;">逾期 ${al.overdue}</span>`:'',
     al.soon?`<span style="color:var(--accent2);font-weight:700;">7 天內到期 ${al.soon}</span>`:'',
-    al.unsplit?`<span>已開始未拆解 ${al.unsplit}</span>`:''].filter(Boolean);
+].filter(Boolean);
   const alertHtml=alertBits.length?`<div class="small" style="margin-top:5px;">⚠ ${alertBits.join('・')}</div>`:'';
   const open=expandedPerson.has(t);
   const role=ROLES[t];
-  const inbN=inboxList().filter(it=>it.to===t && inboxVisibleNow(it) && it.status==='sent').length;
+  const inbN=INBOX_ENABLED?inboxList().filter(it=>it.to===t && inboxVisibleNow(it) && it.status==='sent').length:0;
   return `<div class="pcard ${group}" id="pcard-${esc(t)}" ${uiEvent('click','togglePerson',[jsStr(t)])} style="cursor:pointer;">
       <b>${esc(t)}${role?` <span class="rolelabel">・${esc(role)}</span>`:''}${inbN?` <span class="ibadge ib-sent">📥 ${inbN} 件新交辦</span>`:''}</b><span>負責 ${activeOwned.length}/${owned.length} 案・協作 ${collabOn.length} 案・${taskCount} 項任務</span>${alertHtml}${topHtml}
       ${ps?`<div class="small" style="margin-top:5px;">💡 提案中 ${ps.count} 件${ps.next?`・最近要交：${shortDate(ps.next.end)} ${esc(getName(ps.next.p))}`:''}</div>`:''}
@@ -2144,7 +2144,8 @@ function renderPersonView(){
           <button class="mini" style="background:var(--accent);color:#fff;border-color:var(--accent);" ${uiEvent('click','goToTaskList',[String(p.id)])}>📝 開始拆解</button>
         </div>`; }).join('')}
     </div>` : `<div class="priority ok" style="margin-top:10px;"><h3>✓ 進行中的專案都已經拆解過任務</h3></div>`;
-  document.getElementById("view").innerHTML=legend+staffCards+partnerCards+vendorCards+unHtml+noTasksHtml;
+  // 「尚未指派負責人」「還沒拆解任務的專案」清單已移除：改由每日彙整依 Chat 內容補上。
+  document.getElementById("view").innerHTML=legend+staffCards+partnerCards+vendorCards+(un.length?unHtml:'');
 }
 
 function renderInner(){
@@ -3798,9 +3799,11 @@ function inboxSection(title,list,role,empty){
     ${done.length?`<div class="small" style="margin-top:6px;cursor:pointer;color:var(--sub);" ${uiEvent('click','toggleInboxShowDone',[])}>${inboxShowDone?'▾':'▸'} 已完成 ${done.length} 件</div>${inboxShowDone?done.sort((a,b)=>(b.doneAt||0)-(a.doneAt||0)).slice(0,20).map(it=>inboxItemHtml(it,role)).join(''):''}`:''}
   </div>`;
 }
+// 交辦收件匣已停用（改由每日彙整把 Chat 裡的交辦寫進專案）；資料保留，不刪除。
+const INBOX_ENABLED=false;
 function renderInbox(){
   const box=document.getElementById('inbox'); if(!box) return;
-  if(!ME){ box.innerHTML=''; return; }
+  if(!ME||!INBOX_ENABLED){ box.innerHTML=''; return; }
   const inc=myInboxIn(), out=myInboxOut();
   const nNew=inc.filter(it=>it.status==='sent').length, nIn=inc.filter(it=>it.status!=='done').length;
   const nOut=out.filter(it=>it.status!=='done').length, nReply=out.filter(it=>it.status!=='done'&&(it.replies||[]).some(r=>r.by!==myName())).length;
