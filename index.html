@@ -653,8 +653,17 @@ function taskInfo(p,name){
   if(typeof t==="boolean") return {done:t,assignee:"",start:"",end:"",note:"",link:""};
   return {done:!!t.done, assignee:t.assignee||"", start:t.start||"", end:t.end||"", note:t.note||"", link:t.link||""};
 }
+// 「未使用的範本任務」：系統預設帶出的任務（企劃、成本…、月檔），沒有子項目、負責人、日期、備註，也沒有完成。
+// 這種任務不算進進度、不畫甘特圖，任務清單預設收起；有人開始用就自動出現。
+function isIdleTemplate(p,t){
+  const e=orderedEntries(p).find(x=>x.display===t); if(!e||e.type!=='base') return false;
+  const cur=getRow(p.id); if(cur.subtasks[t]&&cur.subtasks[t].length) return false;
+  const i=taskInfo(p,t); return !i.done&&!i.assignee&&!i.start&&!i.end&&!i.note&&!i.link;
+}
+let showTemplates=new Set();
+window.toggleTemplates=function(pid){ showTemplates.has(pid)?showTemplates.delete(pid):showTemplates.add(pid); renderProjectView(); };
 function taskProgress(p){
-  const list=taskList(p);
+  const list=taskList(p).filter(t=>!isIdleTemplate(p,t));
   let done=0,total=0;
   list.forEach(t=>{
     const subs=materializedSubs(p.id,t);
@@ -1529,7 +1538,7 @@ function receiptsHtml(p){
 
 function ganttRows(p){
   const rows=[];
-  taskList(p).forEach((t)=>{
+  taskList(p).filter(t=>!isIdleTemplate(p,t)).forEach((t)=>{
     const subs=materializedSubs(p.id,t);
     if(subs.length){
       subs.forEach(s=>{ rows.push({group:t, label:s.name, start:s.start, end:s.end, assignee:s.assignee, done:s.done, audience:s.audience}); });
@@ -1643,7 +1652,9 @@ function detailRow(p){
   const collabHtml=collabList.length
     ? collabList.map(x=>`<span class="${isStaff(x)?'tag-staff':'tag-partner'}">${esc(x)}</span>`).join(" ")
     : '<span class="small">（尚無其他人被指派任務）</span>';
-  const items=taskList(p).map((t,idx)=>taskItemHtml(p,idx)).join("");
+  const idleN=taskList(p).filter(t=>isIdleTemplate(p,t)).length, showTpl=showTemplates.has(p.id);
+  const items=taskList(p).map((t,idx)=>(showTpl||!isIdleTemplate(p,t))?taskItemHtml(p,idx):'').join("")
+    +(idleN?`<div class="small" style="margin:6px 0;"><button class="mini" ${uiEvent('click','toggleTemplates',[String(p.id)])}>${showTpl?'收起':'顯示'} ${idleN} 個未使用的範本任務</button> <span style="color:var(--sub);">沒有子項目、負責人或日期，不算進進度</span></div>`:'');
   const tab=getDetailTab(p.id);
   const tabBtn=(key,label)=>`<button class="dtab ${tab===key?'active':''}" ${uiEvent('click','setDetailTab',[String(p.id),String(key)])}>${label}</button>`;
   const paymentOpts=[["","（未設定）"],["一次付清","a. 一次付清"],["訂金+尾款","b. 訂金＋尾款"],["自訂分期","c. 自訂期數"]].map(([v,l])=>`<option value="${v}" ${r.paymentMethod===v?'selected':''}>${l}</option>`).join('');
@@ -3850,7 +3861,7 @@ const UI_ACTIONS=Object.freeze({
       'toggleExpand','toggleGanttGroup','toggleInbox','toggleMonthCatTable','toggleOwnedCollab','togglePerson',
       'toggleShowDeleted','toggleTodoExpand','undoLastDelete','withdrawInbox','refreshExec',
       'saveOppScore','withdrawOppScore','saveOppDecision','clearOppDecision','closeOppAsLost','goToOpp','resetExecCalc',
-      'toggleShowProposals','toggleCompare']),
+      'toggleShowProposals','toggleCompare','toggleTemplates']),
     clearUndoToast:()=>{ document.getElementById('undotoast').innerHTML=''; },
     ignoreBackup:uiCall('ignoreBackup'),
     toggleInboxShowDone:()=>{ inboxShowDone=!inboxShowDone; renderInbox(); },
