@@ -108,6 +108,8 @@ test('browser: synthetic login, editing, drag-and-drop, inbox and logout work th
 
     // Switch detail tab (click with two string args), then tick a top-level task (checked input).
     await page.locator('[data-ui-click*="setDetailTab"][data-ui-click*="\\"tasks\\""]').first().click();
+    // Unused template tasks are collapsed by default; open them through the delegated toggle.
+    await page.locator('[data-ui-click*="toggleTemplates"][data-ui-click*="test-project-1"]').first().click();
     const task = page.locator('input[type=checkbox][data-ui-change*="toggleTask"][data-ui-change*="test-project-1"]').first();
     await task.waitFor();
     await task.click();
