@@ -246,6 +246,25 @@ tr.rowopen td:first-child{box-shadow:inset 4px 0 0 var(--accent2);}
 .execbadge.warn{background:#f6d5cf;color:#9b2c1d;} .execbadge.missing{background:#eceae4;color:#6b6b63;} .execbadge.analysis{background:#e6dcf0;color:#5b3f7a;}
 .execlist{margin:4px 0 4px 18px;padding:0;font-size:.8rem;} .execlist li{margin:2px 0;}
 @media (max-width:640px){ .execgrid{grid-template-columns:1fr;} }
+.fincards{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px;}
+.fincard{border:1px solid var(--line);border-radius:10px;padding:10px 14px;background:var(--card);}
+.fincard-t{font-size:.75rem;color:var(--sub);}
+.fincard-n{font-size:1.7rem;font-weight:700;line-height:1.25;color:var(--ink);}
+.fincard-n small{font-size:.75rem;font-weight:400;color:var(--sub);}
+.fincard-l{font-size:.74rem;color:var(--sub);line-height:1.5;}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;}
+.seg button{border:0;background:var(--card);color:var(--sub);padding:4px 12px;font-size:.78rem;cursor:pointer;}
+.seg button.active{background:var(--accent);color:#fff;}
+.finscope{padding:3px 6px;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--ink);font-size:.78rem;max-width:240px;}
+.finchart{width:100%;height:auto;display:block;cursor:pointer;}
+.fingrid{stroke:var(--line);stroke-dasharray:3 3;}
+.finax{fill:var(--sub);font-size:11px;}
+.finq{stroke:var(--sub);stroke-dasharray:4 3;opacity:.6;}
+.finbar.tgt,.finlg.tgt{fill:#d9b65c;background:#d9b65c;}
+.finbar.fc,.finlg.fc{fill:#5f9e8a;background:#5f9e8a;}
+.finbar.act,.finlg.act{fill:#3f6b4a;background:#3f6b4a;}
+.finbar.out,.finlg.out{fill:#c08457;background:#c08457;}
+.finlg{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:4px;vertical-align:-1px;}
 </style>
 </head>
 <body class="locked">
@@ -1032,9 +1051,9 @@ function renderPriority(){
 const CHART_MONTHS=[9,10,11,12,1,2,3];
 function monthLabel(m){ return m<=3? `2027/${m}` : `${m}月`; }
 function monthOptsQ(sel){ let s='<option value="">未填</option>'; CHART_MONTHS.forEach(m=>{ s+=`<option value="${m}" ${sel===m?'selected':''}>${monthLabel(m)}</option>`; }); return s; }
-function monthContributions(m, mode){
+function monthContributions(m, mode, scoped){
   const md=mode||finMode; const list=[];
-  FINP().forEach(p=>projectEntries(p,md).forEach(e=>{ if(e.m===m) list.push({p, amount:e.amount, kind:e.kind, confirmed:(e.kind==='paid'||e.kind==='issued')}); }));
+  (scoped?FINPS():FINP()).forEach(p=>projectEntries(p,md).forEach(e=>{ if(e.m===m) list.push({p, amount:e.amount, kind:e.kind, confirmed:(e.kind==='paid'||e.kind==='issued')}); }));
   return list.sort((a,b)=>b.amount-a.amount);
 }
 let monthTableOpen=false, monthCatTableExpanded=new Set();
@@ -1044,11 +1063,11 @@ function monthlyTotals(mode){
   const md=mode||'rev';
   const z=()=>{ const o={}; CHART_MONTHS.forEach(m=>o[m]=0); return o; };
   const byKind={est:z(),issued:z(),paid:z(),expected:z(),estIn:z()}, coreByM=z(), nonOpByM=z(), relByM=z();
-  FINP().forEach(p=>{ const g=revGroup(p); projectEntries(p,md).forEach(e=>{ byKind[e.kind][e.m]+=e.amount; (g==='rel'?relByM:g==='nonop'?nonOpByM:coreByM)[e.m]+=e.amount; }); });
+  FINPS().forEach(p=>{ const g=revGroup(p); projectEntries(p,md).forEach(e=>{ byKind[e.kind][e.m]+=e.amount; (g==='rel'?relByM:g==='nonop'?nonOpByM:coreByM)[e.m]+=e.amount; }); });
   const confirmed=z(), estimated=z(), totals=z();
   CHART_MONTHS.forEach(m=>{ confirmed[m]=byKind.paid[m]+byKind.issued[m]; estimated[m]=byKind.est[m]+byKind.expected[m]+byKind.estIn[m]; totals[m]=confirmed[m]+estimated[m]; });
   const outByKind={cost:z(),outPaid:z(),outExpected:z()}, outTotals=z(), net=z(), cum=z();
-  FINP().forEach(p=>expenseEntries(p,md).forEach(e=>{ outByKind[e.kind][e.m]+=e.amount; outTotals[e.m]+=e.amount; }));
+  FINPS().forEach(p=>expenseEntries(p,md).forEach(e=>{ outByKind[e.kind][e.m]+=e.amount; outTotals[e.m]+=e.amount; }));
   let run=0; CHART_MONTHS.forEach(m=>{ net[m]=totals[m]-outTotals[m]; run+=net[m]; cum[m]=run; });
   const sum=(o,ms)=>ms.reduce((s2,m)=>s2+o[m],0), Q4=[9,10,11,12], Q1=[1,2,3];
   return {byKind, confirmed, estimated, totals, q4Total:sum(totals,Q4), q1Total:sum(totals,Q1), q4Confirmed:sum(confirmed,Q4), q1Confirmed:sum(confirmed,Q1),
@@ -1057,7 +1076,7 @@ function monthlyTotals(mode){
 function monthCategoryTableHtml(){
   const cats=[]; const data={}; const projData={};
   CHART_MONTHS.forEach(m=>{
-    monthContributions(m).forEach(x=>{
+    monthContributions(m,undefined,true).forEach(x=>{
       const cat=x.p.cat;
       if(!data[cat]){ data[cat]={}; cats.push(cat); projData[cat]={}; }
       data[cat][m]=(data[cat][m]||0)+x.amount;
@@ -1111,7 +1130,7 @@ function monthCategoryTableHtml(){
   </div>`;
   // ---- 支出 ----
   const expProj={};
-  FINP().forEach(p=>expenseEntries(p,finMode).forEach(e=>{ if(!expProj[p.id]) expProj[p.id]={p,monthly:{}}; expProj[p.id].monthly[e.m]=(expProj[p.id].monthly[e.m]||0)+e.amount; }));
+  FINPS().forEach(p=>expenseEntries(p,finMode).forEach(e=>{ if(!expProj[p.id]) expProj[p.id]={p,monthly:{}}; expProj[p.id].monthly[e.m]=(expProj[p.id].monthly[e.m]||0)+e.amount; }));
   const mt=monthlyTotals(finMode);
   const expOpen=monthCatTableExpanded.has('__exp__');
   const expList=Object.values(expProj);
@@ -1131,54 +1150,86 @@ function monthCategoryTableHtml(){
   </div>`:'';
   return `<div style="overflow-x:auto;margin-top:8px;font-size:.78rem;">${headerRow}${bodyRows}${subtotalRows}${totalRow}${expHead}${expLines}${netRow}${cumRow}</div>`;
 }
+// 金額改用「萬元」，讓卡片和圖一眼看懂。
+function wan(v){ if(v===null||v===undefined||!isFinite(v)) return '—'; const w=v/10000; return (Math.abs(w)>=100?Math.round(w):Math.round(w*10)/10).toLocaleString('zh-TW'); }
+// 公司年度預算（財務摘要的每月營收預算）。只有經營檢視名單內的人拿得到；選單一專案時不顯示。
+function finTargetByMonth(){
+  if(!execAllowed||!EXEC||finScope.startsWith('p:')) return null;
+  const line=finScope.startsWith('line:')?finScope.slice(5):'';
+  if(!execHasMonthly('revenue',line)) return null;
+  const y=execYear(), s=execMonthly('revenue',line), out={};
+  CHART_MONTHS.forEach(m=>{ const fy=m<=3?2027:2026; out[m]=(fy===y&&s[m].budget!==null)?s[m].budget:null; });
+  return Object.values(out).some(v=>v!==null)?out:null;
+}
+function finScopeSelectHtml(){
+  const ps=FINP(); if(ps.length<2) return '';
+  const lines=BIZ_LINES.concat([BIZ_LINE_PENDING]).filter(l=>ps.some(p=>bizLineOf(p)===l));
+  const opt=(v,label)=>`<option value="${esc(v)}" ${finScope===v?'selected':''}>${esc(label)}</option>`;
+  const groups=lines.map(l=>`<optgroup label="${esc(l)}">${opt('line:'+l,l+'（合計）')}${ps.filter(p=>bizLineOf(p)===l).sort((a,b)=>getName(a).localeCompare(getName(b),'zh-Hant')).map(p=>opt('p:'+p.id,'　'+getName(p))).join('')}</optgroup>`).join('');
+  return `<label class="small" style="display:flex;align-items:center;gap:6px;">範圍 <select class="finscope" ${uiEvent('change','setFinScope',[],'value')}>${opt('','全部專案合計')}${groups}</select></label>`;
+}
+function finCard(title,big,lines){
+  return `<div class="fincard"><div class="fincard-t">${title}</div><div class="fincard-n">${big}<small> 萬元</small></div>${lines.map(l=>`<div class="fincard-l">${l}</div>`).join('')}</div>`;
+}
+function finBarChartSvg(series,onClickLabel){
+  const W=Math.round(Math.max(340,Math.min(1100,(window.innerWidth||1000)-80))),H=240,L=46,R=8,T=12,B=30, n=CHART_MONTHS.length;
+  const vals=[]; series.forEach(sr=>CHART_MONTHS.forEach(m=>{ const v=sr.data[m]; if(v!==null&&v!==undefined) vals.push(v); }));
+  const maxV=Math.max(1,...vals)/10000;
+  const steps=[0.1,0.2,0.5,1,2,5,10,20,25,50,100,200,250,500,1000]; const step=steps.find(x=>maxV/x<=5)||Math.ceil(maxV/5);
+  const top=Math.max(step,Math.ceil(maxV/step)*step);
+  const y=v=>T+(H-T-B)*(1-(v/10000)/top);
+  let g='';
+  for(let i=0;i*step<=top+1e-9;i++){ const t=Math.round(i*step*10)/10; const yy=y(t*10000).toFixed(1); g+=`<line x1="${L}" x2="${W-R}" y1="${yy}" y2="${yy}" class="fingrid"/><text x="${L-6}" y="${(+yy+4).toFixed(1)}" text-anchor="end" class="finax">${t.toLocaleString('zh-TW')}</text>`; }
+  const gw=(W-L-R)/n, bw=Math.min(22,(gw-14)/series.length);
+  CHART_MONTHS.forEach((m,i)=>{
+    const x0=L+gw*i+(gw-bw*series.length-2*(series.length-1))/2;
+    series.forEach((sr,k)=>{
+      const v=sr.data[m]; if(v===null||v===undefined) return;
+      const yy=y(Math.max(0,v)), h=Math.max(v>0?1.5:0,(H-B)-yy);
+      g+=`<rect x="${(x0+k*(bw+2)).toFixed(1)}" y="${((H-B)-h).toFixed(1)}" width="${bw.toFixed(1)}" height="${h.toFixed(1)}" rx="2" class="finbar ${sr.cls}"><title>${esc(monthLabel(m))} ${esc(sr.label)}：${wan(v)} 萬元</title></rect>`;
+    });
+    if(i===4) g+=`<line x1="${(L+gw*i).toFixed(1)}" x2="${(L+gw*i).toFixed(1)}" y1="${T}" y2="${H-B}" class="finq"/>`;
+    g+=`<text x="${(L+gw*i+gw/2).toFixed(1)}" y="${H-10}" text-anchor="middle" class="finax">${esc(monthLabel(m))}</text>`;
+  });
+  return `<svg class="finchart" viewBox="0 0 ${W} ${H}" role="img" aria-label="每月${esc(series.map(s=>s.label).join('、'))}，單位萬元" ${uiEvent('click','toggleAllMonths',[])}>${g}</svg>`;
+}
 function monthlyChartBody(){
   const isCash=finMode==='cash';
-  const mt=monthlyTotals(finMode); const {byKind, totals, q4Total, q1Total, outByKind, outTotals, net}=mt;
-  const max=Math.max(...Object.values(totals),...Object.values(outTotals),1);
-  const inSegs = isCash ? [['paid','paid'],['expected','expected'],['estIn','est']] : [['paid','paid'],['issued','issued'],['est','est']];
-  const outSegs = isCash ? [['outPaid','outpaid'],['outExpected','outexpected']] : [['cost','outpaid']];
-  const stack=(segs,src,tot)=>{ const H=tot?Math.max(4,Math.round(tot/max*70)):0; return segs.map(([k,cls])=>`<div class="chartbar ${cls}" style="height:${tot?Math.round(src[k][m0]/tot*H):0}px;"></div>`).join(''); };
-  let m0=0;
-  const chartHtml=CHART_MONTHS.map((m,mi)=>{
-    m0=m;
-    const tip=inSegs.map(([k])=>KIND_LABEL[k]+' '+fmt(byKind[k][m])).concat(outSegs.map(([k])=>KIND_LABEL[k]+' '+fmt(outByKind[k][m]))).join('\n');
-    return `<div style="cursor:pointer;display:flex;flex-direction:column;align-items:center;${mi===4?'border-left:1px dashed var(--line);padding-left:8px;':''}" ${uiEvent('click','toggleAllMonths',[])} title="${esc(tip)}">
-          <div style="display:flex;align-items:flex-end;gap:3px;width:100%;justify-content:center;">
-            <div class="chartstack" style="width:46%;">${stack(inSegs,byKind,totals[m])}${totals[m]?'':'<div class="chartbar est" style="height:3px;"></div>'}</div>
-            <div class="chartstack" style="width:30%;">${stack(outSegs,outByKind,outTotals[m])}</div>
-          </div>
-          <div class="small" style="margin-top:4px;">${monthLabel(m)}</div>
-          <div class="small">${isCash?'入':'收'} ${fmt(totals[m])}</div>
-          ${outTotals[m]?`<div class="small" style="color:#a0522d;">${isCash?'出':'支'} ${fmt(outTotals[m])}</div>`:''}
-          ${outTotals[m]?`<div class="small" style="font-weight:600;color:${net[m]<0?'var(--warn)':'var(--ink)'};">${isCash?'淨':'毛利'} ${fmt(net[m])}</div>`:''}
-        </div>`;
-  }).join('');
-  const detailHtml=monthTableOpen? monthCategoryTableHtml() : '';
-  const legend = isCash
-    ? `<span class="lg paid"></span>已收款　<span class="lg expected"></span>預計收款（已開發票）　<span class="lg est"></span>預估收款（未開發票）　<span class="lg outpaid"></span>已付款　<span class="lg outexpected"></span>預計付款`
-    : `<span class="lg paid"></span>已收款　<span class="lg issued"></span>已開發票、未收款　<span class="lg est"></span>預估收入（尚未開發票）　<span class="lg outpaid"></span>支出認列`;
-  const sumQ=(o,ms)=>ms.reduce((s2,m)=>s2+o[m],0), Q4=[9,10,11,12], Q1=[1,2,3];
-  const head = isCash
-    ? `2026Q4：流入 ${fmt(q4Total)}－流出 ${fmt(mt.q4Out)}＝淨 ${fmt(q4Total-mt.q4Out)}　2027Q1：流入 ${fmt(q1Total)}－流出 ${fmt(mt.q1Out)}＝淨 ${fmt(q1Total-mt.q1Out)}`
-    : `2026Q4：收入 ${fmt(q4Total)}－支出 ${fmt(mt.q4Out)}＝毛利 ${fmt(q4Total-mt.q4Out)}　2027Q1：收入 ${fmt(q1Total)}－支出 ${fmt(mt.q1Out)}＝毛利 ${fmt(q1Total-mt.q1Out)}`;
-  const intro = isCash
-    ? `<b>現金流預估：錢「什麼時候真的進出帳戶」。</b>流入＝收款（收到了依實際收款日；開了發票還沒收依預計收款日；還沒開發票的依收入認列預估月份）；流出＝支出（付了依實際付款日，還沒付依預計付款日）。用來看每個月現金夠不夠用。`
-    : `<b>收入與支出：每個月「做了多少生意、花了多少成本」。</b>收入依發票開立月份認列（還沒開發票的用「收入認列預估」）；支出依「認列月份」。跟錢有沒有收到、付出去無關。`;
-  return `<h3 style="margin:0 0 6px;font-size:1rem;">📊 專案財務預估表${isFinAll()?'':'<span class="small" style="font-weight:400;">（我負責的專案）</span>'}</h3>
-    <div class="dtabs" style="margin-bottom:6px;">
-      <button class="dtab ${!isCash?'active':''}" ${uiEvent('click','setFinMode',['rev'])}>① 收入與支出（損益）</button>
-      <button class="dtab ${isCash?'active':''}" ${uiEvent('click','setFinMode',['cash'])}>② 現金流預估</button>
+  const mt=monthlyTotals(finMode); const {byKind, totals}=mt;
+  const Q4=[9,10,11,12], Q1=[1,2,3], sum=(o,ms)=>ms.reduce((s2,m)=>s2+(o&&o[m]||0),0);
+  const target=isCash?null:finTargetByMonth();
+  const ps=FINPS();
+  let series, cards, basis;
+  if(!isCash){
+    series=[...(target?[{label:'年度預算目標',cls:'tgt',data:target}]:[]),{label:'最新預測',cls:'fc',data:totals},{label:'已開發票（實際認列）',cls:'act',data:mt.confirmed}];
+    const withInv=n=>ps.filter(p=>projectEntries(p,'rev').some(e=>(e.kind==='issued'||e.kind==='paid')&&n.includes(e.m))).length;
+    const qCard=(name,ms)=>{ const t=target?sum(target,ms):null, f=sum(totals,ms);
+      return finCard(name+' 營收預測',wan(f),[`已開發票 ${wan(sum(mt.confirmed,ms))} 萬・預估 ${wan(sum(mt.estimated,ms))} 萬`,
+        t?`年度預算 ${wan(t)} 萬・預測達成 <b style="color:${f>=t?'var(--ok)':'var(--warn)'};">${Math.round(f/t*100)}%</b>`:`${withInv(ms)} / ${ps.length} 案已開發票`]); };
+    const gp=sum(totals,Q4)-mt.q4Out;
+    cards=[qCard('2026 Q4',Q4),qCard('2027 Q1',Q1),finCard('2026 Q4 毛利預測',wan(gp),[`營收 ${wan(sum(totals,Q4))} 萬 − 支出 ${wan(mt.q4Out)} 萬`,`${ps.filter(p=>expenseEntries(p,'rev').length).length} / ${ps.length} 案已登錄支出`])];
+    basis=`營收依發票開立月份認列，還沒開發票的用專案的「收入認列預估」；支出依「認列月份」。跟錢有沒有收到無關。${target?'年度預算目標來自財務摘要（只有經營檢視名單內的人看得到）。':''}`;
+  }else{
+    series=[{label:'預計流入',cls:'fc',data:totals},{label:'已收款',cls:'act',data:byKind.paid},{label:'流出',cls:'out',data:mt.outTotals}];
+    const cumEnd=mt.cum[12];
+    cards=[finCard('2026 Q4 現金流入',wan(sum(totals,Q4)),[`已收 ${wan(sum(byKind.paid,Q4))} 萬・開了發票待收 ${wan(sum(byKind.expected,Q4))} 萬`,`還沒開發票 ${wan(sum(byKind.estIn,Q4))} 萬`]),
+      finCard('2026 Q4 現金流出',wan(mt.q4Out),[`已付 ${wan(sum(mt.outByKind.outPaid,Q4))} 萬・待付 ${wan(sum(mt.outByKind.outExpected,Q4))} 萬`]),
+      finCard('到 12 月累計淨現金流',wan(cumEnd),[`2027 Q1 淨流入 ${wan(sum(mt.net,Q1))} 萬`])];
+    basis='流入＝收款：收到了依實際收款日；開了發票還沒收依預計收款日；還沒開發票的依收入認列預估月份。流出＝支出：付了依實際付款日，還沒付依預計付款日。用來看每個月現金夠不夠用。';
+  }
+  const legend=series.map(sr=>`<span class="finlg ${sr.cls}"></span>${esc(sr.label)}`).join('　');
+  return `<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px;">
+      <h3 style="margin:0;font-size:1rem;">專案財務預估表${isFinAll()?'':'<span class="small" style="font-weight:400;">（我負責的專案）</span>'}</h3>
+      <div class="seg"><button class="${!isCash?'active':''}" ${uiEvent('click','setFinMode',['rev'])}>營收與毛利</button><button class="${isCash?'active':''}" ${uiEvent('click','setFinMode',['cash'])}>現金流</button></div>
+      ${finScopeSelectHtml()}
+      <span style="flex:1;"></span>
+      <button class="mini" ${uiEvent('click','exportMonthlyExcel',[])} title="下載你看得到的全部專案">⬇ Excel</button>
     </div>
-    <div class="small" style="margin-bottom:6px;background:var(--bg,#f6f3ec);border-left:3px solid var(--accent);padding:6px 10px;line-height:1.6;">${intro}</div>
-    <div class="small" style="margin-bottom:6px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-      <span>${head}</span>
-      <button class="mini" ${uiEvent('click','toggleAllMonths',[])}>${monthTableOpen?'收合明細':'展開明細'}</button>
-      <button class="mini" ${uiEvent('click','exportMonthlyExcel',[])} title="下載你目前看得到的資料">⬇ 下載 Excel</button>
-    </div>
-    <div class="mtable-row" style="align-items:flex-end;margin-bottom:10px;"><div></div>${chartHtml}<div></div></div>
-    ${detailHtml}
-    <div class="small" style="margin-top:6px;">每個月左邊長條＝${isCash?'流入':'收入'}、右邊長條＝${isCash?'流出':'支出'}。${legend}</div>
-    <div class="small" style="margin-top:2px;">2027年1-3月為Q1（虛線右側）。點長條或「展開明細」看各類別／專案。</div>`;
+    <div class="fincards">${cards.join('')}</div>
+    <div class="small" style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin:10px 0 2px;">${legend}<span style="flex:1;"></span><span>單位：萬元・虛線右側為 2027 年</span></div>
+    ${finBarChartSvg(series)}
+    <div style="margin-top:4px;"><button class="mini" ${uiEvent('click','toggleAllMonths',[])}>${monthTableOpen?'▾ 收合':'▸'} 各案明細與計算基準</button></div>
+    ${monthTableOpen?`<div class="small" style="margin-top:6px;color:var(--sub);line-height:1.6;">${basis}</div>${monthCategoryTableHtml()}`:''}`;
 }
 // ================= 按月認列：下載 Excel =================
 // 只匯出目前登入的人看得到的專案（FINP()），跟畫面一致。
@@ -2820,6 +2871,15 @@ function finOK(p){
   return false;
 }
 function FINP(){ return ALLP.filter(finOK); }
+// 專案財務預估表的範圍：''＝全部、'line:<業務線>'、'p:<專案id>'。只影響畫面，不影響下載 Excel。
+let finScope='';
+function FINPS(){
+  const all=FINP();
+  if(finScope.startsWith('line:')){ const l=finScope.slice(5); return all.filter(p=>bizLineOf(p)===l); }
+  if(finScope.startsWith('p:')){ const id=finScope.slice(2); return all.filter(p=>String(p.id)===id); }
+  return all;
+}
+window.setFinScope=function(v){ const ok=v===''||(v.startsWith('line:')&&BIZ_LINES.concat([BIZ_LINE_PENDING]).includes(v.slice(5)))||(v.startsWith('p:')&&FINP().some(p=>String(p.id)===v.slice(2))); finScope=ok?v:''; renderPriority(); };
 function anyFin(){ return finLevel()!=='none' && FINP().length>0; }
 const LEVEL_LABEL={admin:'管理者',finance:'財務',owner:'本人負責',none:'一般'};
 function applyIdentity(me,err){
@@ -3871,7 +3931,7 @@ const UI_ACTIONS=Object.freeze({
     'setEstSlot','setExpField','setExpPaid','setField','setInvField','setInvPaid','setOwnerFilter','setProjectCat',
     'setReceiptField','setRelated','setSubtaskAssignee','setSubtaskAudience','setSubtaskDeadline','setSubtaskNote',
     'setSubtaskLink','setTaskNote','setTaskLink',
-    'setTaskAssignee','setTaskDeadline','toggleSubtask','toggleTask','setOppDraft','setOppDecisionDraft','setBizLine','setExecCalc'])),
+    'setTaskAssignee','setTaskDeadline','toggleSubtask','toggleTask','setOppDraft','setOppDecisionDraft','setBizLine','setExecCalc','setFinScope'])),
   input:Object.freeze(uiCalls(['inboxType'])),
   keydown:Object.freeze({
     loginEnter:(el,ev)=>{ if(ev.key==='Enter') return window.login(); },
