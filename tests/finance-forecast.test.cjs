@@ -29,7 +29,10 @@ test('browser: finance forecast shows cards, grouped bars, scope filter and cash
   t.after(async () => { await browser.close(); server.close(); });
 
   const { page, problems } = await login(browser, base, 'fake-admin');
-  await page.waitForSelector('.fincard');
+  // 預設是「本月」；這裡檢查「營收與毛利」。
+  await page.waitForSelector('table.monthlines');
+  await page.locator('[data-ui-click*="setFinMode"][data-ui-click*="rev"]').click();
+  await page.waitForSelector('svg.finchart');
   assert.equal(await page.locator('.fincard').count(), 3);
   assert.match(await page.locator('.fincards').innerText(), /2026 Q4 營收預測[\s\S]*萬元/);
   assert.ok(await page.locator('svg.finchart rect.finbar.fc').count() > 0, 'forecast bars drawn');

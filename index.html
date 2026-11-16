@@ -273,6 +273,10 @@ table.monthlines th{color:var(--sub);font-weight:500;font-size:.74rem;}
 table.monthlines .n{text-align:right;font-variant-numeric:tabular-nums;}
 table.monthlines tr.subtotal td{background:var(--bg);font-weight:600;}
 table.monthlines tr.total td{background:var(--bg);font-weight:700;border-top:2px solid var(--line);}
+table.monthlines tr.msec td{font-size:.72rem;color:var(--sub);font-weight:600;padding-top:8px;border-bottom:0;}
+table.monthlines tr.core td,table.monthlines tr.rel td{background:var(--bg);font-weight:600;}
+table.monthlines tr.nonop td{color:var(--sub);border-top:1px dashed var(--line);}
+.mmargin{margin-top:8px;padding:6px 10px;border-radius:8px;background:var(--bg);line-height:1.6;}
 </style>
 </head>
 <body class="locked">
@@ -526,9 +530,11 @@ function collaboratorsOf(p){
   });
   return [...set];
 }
-function isNonOp(p){ return p.cat==="政府"; }
+// 營業外收入＝補助。政府的標案、委託屬於營收（2G）。
+const NONOP_CAT="補助";
+function isNonOp(p){ return p.cat===NONOP_CAT; }
 function isRelated(p){ return !!(state[p.id]&&state[p.id].relatedParty); }
-// 營收分組：關係人交易（財務勾選）優先，其次營業外（政府），其餘為核心營收
+// 營收分組：關係人交易（財務勾選）優先，其次營業外（類別「補助」），其餘為核心營收
 function revGroup(p){ return isRelated(p)?'rel':(isNonOp(p)?'nonop':'core'); }
 const REV_GROUPS=[['core','核心營收小計'],['rel','關係人交易小計'],['nonop','營業外收入小計']];
 function selStyle(n){ if(!n) return ''; if(isVendor(n)) return 'background:#f3e6c4;'; return isStaff(n)?'background:#dfe9df;':'background:#f4e3c9;'; }
@@ -631,7 +637,7 @@ function periodsFor(p){
   return months.length?months:["執行檔期"];
 }
 function baseTasksFor(p){
-  if(p.cat==="政府") return BASE_TASKS.concat(GOV_EXTRA);
+  if(p.cat==="政府"||p.cat===NONOP_CAT) return BASE_TASKS.concat(GOV_EXTRA);
   if(p.cat==="2C零售") return periodsFor(p);
   return BASE_TASKS;
 }
@@ -1202,9 +1208,10 @@ function finBarChartSvg(series,onClickLabel){
   return `<svg class="finchart" viewBox="0 0 ${W} ${H}" role="img" aria-label="每月${esc(series.map(s=>s.label).join('、'))}，單位萬元" ${uiEvent('click','toggleAllMonths',[])}>${g}</svg>`;
 }
 // ================= 本月營收預估明細 =================
-// 依業務線分列某個月份的營收：已開發票（依開立月份）＋還沒開發票的「收入認列預估」。
-// 提案中、未成案只計入已開發票的部分（projectEntries 已處理）。目標只給經營檢視名單內、且看得到全部專案的人。
-let finView='chart', finMonth=null;
+// 某個月份的營收：已開發票（依開立月份）＋還沒開發票的「收入認列預估」。提案中、未成案只計已開發票（projectEntries 已處理）。
+// 分三段：核心營收（依業務線）、關係人交易、營業外收入（補助）。營收合計＝核心＋關係人，對照全公司每月營收預算；營業外另外對照預算的營業外收入。
+// 目標只給經營檢視名單內、且看得到全部專案的人。
+let finView='month', finMonth=null;
 function finDefaultMonth(now){
   const d=now||new Date(), y=d.getFullYear(), m=d.getMonth()+1;
   if(CHART_MONTHS.includes(m) && (m<=3?y===2027:y===2026)) return m;
@@ -1213,54 +1220,72 @@ function finDefaultMonth(now){
 function finSelMonth(){ return CHART_MONTHS.includes(finMonth)?finMonth:finDefaultMonth(); }
 window.setFinView=function(v){ finView=v==='month'?'month':'chart'; if(finView==='month') finMode='rev'; renderPriority(); };
 window.setFinMonth=function(v){ const m=Number(v); finMonth=CHART_MONTHS.includes(m)?m:null; renderPriority(); };
-// 每條業務線、小計、合計在 m 月的目標。拿不到（沒權限、只看得到部分專案、該月沒有預算）時回 null。
+const MONTH_LINE_LABEL={'2G 政府／補助':'2G 政府（標案／委託）'};
+// 每條業務線、核心小計、營收合計、營業外在 m 月的目標。拿不到（沒權限、只看得到部分專案、該月沒有預算）時回 null。
 function monthLineTargets(m){
   if(!execAllowed||!EXEC||!isFinAll()) return null;
   const fy=m<=3?2027:2026; if(execYear()!==fy) return null;
-  const pick=line=>{ if(!execHasMonthly('revenue',line)) return null; const v=execMonthly('revenue',line)[m].budget; return v===null||v===undefined?null:v; };
-  const lines={}; BIZ_LINES.forEach(l=>lines[l]=pick(l));
+  const pick=(metric,line)=>{ if(!execHasMonthly(metric,line)) return null; const v=execMonthly(metric,line)[m].budget; return v===null||v===undefined?null:v; };
+  const lines={}; BIZ_LINES.forEach(l=>lines[l]=pick('revenue',l));
   const vals=BIZ_LINES.map(l=>lines[l]);
-  return {lines, subtotal:vals.every(v=>v!==null)?vals.reduce((a,b)=>a+b,0):null, total:pick('')};
+  const gp=pick('gross_profit',''), total=pick('revenue','');
+  return {lines, core:vals.every(v=>v!==null)?vals.reduce((a,b)=>a+b,0):null, total, nonop:pick('nonop_income',''), gm:(gp!==null&&total)?gp/total:null};
 }
 // 純計算：projects 是要算的專案，targets 是 monthLineTargets 的結果（可為 null）。
 function monthLineRows(m, projects, targets){
-  const mk=(label,kind)=>({label,kind,count:0,actual:0,est:0,total:0,target:null,pct:null,gap:null});
-  const rows={}; BIZ_LINES.concat([BIZ_LINE_PENDING]).forEach(l=>rows[l]=mk(l,'line'));
+  const mk=(label,kind,key)=>({label,kind,key,count:0,actual:0,est:0,total:0,target:null,pct:null,gap:null});
+  const lineRows={}; BIZ_LINES.concat([BIZ_LINE_PENDING]).forEach(l=>lineRows[l]=mk(MONTH_LINE_LABEL[l]||l,'line',l));
+  const rel=mk('關係人交易小計','rel','rel'), nonop=mk('營業外收入小計（補助）','nonop','nonop');
   projects.forEach(p=>{
     const es=projectEntries(p,'rev').filter(e=>e.m===m); if(!es.length) return;
-    const r=rows[bizLineOf(p)]||rows[BIZ_LINE_PENDING];
+    const g=revGroup(p);
+    const r=g==='rel'?rel:g==='nonop'?nonop:(lineRows[bizLineOf(p)]||lineRows[BIZ_LINE_PENDING]);
     r.count++;
     es.forEach(e=>{ if(e.kind==='est') r.est+=e.amount; else r.actual+=e.amount; });
   });
-  const sumRows=(label,kind,ls)=>{ const o=mk(label,kind); ls.forEach(l=>{ o.count+=rows[l].count; o.actual+=rows[l].actual; o.est+=rows[l].est; }); return o; };
-  const sub=sumRows('小計','subtotal',BIZ_LINES), tot=sumRows('合計','total',BIZ_LINES.concat([BIZ_LINE_PENDING]));
+  const sumRows=(label,kind,list)=>{ const o=mk(label,kind,kind); list.forEach(x=>{ o.count+=x.count; o.actual+=x.actual; o.est+=x.est; }); return o; };
   const finish=(r,t)=>{ r.total=r.actual+r.est; r.target=(t===null||t===undefined)?null:t;
     if(r.target!==null){ r.gap=r.target-r.total; r.pct=r.target>0?Math.round(r.total/r.target*100):null; } return r; };
-  const out=BIZ_LINES.map(l=>finish(rows[l],targets?targets.lines[l]:null));
-  out.push(finish(sub,targets?targets.subtotal:null));
-  const pend=rows[BIZ_LINE_PENDING];
-  if(pend.count||pend.actual||pend.est){ pend.na=true; out.push(finish(pend,null)); }
-  out.push(finish(tot,targets?targets.total:null));
+  const out=BIZ_LINES.map(l=>finish(lineRows[l],targets?targets.lines[l]:null));
+  const pend=lineRows[BIZ_LINE_PENDING];
+  const coreParts=BIZ_LINES.map(l=>lineRows[l]);
+  if(pend.count||pend.actual||pend.est){ pend.na=true; out.push(finish(pend,null)); coreParts.push(pend); }
+  const core=finish(sumRows('核心營收小計','core',coreParts), targets?targets.core:null);
+  out.push(core);
+  rel.na=true; out.push(finish(rel,null));
+  out.push(finish(sumRows('營收合計','total',[core,rel]),targets?targets.total:null));
+  out.push(finish(nonop,targets?targets.nonop:null));
   return out;
+}
+// 毛利參考：營收合計（核心＋關係人）減掉同月已登錄的支出。支出登錄不完整時只供參考。
+function monthMarginInfo(m, projects, targets){
+  const ps=projects.filter(p=>revGroup(p)!=='nonop'&&projectEntries(p,'rev').some(e=>e.m===m));
+  let rev=0, cost=0, withExp=0;
+  ps.forEach(p=>{ projectEntries(p,'rev').forEach(e=>{ if(e.m===m) rev+=e.amount; });
+    const ex=expenseEntries(p,'rev'); if(ex.length) withExp++; ex.forEach(e=>{ if(e.m===m) cost+=e.amount; }); });
+  return {rev, cost, gm:rev>0?(rev-cost)/rev:null, withExp, n:ps.length, budgetGm:targets?targets.gm:null};
 }
 const NO_TARGET='尚未連結資料';
 function pctHtml(r){ if(r.na) return '—'; if(r.pct===null) return `<span class="small" style="color:var(--sub);">${r.target===null?NO_TARGET:'—'}</span>`; return `<b style="color:${r.pct>=100?'var(--ok)':'var(--warn)'};">${r.pct}%</b>`; }
 function gapHtml(r){ if(r.na) return '—'; if(r.gap===null) return `<span class="small" style="color:var(--sub);">${NO_TARGET}</span>`; return r.gap>0?`<span style="color:var(--warn);">${wan(r.gap)}</span>`:`<span style="color:var(--ok);">已達標</span>`; }
 function monthDetailHtml(){
-  const m=finSelMonth(), targets=monthLineTargets(m), rows=monthLineRows(m,FINP(),targets), tot=rows[rows.length-1];
+  const m=finSelMonth(), targets=monthLineTargets(m), ps=FINP(), rows=monthLineRows(m,ps,targets);
+  const tot=rows.find(r=>r.kind==='total'), non=rows.find(r=>r.kind==='nonop'), mg=monthMarginInfo(m,ps,targets);
   const partial=execAllowed&&EXEC&&!isFinAll();
-  const card=(t,big,unit,sub,cls)=>`<div class="fincard ${cls||''}"><div class="fincard-t">${t}</div><div class="fincard-n">${big}${unit?`<small> ${unit}</small>`:''}</div>${sub?`<div class="fincard-l">${sub}</div>`:''}</div>`;
+  const card=(t,big,unit,sub)=>`<div class="fincard"><div class="fincard-t">${t}</div><div class="fincard-n">${big}${unit?`<small> ${unit}</small>`:''}</div>${sub?`<div class="fincard-l">${sub}</div>`:''}</div>`;
   const noT=`<span style="font-size:1rem;color:var(--sub);">${NO_TARGET}</span>`;
   const cards=[
-    card(`${monthLabel(m)} 預估營收`,wan(tot.total),'萬元',`已開發票 ${wan(tot.actual)} 萬・預估 ${wan(tot.est)} 萬`),
+    card(`${monthLabel(m)} 預估營收`,wan(tot.total),'萬元',`已開發票 ${wan(tot.actual)} 萬・預估 ${wan(tot.est)} 萬${non.total?`<br>另有營業外收入 ${wan(non.total)} 萬`:''}`),
     card('目標營收',tot.target===null?noT:wan(tot.target),tot.target===null?'':'萬元','財務摘要的每月營收預算'),
     card('完成%',tot.pct===null?noT:`<span style="color:${tot.pct>=100?'var(--ok)':'var(--warn)'};">${tot.pct}%</span>`,'',''),
     card('缺口',tot.gap===null?noT:(tot.gap>0?`<span style="color:var(--warn);">${wan(tot.gap)}</span>`:`<span style="color:var(--ok);">0</span>`),tot.gap===null?'':'萬元',tot.gap!==null&&tot.gap<=0?'已達標':''),
     card('可回補',`<span style="font-size:1rem;color:var(--sub);">待定義</span>`,'','下一步再加入'),
   ];
   const num=v=>wan(v);
-  const tr=r=>`<tr class="mline ${r.kind}"><td>${esc(r.label)}</td><td class="n">${r.count}</td><td class="n">${num(r.actual)}</td><td class="n">${num(r.est)}</td><td class="n"><b>${num(r.total)}</b></td><td class="n">${r.na?'—':r.target===null?`<span class="small" style="color:var(--sub);">${NO_TARGET}</span>`:num(r.target)}</td><td class="n">${pctHtml(r)}</td><td class="n">${gapHtml(r)}</td></tr>`;
+  const tr=r=>`${r.kind==='line'&&r.key===BIZ_LINES[0]?'<tr class="msec"><td colspan="8">核心營收</td></tr>':''}<tr class="mline ${r.kind}"><td>${esc(r.label)}</td><td class="n">${r.count}</td><td class="n">${num(r.actual)}</td><td class="n">${num(r.est)}</td><td class="n"><b>${num(r.total)}</b></td><td class="n">${r.na?'—':r.target===null?`<span class="small" style="color:var(--sub);">${NO_TARGET}</span>`:num(r.target)}</td><td class="n">${pctHtml(r)}</td><td class="n">${gapHtml(r)}</td></tr>`;
   const opts=CHART_MONTHS.map(x=>`<option value="${x}" ${x===m?'selected':''}>${monthLabel(x)}</option>`).join('');
+  const pctTxt=v=>v===null?'—':`${Math.round(v*1000)/10}%`;
+  const margin=mg.n?`<div class="small mmargin">毛利參考（不含營業外）：本月已登錄支出 ${wan(mg.cost)} 萬，預估毛利率 <b>${pctTxt(mg.gm)}</b>${mg.budgetGm!==null?`（預算 ${pctTxt(mg.budgetGm)}）`:''}；${mg.n} 案中 ${mg.withExp} 案已登錄支出${mg.withExp<mg.n?'，支出還沒登錄齊，毛利率會偏高':''}。</div>`:'';
   return `<div style="display:flex;align-items:center;gap:8px;margin:2px 0 8px;flex-wrap:wrap;">
       <label class="small" style="display:flex;align-items:center;gap:6px;">月份 <select class="finmonth" ${uiEvent('change','setFinMonth',[],'value')}>${opts}</select></label>
       <span style="flex:1;"></span><span class="small">單位：萬元</span></div>
@@ -1268,7 +1293,8 @@ function monthDetailHtml(){
     <div class="mtablewrap" style="overflow-x:auto;margin-top:10px;"><table class="monthlines">
       <thead><tr><th>業務線</th><th class="n">案數</th><th class="n">已開發票（實際）</th><th class="n">預估（未開發票）</th><th class="n">預估營收合計</th><th class="n">目標營收</th><th class="n">完成%</th><th class="n">缺口</th></tr></thead>
       <tbody>${rows.map(tr).join('')}</tbody></table></div>
-    <div class="small" style="margin-top:6px;color:var(--sub);line-height:1.6;">已開發票依開立月份計入；還沒開發票的用專案的「收入認列預估」。目標來自財務摘要的每月營收預算${targets?'':'（只有經營檢視名單內的人看得到）'}。提案中、未成案只計入已開發票的部分。小計是四條業務線；合計再加上尚未分類的專案。${partial?'你只看得到部分專案的金額，所以不對照公司目標。':''}</div>`;
+    ${margin}
+    <div class="small" style="margin-top:6px;color:var(--sub);line-height:1.6;">已開發票依開立月份計入；還沒開發票的用專案的「收入認列預估」。目標來自財務摘要的每月預算${targets?'':'（只有經營檢視名單內的人看得到）'}。提案中、未成案只計入已開發票的部分。營收合計＝核心營收＋關係人交易；類別「補助」的專案算營業外收入，另外對照預算的營業外收入；政府標案、委託算核心營收（2G）。${partial?'你只看得到部分專案的金額，所以不對照公司目標。':''}</div>`;
 }
 function monthlyChartBody(){
   const isMonth=finView==='month', isCash=!isMonth&&finMode==='cash';
@@ -1297,7 +1323,7 @@ function monthlyChartBody(){
   const legend=series.map(sr=>`<span class="finlg ${sr.cls}"></span>${esc(sr.label)}`).join('　');
   return `<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px;">
       <h3 style="margin:0;font-size:1rem;">專案財務預估表${isFinAll()?'':'<span class="small" style="font-weight:400;">（我負責的專案）</span>'}</h3>
-      <div class="seg"><button class="${!isMonth&&!isCash?'active':''}" ${uiEvent('click','setFinMode',['rev'])}>營收與毛利</button><button class="${isCash?'active':''}" ${uiEvent('click','setFinMode',['cash'])}>現金流</button><button class="${isMonth?'active':''}" ${uiEvent('click','setFinView',['month'])}>本月</button></div>
+      <div class="seg"><button class="${isMonth?'active':''}" ${uiEvent('click','setFinView',['month'])}>本月</button><button class="${!isMonth&&!isCash?'active':''}" ${uiEvent('click','setFinMode',['rev'])}>營收與毛利</button><button class="${isCash?'active':''}" ${uiEvent('click','setFinMode',['cash'])}>現金流</button></div>
       ${isMonth?'':finScopeSelectHtml()}
       <span style="flex:1;"></span>
       <button class="mini" ${uiEvent('click','exportMonthlyExcel',[])} title="下載你看得到的全部專案">⬇ Excel</button>
@@ -1797,7 +1823,7 @@ function detailRow(p){
   const basicPane=`
     <div class="basicgrid">
       <label style="max-width:420px;">專案名稱<input type="text" value="${esc(getName(p))}" ${uiEvent('change','saveName',[String(p.id)],'value')}></label>
-      ${isAdmin()?`<label>類別<select ${uiEvent('change','setProjectCat',[String(p.id)],'value')}>${[...new Set([...allCats(),p.cat])].map(c=>`<option value="${esc(c)}" ${c===p.cat?'selected':''}>${esc(c)}</option>`).join('')}<option value="__new__">＋ 新增類別…</option></select></label>
+      ${isAdmin()?`<label>類別<select ${uiEvent('change','setProjectCat',[String(p.id)],'value')}>${[...new Set([...allCats(),NONOP_CAT,p.cat])].map(c=>`<option value="${esc(c)}" ${c===p.cat?'selected':''}>${esc(c)}</option>`).join('')}<option value="__new__">＋ 新增類別…</option></select></label>
       <label>&nbsp;<button class="mini danger" ${uiEvent('click','deleteProject',[String(p.id)])} style="white-space:nowrap;">🗑 刪除專案</button></label>`:''}
       ${isAdmin()?`<label title="看「錢從哪裡來」的分類；預設依專案分類推得">業務線<select ${uiEvent('change','setBizLine',[String(p.id)],'value')}><option value="" ${r.bizLine?'':'selected'}>自動：${esc(CAT_TO_LINE[p.cat]||BIZ_LINE_PENDING)}</option>${BIZ_LINE_OPTIONS.map(b=>`<option ${r.bizLine===b?'selected':''}>${esc(b)}</option>`).join('')}</select></label>`:`<label>業務線<div class="calcbox">${esc(bizLineTag(p))}</div></label>`}
     </div>
@@ -2524,7 +2550,7 @@ function execNetProgress(target,ytd){
 // 預設依專案分類推得，管理者可逐案調整（bizLine）。
 const BIZ_LINES=['2C 零售','2B 禮盒','2B 專案','2G 政府／補助'];
 const BIZ_LINE_OPTIONS=BIZ_LINES;
-const CAT_TO_LINE={'2C零售':'2C 零售','禮盒':'2B 禮盒','企業':'2B 專案','好田':'2B 專案','中介':'2B 專案','委外':'2B 專案','政府':'2G 政府／補助'};
+const CAT_TO_LINE={'2C零售':'2C 零售','禮盒':'2B 禮盒','企業':'2B 專案','好田':'2B 專案','中介':'2B 專案','委外':'2B 專案','政府':'2G 政府／補助','補助':'2G 政府／補助'};
 const BIZ_LINE_PENDING='待分類';
 function bizLineTag(p){ const r=getRow(p.id); return BIZ_LINES.includes(r.bizLine)?r.bizLine:(CAT_TO_LINE[p.cat]||BIZ_LINE_PENDING); }
 function bizLineOf(p){ return bizLineTag(p); }
