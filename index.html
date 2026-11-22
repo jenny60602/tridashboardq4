@@ -277,6 +277,11 @@ table.monthlines tr.msec td{font-size:.72rem;color:var(--sub);font-weight:600;pa
 table.monthlines tr.core td,table.monthlines tr.rel td{background:var(--bg);font-weight:600;}
 table.monthlines tr.nonop td{color:var(--sub);border-top:1px dashed var(--line);}
 .mmargin{margin-top:8px;padding:6px 10px;border-radius:8px;background:var(--bg);line-height:1.6;}
+#stats>.statgroup{flex:1 1 100%;}
+.stats.oneline .stat{flex:1 1 0;min-width:140px;}
+.stats.oneline .stat.wide{flex:1.4 1 0;min-width:180px;}
+.stat b small{font-size:.7rem;font-weight:400;color:var(--sub);}
+.stat b.inl{display:inline;font-size:inherit;}
 </style>
 </head>
 <body class="locked">
@@ -1458,28 +1463,19 @@ function quarterCost(){
 function renderStats(){
   const mt=monthlyTotals();
   const proposals=FINP().filter(p=>getRow(p.id).status==="提案中");
-  const proposalHtml=proposals.length?`<div class="stat clickable" ${uiEvent('click','gotoStatus',['提案中'])}><b>${fmt(proposals.reduce((a,p)=>a+Number(getEstRev(p)||0),0))}</b><span>提案中 ${proposals.length} 案（未計入營收預估）</span><span class="small">成案後改成「進行中」就會算進去</span></div>`:'';
   const {q4Cost, q1Cost}=quarterCost();
   const q4Margin=mt.q4Total-q4Cost, q1Margin=mt.q1Total-q1Cost;
-  let tDone=0,tAll=0; ALLP.forEach(p=>{const t=taskProgress(p); tDone+=t.done; tAll+=t.total;});
-  const pct=tAll?Math.round(tDone/tAll*100):0;
-  const noTaskCount=noTaskScope(ALLP.filter(needsBreakdown)).length;
-  let actualSum=0,actualCount=0,costSum=0,costCount=0;
-  ALLP.forEach(p=>{const r=getRow(p.id);
-    { const list=getReceipts(p.id); if(list.length){ actualSum+=list.reduce((s,x)=>s+Number(x.amount||0),0); actualCount++; } }
-    if(r.cost!==null && r.cost!==""){costSum+=Number(r.cost); costCount++;}
-  });
+  const qCard=(label,total,core,rel,non,margin)=>{
+    const gm=total?Math.round(margin/total*100):null;
+    return `<div class="stat wide" title="核心 ${fmt(core)}／關係人 ${fmt(rel)}／營業外 ${fmt(non)}"><b>${wan(total)}<small> 萬元</small></b><span>${label} 營收預估（未稅）</span><span class="small">毛利率 <b class="inl" style="color:${margin<0?'var(--warn)':'var(--ink)'};">${gm===null?'—':gm+'%'}</b>・毛利 ${wan(margin)} 萬</span></div>`;
+  };
+  const propCard=proposals.length?`<div class="stat clickable" ${uiEvent('click','gotoStatus',['提案中'])}><b>${wan(proposals.reduce((a,p)=>a+Number(getEstRev(p)||0),0))}<small> 萬元</small></b><span>提案中 ${proposals.length} 案</span><span class="small">未計入營收預估</span></div>`:'';
   document.getElementById("stats").innerHTML=`
     <div class="statgroup">
       <div class="statgrouplabel">${isFinAll()?"財務":(anyFin()?"總覽（金額只計算你負責的專案）":"總覽")}</div>
-      <div class="stats">
+      <div class="stats oneline">
         <div class="stat clickable" ${uiEvent('click','gotoStatus',['全部'])}><b>${ALLP.length}</b><span>專案總數</span></div>
-        <div class="stat"><b>${pct}%</b><span>全公司任務完成率</span></div>
-        ${anyFin()?`        <div class="stat"><b>${fmt(mt.q4Total)}</b><span>2026Q4 認列營收（未稅，預估＋已開發票）</span><span class="small">核心 ${fmt(mt.q4Core)}／關係人 ${fmt(mt.q4Rel)}／營業外 ${fmt(mt.q4NonOp)}</span></div>
-        <div class="stat"><b style="color:${q4Margin<0?'var(--warn)':'var(--ink)'}">${mt.q4Total?Math.round(q4Margin/mt.q4Total*100)+'%':'—'}</b><span>2026Q4 毛利率估算</span><span class="small">毛利 ${fmt(q4Margin)}</span></div>
-        <div class="stat"><b>${fmt(mt.q1Total)}</b><span>2027Q1 認列營收（未稅，預估＋已開發票）</span><span class="small">核心 ${fmt(mt.q1Core)}／關係人 ${fmt(mt.q1Rel)}／營業外 ${fmt(mt.q1NonOp)}</span></div>
-        <div class="stat"><b style="color:${q1Margin<0?'var(--warn)':'var(--ink)'}">${mt.q1Total?Math.round(q1Margin/mt.q1Total*100)+'%':'—'}</b><span>2027Q1 毛利率估算</span><span class="small">毛利 ${fmt(q1Margin)}</span></div>
-        ${proposalHtml}`:''}
+        ${anyFin()?qCard('2026Q4',mt.q4Total,mt.q4Core,mt.q4Rel,mt.q4NonOp,q4Margin)+qCard('2027Q1',mt.q1Total,mt.q1Core,mt.q1Rel,mt.q1NonOp,q1Margin)+propCard:''}
       </div>
     </div>`;
 }
