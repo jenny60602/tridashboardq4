@@ -79,3 +79,38 @@ test('browser: finance forecast shows cards, grouped bars, scope filter and cash
   assert.ok(await mobile.page.evaluate(() => document.documentElement.scrollWidth <= 390));
   assert.deepEqual([...problems, ...head.problems, ...mobile.problems], []);
 });
+
+test('browser: finance chart keeps 1:1 scale on narrow and wide screens (no enlarged text)', { skip, timeout: 90000 }, async t => {
+  const { createServer, HOST } = require('../scripts/preview-synthetic.cjs');
+  const { server } = createServer();
+  await new Promise(r => server.listen(0, HOST, r));
+  const base = `http://${HOST}:${server.address().port}/`;
+  const browser = await playwright.chromium.launch();
+  t.after(async () => { await browser.close(); server.close(); });
+
+  const measure = page => page.evaluate(() => {
+    const svg = document.querySelector('svg.finchart');
+    const r = svg.getBoundingClientRect();
+    const vbW = svg.viewBox.baseVal.width;
+    const ax = svg.querySelector('text.finax').getBoundingClientRect();
+    return { scale: r.width / vbW, height: r.height, axisTextH: ax.height };
+  });
+  const out = {};
+  for (const width of [800, 1280, 2560]) {
+    const { page, problems } = await login(browser, base, 'fake-admin', width);
+    await page.waitForSelector('svg.finchart');
+    await page.waitForTimeout(300);
+    out[width] = await measure(page);
+    assert.ok(Math.abs(out[width].scale - 1) < 0.02, `scale ~1 at ${width}px (got ${out[width].scale})`);
+    assert.ok(Math.abs(out[width].height - 240) < 6, `chart height stays ~240px at ${width}px`);
+    // Resize the window: chart re-fits its container, still at 1:1.
+    // Opened in a small window, then made fullscreen (the reported case) — and the reverse.
+    await page.setViewportSize({ width: width < 2000 ? 2560 : 1000, height: 900 });
+    await page.waitForTimeout(500);
+    const after = await measure(page);
+    assert.ok(Math.abs(after.scale - 1) < 0.02, `scale ~1 after resize from ${width}px (got ${after.scale})`);
+    assert.deepEqual(problems, []);
+    await page.close();
+  }
+  assert.ok(Math.abs(out[1280].axisTextH - out[2560].axisTextH) < 1.5, 'axis text same size on both widths');
+});

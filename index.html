@@ -1190,8 +1190,19 @@ function finScopeSelectHtml(){
 function finCard(title,big,lines){
   return `<div class="fincard"><div class="fincard-t">${title}</div><div class="fincard-n">${big}<small> 萬元</small></div>${lines.map(l=>`<div class="fincard-l">${l}</div>`).join('')}</div>`;
 }
+// 圖的寬度跟著實際容器寬度畫（1 單位＝1 像素），字和高度不會因寬螢幕而被放大。
+let finChartSeries=null;
+function finChartHostWidth(){ const el=document.querySelector('svg.finchart'), p=el&&el.parentElement; if(!p) return 0; const cs=getComputedStyle(p); return Math.floor(p.clientWidth-(parseFloat(cs.paddingLeft)||0)-(parseFloat(cs.paddingRight)||0)); }
+function syncFinChartWidth(){
+  const el=document.querySelector('svg.finchart'); if(!el||!finChartSeries) return;
+  const w=finChartHostWidth(), cur=+el.dataset.w||0;
+  if(w>0 && Math.abs(Math.max(340,w)-cur)>4) el.outerHTML=finBarChartSvg(finChartSeries);
+}
+let finChartResizeTimer=null;
+window.addEventListener('resize',()=>{ clearTimeout(finChartResizeTimer); finChartResizeTimer=setTimeout(syncFinChartWidth,150); });
 function finBarChartSvg(series,onClickLabel){
-  const W=Math.round(Math.max(340,Math.min(1100,(window.innerWidth||1000)-80))),H=240,L=46,R=8,T=12,B=30, n=CHART_MONTHS.length;
+  finChartSeries=series; setTimeout(syncFinChartWidth,0);
+  const W=Math.round(Math.max(340,finChartHostWidth()||((window.innerWidth||1000)-80))),H=240,L=46,R=8,T=12,B=30, n=CHART_MONTHS.length;
   const vals=[]; series.forEach(sr=>CHART_MONTHS.forEach(m=>{ const v=sr.data[m]; if(v!==null&&v!==undefined) vals.push(v); }));
   const maxV=Math.max(1,...vals)/10000;
   const steps=[0.1,0.2,0.5,1,2,5,10,20,25,50,100,200,250,500,1000]; const step=steps.find(x=>maxV/x<=5)||Math.ceil(maxV/5);
@@ -1210,7 +1221,7 @@ function finBarChartSvg(series,onClickLabel){
     if(i===4) g+=`<line x1="${(L+gw*i).toFixed(1)}" x2="${(L+gw*i).toFixed(1)}" y1="${T}" y2="${H-B}" class="finq"/>`;
     g+=`<text x="${(L+gw*i+gw/2).toFixed(1)}" y="${H-10}" text-anchor="middle" class="finax">${esc(monthLabel(m))}</text>`;
   });
-  return `<svg class="finchart" viewBox="0 0 ${W} ${H}" role="img" aria-label="每月${esc(series.map(s=>s.label).join('、'))}，單位萬元" ${uiEvent('click','toggleAllMonths',[])}>${g}</svg>`;
+  return `<svg class="finchart" viewBox="0 0 ${W} ${H}" data-w="${W}" style="max-width:${W}px" role="img" aria-label="每月${esc(series.map(s=>s.label).join('、'))}，單位萬元" ${uiEvent('click','toggleAllMonths',[])}>${g}</svg>`;
 }
 // ================= 本月營收預估明細 =================
 // 某個月份的營收：已開發票（依開立月份）＋還沒開發票的「收入認列預估」。提案中、未成案只計已開發票（projectEntries 已處理）。
